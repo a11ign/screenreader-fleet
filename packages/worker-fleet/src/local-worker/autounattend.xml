@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Unattended install for the local NVDA capture worker (Windows 11 ARM64 under QEMU).
+
+  Derived from the Autounattend.xml that UTM ships on utm-guest-tools.iso, which is
+  the proven ARM64 recipe: the LabConfig bypasses and the windowsPE ARM64 driver
+  paths come from there. What UTM's version does NOT do is complete the install
+  hands-off, so this adds:
+
+    * DiskConfiguration + ImageInstall   - partition and install with no clicking
+    * LocalAccounts + AutoLogon          - NVDA needs a logged-on interactive desktop,
+                                           so auto-logon is a REQUIREMENT here, not a
+                                           convenience: without it the worker is dead
+                                           after every reboot until a human logs in
+    * FirstLogonCommands                 - hand off to the worker bootstrap
+
+  Drive E: is the support ISO built by build-vm.sh (this file plus the
+  UTM guest-tools payload). Windows Setup picks autounattend.xml up automatically
+  from the root of removable media.
+
+  SECURITY: the account password below is in plain text, in a checked-in file. That is
+  acceptable ONLY because this is a disposable local VM behind QEMU user-mode
+  networking, reachable solely through the ports the launch script forwards to
+  127.0.0.1. Do not put this VM on a bridged network, and do not reuse the password.
+
+  NOTE: UTM's template sets EnableLUA=false (UAC off). We deliberately do NOT copy
+  that. With UAC off every process runs at high integrity, and the capture pipeline
+  depends on NVDA (nvda_noUIAccess.exe) and Edge sitting at the SAME integrity level;
+  leaving UAC at its default keeps that relationship the way the Proxmox worker has it,
+  rather than betting the pipeline on an untested configuration. Provisioning gets the
+  elevation it needs from a RunLevel Highest scheduled task instead, which elevates
+  without a prompt  -  and a prompt would be fatal, since UAC dialogs render on the
+  secure desktop where automation cannot reach them.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage>
+        <UILanguage>en-US</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <Diagnostics>
+        <OptIn>false</OptIn>
+      </Diagnostics>
+
+
+      <!-- UEFI/GPT layout: ESP, MSR, then Windows across the remainder. -->
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>300</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Format>FAT32</Format>
+              <Label>System</Label>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>3</Order>
+              <PartitionID>3</PartitionID>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+
+      <!-- Match /IMAGE/NAME to the WIM's NAME, which is "Windows 11 Professional".
+           "Windows 11 Pro" is its DESCRIPTION, and matching that leaves Setup sitting on
+           the edition picker. Keep this block byte-for-byte simple: substituting
+           /IMAGE/INDEX here, or adding a comment inside <InstallFrom>, made Setup reject
+           the whole answer file and revert to a fully interactive install. -->
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/NAME</Key>
+              <Value>Windows 11 Professional</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <WillShowUI>OnError</WillShowUI>
+        </OSImage>
+      </ImageInstall>
+
+      <!-- Windows 11 refuses to install without TPM 2.0 and Secure Boot. Rather than
+           wiring up swtpm, take UTM's approach and tell Setup to skip the checks. -->
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassDiskCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <FullName>a11y-witness</FullName>
+        <Organization>a11y-witness</Organization>
+        <!-- Generic Windows 11 Pro KMS client key: selects the edition during an
+             unattended install. It does NOT activate, which is what we want  -  an
+             unactivated Windows is fully functional for capture, and leaving it
+             unactivated keeps the exported image portable between machines. -->
+        <ProductKey>
+          <Key>W269N-WFGWX-YVC9B-4J6C9-T83GX</Key>
+          <WillShowUI>Never</WillShowUI>
+        </ProductKey>
+      </UserData>
+    </component>
+
+    <!-- ARM64 virtio drivers, injected so the installed OS has storage, serial and
+         NETWORK working on first boot. Networking on first boot is what lets the
+         bootstrap fetch Node, Git and NVDA without any manual driver step.
+         Paths are UTM's, on the support ISO (drive E:). viogpu is deliberately left
+         out: UTM disables it because it causes a black screen. -->
+    <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <DriverPaths>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+          <Path>E:\Drivers\vioscsi\w10\ARM64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="2">
+          <Path>E:\Drivers\viostor\w10\ARM64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="3">
+          <Path>E:\Drivers\vioserial\w10\ARM64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="4">
+          <Path>E:\Drivers\NetKVM\w10\ARM64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="5">
+          <Path>E:\Drivers\Balloon\w10\ARM64</Path>
+        </PathAndCredentials>
+      </DriverPaths>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <ComputerName>A11Y-WORKER</ComputerName>
+      <TimeZone>GMT Standard Time</TimeZone>
+    </component>
+    <component name="Microsoft-Windows-Security-SPP-UX" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SkipAutoActivation>true</SkipAutoActivation>
+    </component>
+    <component name="Microsoft-Windows-SQMApi" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <CEIPEnabled>0</CEIPEnabled>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="arm64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>witness</Name>
+            <DisplayName>witness</DisplayName>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>witness</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+
+      <!-- The whole reason this file exists. NVDA is a GUI application: it needs a
+           real logged-on desktop session. No auto-logon means no session after a
+           reboot, which means captures silently return nothing at all. -->
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>witness</Username>
+        <Password>
+          <Value>witness</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <LogonCount>2147483647</LogonCount>
+      </AutoLogon>
+
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>3</ProtectYourPC>
+        <VMModeOptimizations>
+          <SkipWinREInitialization>true</SkipWinREInitialization>
+        </VMModeOptimizations>
+      </OOBE>
+
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Disable hibernation</Description>
+          <CommandLine>cmd /c POWERCFG -H OFF</CommandLine>
+        </SynchronousCommand>
+        <!-- Adds qemu-ga, which gives the host a command channel into this guest over
+             QMP before SSH exists  -  the difference between debugging this VM and
+             guessing at it. /S is the NSIS silent switch. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Install UTM/virtio guest tools (adds qemu-ga)</Description>
+          <CommandLine>cmd /c for %i in (D E F G) do if exist %i:\utm-guest-tools.exe start /wait %i:\utm-guest-tools.exe /S</CommandLine>
+        </SynchronousCommand>
+        <!-- Never disable the screensaver's lock and then leave the console locked:
+             a locked desktop makes NVDA silent. Belt and braces alongside the
+             provisioning script, which also turns the screensaver off. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Disable screensaver (it steals foreground mid-capture)</Description>
+          <CommandLine>reg add "HKCU\Control Panel\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f</CommandLine>
+        </SynchronousCommand>
+        <!-- Provisioning needs elevation (firewall rules, HKLM Edge policy). A
+             RunLevel Highest scheduled task elevates with NO prompt; a UAC dialog here
+             would render on the secure desktop and hang the build forever. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Description>Run the worker bootstrap elevated, without a UAC prompt</Description>
+          <CommandLine>cmd /c for %i in (D E F G) do if exist %i:\first-boot.cmd start /wait %i:\first-boot.cmd</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>

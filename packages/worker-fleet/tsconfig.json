@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "dist", "rootDir": "src" },
+  // The `.mjs` here are host-side, so unlike the worker's they have no "must run under plain node on the
+  // guest" constraint — including them lets tsc emit them into `dist` alongside the compiled TS, which is what
+  // makes `dist/local-vm.js`'s `./host-capacity.mjs` import resolve. `allowJs` without `checkJs` transpiles
+  // them without type-checking.
+  "include": ["src/**/*.ts", "src/**/*.mjs"],
+  "exclude": ["src/**/*.test.ts"]
+}

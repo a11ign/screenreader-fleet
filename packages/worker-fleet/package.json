@@ -1,0 +1,59 @@
+{
+  "name": "@a11y-witness/worker-fleet",
+  "version": "0.1.0",
+  "description": "Host-side lifecycle, health and capacity for a fleet of Windows NVDA capture workers: lease one, judge whether it is degrading, and know how many the host can afford.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./health": {
+      "default": "./dist/worker-health.mjs"
+    },
+    "./capacity": {
+      "default": "./dist/host-capacity.mjs"
+    }
+  },
+  "bin": {
+    "a11y-doctor": "./dist/doctor.mjs",
+    "a11y-worker-code": "./dist/check-worker-code.mjs",
+    "a11y-worker-compare": "./dist/compare-workers.mjs",
+    "a11y-worker-ctl": "./src/local-worker/worker-ctl.sh",
+    "a11y-worker-deploy": "./dist/deploy-worker.mjs"
+  },
+  "files": [
+    "dist",
+    "src/local-worker",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@a11y-witness/nvda-worker": "0.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepack": "tsc --build",
+    "prepare": "tsc --build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanBeckDev/a11y-witness.git",
+    "directory": "packages/worker-fleet"
+  },
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "nvda",
+    "screen-reader",
+    "windows",
+    "utm",
+    "vm"
+  ]
+}
