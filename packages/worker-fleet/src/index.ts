@@ -15,28 +15,16 @@ export {
 } from "./local-vm.js";
 export type { AfterRun, WorkerLease, PoolLease } from "./local-vm.js";
 
-import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { fleetScriptPaths as scriptPaths } from "./fleet-scripts.mjs";
 
 /**
  * The provisioning and lifecycle scripts, as absolute paths.
  *
  * They are shell and PowerShell, not JavaScript, so a consumer has to spawn them — and they can only be found
- * relative to THIS module. The same resolve-from-`import.meta.url` pattern as `@a11y-witness/scorer`, for the
- * same reason: a cwd-relative path is correct exactly when the cwd happens to be the repo root.
+ * relative to the module. Delegated to `fleet-scripts.mjs` so this package has exactly ONE definition of where
+ * they live: it had four, and one of them was wrong, which broke `leaseWorker` silently.
  */
 export function fleetScriptPaths(): Record<string, string> {
-  // `../src/local-worker/`, not `./local-worker/`. The assets are shell, PowerShell and XML, so tsc does not
-  // copy them into `dist` — they ship from `src`. This resolves correctly from BOTH `src/index.ts` under tsx and
-  // `dist/index.js` when installed, because `src` and `dist` are siblings one level below the package root.
-  // Getting it wrong is not subtle: the isolation gate failed with `dist/local-worker/` missing.
-  const dir = fileURLToPath(new URL("../src/local-worker/", import.meta.url));
-  return {
-    dir,
-    workerCtl: join(dir, "worker-ctl.sh"),
-    buildVm: join(dir, "build-vm.sh"),
-    cloneWorker: join(dir, "clone-worker.sh"),
-    createUtmVm: join(dir, "create-utm-vm.sh"),
-    fetchWindowsIso: join(dir, "fetch-windows-iso.sh"),
-  };
+  return scriptPaths();
 }
+

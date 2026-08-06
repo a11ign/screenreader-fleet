@@ -10,9 +10,15 @@
 //
 // Runs scripts/guest/normalise-fleet.cmd on each guest through guest-run.mjs, which is the only
 // channel that can do elevated work on these VMs (see that file for why the obvious ones cannot).
+import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
+
+// A SIBLING in this package, resolved from this module. It was the cwd-relative path `scripts/guest-run.mjs`,
+// which stopped existing when M8 moved the fleet tooling — and was only ever right when the cwd happened to be
+// the repo root.
+const GUEST_RUN = fileURLToPath(new URL("./guest-run.mjs", import.meta.url));
 
 const run = promisify(execFile);
 const UTMCTL = "/Applications/UTM.app/Contents/MacOS/utmctl";
@@ -34,7 +40,7 @@ for (const vm of vms) {
   // One at a time. Three guests doing DISM and service work simultaneously is exactly the disk
   // contention this project spent a day diagnosing.
   try {
-    const { stdout: out } = await run("node", ["scripts/guest-run.mjs", vm.name, script, "--timeout=900"],
+    const { stdout: out } = await run("node", [GUEST_RUN, vm.name, script, "--timeout=900"],
       { maxBuffer: 1 << 24 });
     process.stdout.write(out);
   } catch (error) {

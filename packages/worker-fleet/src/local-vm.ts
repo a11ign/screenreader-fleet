@@ -11,14 +11,14 @@
  * had already started yourself is left alone. That last case matters -- a run must never
  * shut down a VM somebody else is using.
  *
- * Everything UTM-specific lives in scripts/local-worker/worker-ctl.sh (`json` emits the
+ * Everything UTM-specific lives in `local-worker/worker-ctl.sh` in this package (`json` emits the
  * state this module reads). Nothing here knows about utmctl, bundles or bookmarks.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import { networkInterfaces } from "node:os";
 import { availableHostMemoryMb, capacityReason, workersHostCanRun } from "./host-capacity.mjs";
+import { fleetScriptPaths } from "./fleet-scripts.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,7 +27,7 @@ export const DEFAULT_WORKER = "http://localhost:8765";
 
 // Relative to this module, not the process cwd: `npm run` happens to start in the repo
 // root, but a direct `tsx src/cli.ts` from elsewhere would not.
-const CTL = fileURLToPath(new URL("../../scripts/local-worker/worker-ctl.sh", import.meta.url));
+const CTL = fleetScriptPaths().workerCtl;
 
 const STATUS_TIMEOUT_MS = 30_000;
 // Generous on purpose: `up` boots Windows, waits for auto-logon and then polls /health,

@@ -21,7 +21,7 @@
 //   - A single mute-recovery outlier (~86s against a normal ~12s) moves a mean by 5s and makes a healthy
 //     worker look broken. The median and IQR do not move.
 //
-// It also refuses to declare a difference the samples do not support -- see src/capture/worker-stats.mjs.
+// It also refuses to declare a difference the samples do not support -- see `./worker-stats.mjs`.
 // "Not distinguishable" is a real answer, and it is the one that was missing.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";

@@ -11,12 +11,12 @@
 // Exit codes: 0 ready, 1 something is broken (details in the report).
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
+import { fleetScriptPaths } from "./fleet-scripts.mjs";
 
 const run = promisify(execFile);
 const JSON_OUT = process.argv.includes("--json");
@@ -26,7 +26,7 @@ const PAGES_PORT = Number(process.env.DATASET_PAGES_PORT || 5050);
 // resolved from this module — correct while doctor lived in `scripts/`, and silently wrong the moment it
 // moved: doctor then reported "no local VM tooling here" on a host with three registered VMs, which reads as
 // a broken environment rather than a broken path.
-const CTL = fileURLToPath(new URL("./local-worker/worker-ctl.sh", import.meta.url));
+const CTL = fleetScriptPaths().workerCtl;
 const DATASET = resolve(process.cwd(), "runs/screenreader-dataset");
 const PROBE_TIMEOUT_MS = 8000;
 

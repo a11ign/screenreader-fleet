@@ -25,8 +25,8 @@ import { createHash } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { WORKER_FILES, workerSourceDir } from "@a11y-witness/nvda-worker";
+import { fleetScriptPaths } from "./fleet-scripts.mjs";
 
 const run = promisify(execFile);
 // From the worker PACKAGE, not from the cwd. This was `resolve("src/capture/nvda")` and then
@@ -40,7 +40,7 @@ const NVDA_DIR = workerSourceDir();
 const GUEST_DIR = "C:\\Users\\witness\\a11y-witness\\src\\capture\\nvda";
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.
-const CTL = fileURLToPath(new URL("./local-worker/worker-ctl.sh", import.meta.url));
+const CTL = fleetScriptPaths().workerCtl;
 const LIFECYCLE_TIMEOUT_MS = 420_000;
 // `pool` launches UTM if it is closed and polls every VM's /health. 90s was too short: it timed out
 // mid-deploy while three guests were transitioning, and the whole run died with a bare SIGTERM.

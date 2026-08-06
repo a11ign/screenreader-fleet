@@ -26,6 +26,7 @@
   "files": [
     "dist",
     "src/local-worker",
+    "src/provisioning",
     "README.md",
     "LICENSE"
   ],

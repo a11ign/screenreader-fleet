@@ -13,12 +13,12 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { codeVersion, workerSourceDir } from "@a11y-witness/nvda-worker";
+import { fleetScriptPaths } from "./fleet-scripts.mjs";
 
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.
-const CTL = fileURLToPath(new URL("./local-worker/worker-ctl.sh", import.meta.url));
+const CTL = fleetScriptPaths().workerCtl;
 // From the worker PACKAGE, not from the cwd. This was `resolve("src/capture/nvda")` and then
 // `resolve("packages/nvda-worker/src")` — a repo-layout guess that had to be edited every time the worker
 // moved, and that silently pointed at nothing whenever the cwd was not the repo root.
