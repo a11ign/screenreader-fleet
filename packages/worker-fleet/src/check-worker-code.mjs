@@ -69,34 +69,43 @@ async function versionOf(url) {
   return (await response.json()).code ?? "absent";
 }
 
-const expected = localVersion();
-const urls = workerUrls();
-console.log(`this checkout: ${expected}`);
-if (!urls.length) {
-  console.log("no worker is running — nothing to compare (start one, or a run will)");
-  process.exit(0);
+/**
+ * Nothing here runs on import, for the same reason as `deploy-worker.mjs`: a module that probes every worker
+ * over HTTP should be invoked, not merely mentioned. It also lets `code-version.test.ts` import this rather
+ * than parse its source as text.
+ */
+async function main() {
+  const expected = localVersion();
+  const urls = workerUrls();
+  console.log(`this checkout: ${expected}`);
+  if (!urls.length) {
+    console.log("no worker is running — nothing to compare (start one, or a run will)");
+    process.exit(0);
+  }
+
+  let stale = 0;
+  for (const url of urls) {
+    let actual;
+    try {
+      actual = await versionOf(url);
+    } catch (e) {
+      console.log(`  ${url}  unreachable (${e.message})`);
+      continue;
+    }
+    // "absent" means the worker predates /health.code, which is itself a stale deploy.
+    const ok = actual === expected;
+    if (!ok) stale += 1;
+    console.log(`  ${url}  ${actual}  ${ok ? "matches" : "STALE — redeploy and REBOOT the guest"}`);
+  }
+  if (stale) {
+    console.log(`\n${stale} stale worker(s). A restart via \`utmctl exec\` silently does nothing on`);
+    console.log("some guests; rebooting the VM always picks up a pushed file:");
+    console.log("  utmctl stop <uuid> --request && utmctl start <uuid>");
+      console.log("  ...or simply: npm run worker:deploy");
+      const note = protocolBumpNote();
+      if (note) console.log(note);
+  }
+  process.exit(stale ? 1 : 0);
 }
 
-let stale = 0;
-for (const url of urls) {
-  let actual;
-  try {
-    actual = await versionOf(url);
-  } catch (e) {
-    console.log(`  ${url}  unreachable (${e.message})`);
-    continue;
-  }
-  // "absent" means the worker predates /health.code, which is itself a stale deploy.
-  const ok = actual === expected;
-  if (!ok) stale += 1;
-  console.log(`  ${url}  ${actual}  ${ok ? "matches" : "STALE — redeploy and REBOOT the guest"}`);
-}
-if (stale) {
-  console.log(`\n${stale} stale worker(s). A restart via \`utmctl exec\` silently does nothing on`);
-  console.log("some guests; rebooting the VM always picks up a pushed file:");
-  console.log("  utmctl stop <uuid> --request && utmctl start <uuid>");
-    console.log("  ...or simply: npm run worker:deploy");
-    const note = protocolBumpNote();
-    if (note) console.log(note);
-}
-process.exit(stale ? 1 : 0);
+if (import.meta.url === `file://${process.argv[1]}`) await main();

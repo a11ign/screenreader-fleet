@@ -171,31 +171,46 @@ function guardProtocolChange() {
   process.exit(3);
 }
 
-guardProtocolChange();
+/**
+ * Nothing here runs on import.
+ *
+ * This module used to execute its whole deploy at module scope, so merely importing it — which I did, to read a
+ * path constant — ran `guardProtocolChange()` and began enumerating VMs. With guests running it would have
+ * pushed files and rebooted them. A program that reboots machines must be invoked, never merely mentioned.
+ *
+ * `check-worker-code.mjs` got the same treatment. The four remaining scripts in this repo that execute at
+ * module scope are pure programs nothing imports; they are left alone deliberately rather than restructured for
+ * symmetry.
+ */
+async function main() {
+  guardProtocolChange();
 
-const files = hashedFiles();
-const expected = localVersion(files);
-const vms = await pool();
-if (!vms.length) {
-  process.stderr.write(only ? `no local worker VM named ${only}\n` : "no local worker VMs registered\n");
-  process.exit(2);
-}
-process.stdout.write(`Deploying ${files.length} file(s) to ${vms.length} worker(s)\n`);
-process.stdout.write(`Files: ${files.join(", ")}\nExpected code: ${expected}\n`);
-
-const failed = [];
-for (const vm of vms) {
-  try {
-    if (!await deployTo(vm, files, expected)) failed.push(vm.name);
-  } catch (error) {
-    process.stdout.write(`  FAILED: ${error.message}\n`);
-    failed.push(vm.name);
+  const files = hashedFiles();
+  const expected = localVersion(files);
+  const vms = await pool();
+  if (!vms.length) {
+    process.stderr.write(only ? `no local worker VM named ${only}\n` : "no local worker VMs registered\n");
+    process.exit(2);
   }
+  process.stdout.write(`Deploying ${files.length} file(s) to ${vms.length} worker(s)\n`);
+  process.stdout.write(`Files: ${files.join(", ")}\nExpected code: ${expected}\n`);
+
+  const failed = [];
+  for (const vm of vms) {
+    try {
+      if (!await deployTo(vm, files, expected)) failed.push(vm.name);
+    } catch (error) {
+      process.stdout.write(`  FAILED: ${error.message}\n`);
+      failed.push(vm.name);
+    }
+  }
+
+  process.stdout.write(`\n${vms.length - failed.length}/${vms.length} worker(s) on ${expected}\n`);
+  if (failed.length) {
+    process.stdout.write(`stale or failed: ${failed.join(", ")}\n`);
+    process.stdout.write("Re-run this command; if it persists, the guest is not rebooting — see docs/nvda-worker-runbook.md\n");
+  }
+  process.exit(failed.length ? 1 : 0);
 }
 
-process.stdout.write(`\n${vms.length - failed.length}/${vms.length} worker(s) on ${expected}\n`);
-if (failed.length) {
-  process.stdout.write(`stale or failed: ${failed.join(", ")}\n`);
-  process.stdout.write("Re-run this command; if it persists, the guest is not rebooting — see docs/nvda-worker-runbook.md\n");
-}
-process.exit(failed.length ? 1 : 0);
+if (import.meta.url === `file://${process.argv[1]}`) await main();
