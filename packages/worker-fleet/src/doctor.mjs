@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
@@ -27,6 +28,10 @@ const PAGES_PORT = Number(process.env.DATASET_PAGES_PORT || 5050);
 // moved: doctor then reported "no local VM tooling here" on a host with three registered VMs, which reads as
 // a broken environment rather than a broken path.
 const CTL = fleetScriptPaths().workerCtl;
+// Resolved from THIS module, never the cwd. The scorer being resolved against `process.cwd()` is the
+// defect that made a fresh clone unable to run its own default judge (see packages/scorer/src/index.ts),
+// so nothing here may repeat it.
+const SCORER_MODEL_DIR = fileURLToPath(new URL("../../scorer/models/screenreader-scorer/", import.meta.url));
 const DATASET = resolve(process.cwd(), "runs/screenreader-dataset");
 const PROBE_TIMEOUT_MS = 8000;
 
@@ -62,18 +67,32 @@ async function httpJson(url) {
 
 // --- the checks -----------------------------------------------------------
 
+// The DEFAULT here was "codex", and every part of that was wrong. `judge.ts` has no codex case at all —
+// it offers local, anthropic and openai — so with JUDGE_BACKEND unset (the normal case) this told the
+// operator to "install Codex and run: codex login" for a backend the product cannot use. And setting
+// JUDGE_BACKEND=local fell into the other branch and checked JUDGE_BASE_URL, which local does not need.
+// Both answers were wrong, in a command whose whole promise is that every check names its own fix.
+//
+// Mirrors judge.ts's default deliberately: a doctor that disagrees with the thing it inspects is worse
+// than no doctor.
 async function checkJudge() {
-  const backend = (process.env.JUDGE_BACKEND ?? "codex").toLowerCase();
-  if (backend !== "codex") {
+  // `||`, not `??`: an env var set to the EMPTY string is how CI passes "unset", and `??` only defaults
+  // on nullish — so an empty JUDGE_BACKEND matched no backend and reported a typo that nobody made.
+  const backend = (process.env.JUDGE_BACKEND || "local").toLowerCase();
+  if (backend === "local") {
+    const weights = resolve(SCORER_MODEL_DIR, "model.safetensors");
+    return add("judge", existsSync(weights),
+      existsSync(weights) ? "backend=local, trained scorer present" : "backend=local, but the trained scorer is missing",
+      `expected weights at ${weights} — they ship in the repo, so this means an incomplete checkout`);
+  }
+  if (backend === "anthropic" || backend === "openai") {
     const key = backend === "anthropic" ? "ANTHROPIC_API_KEY" : "JUDGE_BASE_URL";
     return add("judge", !!process.env[key], `backend=${backend}`, `export ${key}=...`);
   }
-  try {
-    await shell("codex", ["--version"], 15000);
-    add("judge", true, "codex CLI present (login is not checked here)");
-  } catch {
-    add("judge", false, "codex CLI not found", "install Codex and run: codex login");
-  }
+  // Refuse an unknown backend rather than reporting on one that will not run — the same rule action.yml
+  // applies, because a typo must not quietly change which judge assessed the page.
+  add("judge", false, `backend=${backend} is not one of local, anthropic, openai`,
+    "unset JUDGE_BACKEND to use the default local scorer");
 }
 
 // Workers, as a POOL, and with the right idea of what "ready" means.
