@@ -99,6 +99,23 @@ async function healthCode(ip, port) {
   return (await response.json()).code;
 }
 
+/**
+ * Wait until a VM is no longer `stopping`, so the next deploy does not start a guest on top of one still
+ * holding its memory.
+ *
+ * Bounded and non-fatal: if it never settles we continue and let the next deploy report its own failure,
+ * because a deploy that hangs forever is worse than one that reports a stale worker.
+ */
+async function waitUntilSettled(name, limitMs = 120_000) {
+  const deadline = Date.now() + limitMs;
+  while (Date.now() < deadline) {
+    const vm = (await pool()).find((v) => v.name === name);
+    if (!vm || vm.state !== "stopping") return;
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+  }
+  process.stdout.write(`  note: ${name} is still stopping; continuing anyway\n`);
+}
+
 async function deployTo(vm, files, expected) {
   process.stdout.write(`\n=== ${vm.name} ===\n`);
   // Push needs the guest running; the reboot afterwards is what actually loads the new code.
@@ -111,15 +128,23 @@ async function deployTo(vm, files, expected) {
   await ctl("stop", vm.name);
   await ctl("up", vm.name);
 
-  const fresh = await pool();
-  const back = fresh.find((v) => v.name === vm.name);
-  if (!back?.ip) throw new Error(`${vm.name} did not come back with an address`);
-  const actual = await healthCode(back.ip, back.port);
-  const ok = actual === expected;
-  process.stdout.write(`  /health.code ${actual} ${ok ? "== expected" : `!= expected ${expected}`}\n`);
-  // Put it back where it was found, the same contract the run's lease honours.
-  if (vm.state !== "started") await ctl("stop", vm.name);
-  return ok;
+  // The restore is in a `finally` because it used to be on the SUCCESS path only, and the failure path is
+  // exactly when it matters. A guest whose health check threw was left RUNNING, and the loop then started
+  // the next VM on top of it — on a host `doctor` reports as having room for one of two, that guarantees
+  // the second times out too. It is then printed as "stale or failed", which reads as a broken guest and
+  // sent me looking to rebuild one that boots to ready in 33 s.
+  try {
+    const fresh = await pool();
+    const back = fresh.find((v) => v.name === vm.name);
+    if (!back?.ip) throw new Error(`${vm.name} did not come back with an address`);
+    const actual = await healthCode(back.ip, back.port);
+    const ok = actual === expected;
+    process.stdout.write(`  /health.code ${actual} ${ok ? "== expected" : `!= expected ${expected}`}\n`);
+    return ok;
+  } finally {
+    // Put it back where it was found, the same contract the run's lease honours.
+    if (vm.state !== "started") await ctl("stop", vm.name).catch(() => undefined);
+  }
 }
 
 /**
@@ -203,6 +228,10 @@ async function main() {
       process.stdout.write(`  FAILED: ${error.message}\n`);
       failed.push(vm.name);
     }
+    // A `stop` returns before the guest has actually released its memory — one was observed sitting in
+    // `stopping` for minutes. Starting the next VM into that overlap is the same over-commitment by a
+    // second route, so wait for the host to be quiet before moving on.
+    await waitUntilSettled(vm.name);
   }
 
   process.stdout.write(`\n${vms.length - failed.length}/${vms.length} worker(s) on ${expected}\n`);
