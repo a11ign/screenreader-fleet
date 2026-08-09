@@ -49,6 +49,24 @@ set -euo pipefail
 
 VM_NAME="${A11Y_VM_NAME:-a11y-worker}"
 PORT="${A11Y_PORT:-8765}"
+
+# Accept `--vm=<name>` as well as A11Y_VM_NAME, and accept it in ANY position.
+#
+# `worker:deploy` has always taken `--vm=`, so anyone who has used that reaches for it here too — and this
+# script silently ignored it, then reported a DIFFERENT VM's state under the name you asked for. Silently,
+# because a stray argument was simply never read. Two tools in one fleet disagreeing about how to name a
+# machine is the kind of paper cut that gets diagnosed as "the guest is broken".
+#
+# Stripped from the positional arguments before CMD/ARG are taken, so `up --vm=x` and `--vm=x up` both work.
+ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --vm=*) VM_NAME="${a#--vm=}" ;;
+    *) ARGS+=("$a") ;;
+  esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
 CMD="${1:-status}"
 SHUTDOWN_GRACE_S=120   # how long to let Windows shut down cleanly before forcing
 RECLAIM_SETTLE_S=45    # give the host a chance to reclaim pages before reporting usage
@@ -302,7 +320,12 @@ case "$CMD" in
     busy=false; if echo "$body" | grep -q '"busy":true'; then busy=true; fi
     # A worker can answer /health while NVDA cannot start. `ready:false` says so explicitly;
     # a worker predating the field reports nothing, and is treated as ready.
-    ready=true; if echo "$body" | grep -q '"ready":false'; then ready=false; fi
+    # `ready` is only meaningful when something ANSWERED. This defaulted to true and was lowered only if
+    # the body said `"ready":false` — so a stopped or unreachable VM, whose body is empty, reported
+    # `ready: true`. That is "we could not ask" rendered as "yes", on the one field CLAUDE.md says to
+    # dispatch on: a run reading this JSON could pick a stopped guest.
+    ready=false
+    if [ "$healthy" = true ] && ! echo "$body" | grep -q '"ready":false'; then ready=true; fi
     state="$(vm_state "$UUID")"
 
     # `means` carries no information the other fields lack; it exists because they were being
