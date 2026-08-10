@@ -99,6 +99,45 @@ async function healthCode(ip, port) {
   return (await response.json()).code;
 }
 
+/** How long a rebooted guest gets to start answering before a deploy calls the verification failed. */
+const VERIFY_BUDGET_MS = 240_000;
+const VERIFY_POLL_MS = 10_000;
+
+/**
+ * Read the guest's code hash, waiting for it to finish booting first.
+ *
+ * A guest that is not answering YET is not a failed deploy, and reading `/health` once immediately after the
+ * reboot conflated the two: `worker:deploy` printed "stale or failed" while `npm run worker:code` — run a
+ * minute later against the same guest — reported `matches`. That false alarm sent me redeploying guests that
+ * had deployed correctly, repeatedly, and the deploy is the tool whose whole job is telling you whether the
+ * push landed.
+ *
+ * Only SILENCE is waited on. A hash that answers and differs is returned straight to the caller, which
+ * compares it — so a genuine stale deploy still fails immediately and only a booting guest costs time. Boot
+ * times measured on this fleet run from 30 s to 147 s depending on how much Edge-profile hygiene the guest has
+ * to do first, so the budget is well above the slowest honest answer.
+ */
+async function healthCodeWhenAwake(ip, port) {
+  const deadline = Date.now() + VERIFY_BUDGET_MS;
+  let last = "no answer";
+  let waited = false;
+  while (Date.now() < deadline) {
+    try {
+      const actual = await healthCode(ip, port);
+      if (waited) process.stdout.write("\n");
+      return actual;
+    } catch (error) {
+      last = error instanceof Error ? error.message : String(error);
+      if (!waited) process.stdout.write("  waiting for the guest to answer /health ");
+      waited = true;
+      process.stdout.write(".");
+      await new Promise((resolve) => setTimeout(resolve, VERIFY_POLL_MS));
+    }
+  }
+  if (waited) process.stdout.write("\n");
+  throw new Error(`${ip}:${port} never answered /health within ${VERIFY_BUDGET_MS / 1000}s (last: ${last})`);
+}
+
 /**
  * Wait until a VM is no longer `stopping`, so the next deploy does not start a guest on top of one still
  * holding its memory.
@@ -137,7 +176,7 @@ async function deployTo(vm, files, expected) {
     const fresh = await pool();
     const back = fresh.find((v) => v.name === vm.name);
     if (!back?.ip) throw new Error(`${vm.name} did not come back with an address`);
-    const actual = await healthCode(back.ip, back.port);
+    const actual = await healthCodeWhenAwake(back.ip, back.port);
     const ok = actual === expected;
     process.stdout.write(`  /health.code ${actual} ${ok ? "== expected" : `!= expected ${expected}`}\n`);
     return ok;
