@@ -333,13 +333,24 @@ if ($tp -eq $true) {
 }
 
 # ---------------------------------------------------------------------------
-Step 7b 'Durable Edge capture profile'
+Step 7b 'Durable browser capture profile'
 
-# capture-core.mjs defaults this under %LOCALAPPDATA%; A11Y_EDGE_PROFILE overrides.
+# browsers.mjs defaults this under %LOCALAPPDATA%, one directory PER BROWSER; A11Y_BROWSER_PROFILE
+# overrides for any browser and A11Y_EDGE_PROFILE for Edge only (kept because this script has always
+# read it, and provisioning preparing one path while the worker uses another leaves a first-run
+# browser -- which NVDA records as phantom elements on pages with no headings).
 # It must not sit in %TEMP%, for the same reason the NVDA install must not.
-$edgeProfile = if ($env:A11Y_EDGE_PROFILE) { $env:A11Y_EDGE_PROFILE } else { Join-Path $env:LOCALAPPDATA 'a11y-witness\edge-profile' }
-New-Item -ItemType Directory -Force -Path $edgeProfile | Out-Null
-OK "Edge profile dir $edgeProfile"
+#
+# Both are created regardless of which browser this guest will drive: they cost an empty directory, and
+# a guest whose browser is switched later should not need re-provisioning to get a prepared profile.
+$profileNames = @('edge-profile', 'chrome-profile')
+foreach ($name in $profileNames) {
+  $dir = if ($env:A11Y_BROWSER_PROFILE) { $env:A11Y_BROWSER_PROFILE }
+         elseif ($name -eq 'edge-profile' -and $env:A11Y_EDGE_PROFILE) { $env:A11Y_EDGE_PROFILE }
+         else { Join-Path $env:LOCALAPPDATA "a11y-witness\$name" }
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  OK "Browser profile dir $dir"
+}
 
 # ---------------------------------------------------------------------------
 Step 8 "Worker scheduled task '$TaskName'"
