@@ -25,6 +25,29 @@
 $ErrorActionPreference = 'Stop'
 
 $RepoPath       = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11y-witness' }
+
+# Resolve a repo file by NAME rather than by a hardcoded relative path.
+#
+# Four paths in this script were spelled 'src\capture\nvda\...', and the repo moved everything
+# under packages/. One threw ("Worker launcher not found"); the other two sat behind
+# `if (Test-Path ...)` and SILENTLY skipped -- so the Windows trim never ran and the a11ycheck
+# task was never registered, on every guest provisioned since the restructure, with no message.
+# A guard that cannot tell "moved" from "deliberately absent" reports neither.
+#
+# Searches the source trees only: a provisioned guest has node_modules, and recursing the whole
+# repo takes minutes.
+function Resolve-RepoFile($name, [switch] $Required) {
+  $roots = @('packages', 'scripts', 'src') |
+    ForEach-Object { Join-Path $RepoPath $_ } | Where-Object { Test-Path $_ }
+  foreach ($root in $roots) {
+    $hit = Get-ChildItem -Path $root -Filter $name -Recurse -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -notmatch '\\node_modules\\' } | Select-Object -First 1
+    if ($hit) { return $hit.FullName }
+  }
+  if ($Required) { throw "$name not found under $RepoPath (searched: $($roots -join ', '))" }
+  Warn "$name not found under $RepoPath -- the step that needs it will be skipped"
+  return $null
+}
 $Port           = if ($env:A11Y_PORT) { [int] $env:A11Y_PORT } else { 8765 }
 $TaskName       = if ($env:A11Y_TASK_NAME) { $env:A11Y_TASK_NAME } else { 'a11ysrv' }
 $SkipNpmInstall = $env:A11Y_SKIP_NPM_INSTALL -eq '1'
@@ -300,7 +323,7 @@ Step 7 'Trim Windows background services and apps'
 # hardcodes amd64 package names while these guests are ARM64. So names are read from the guest, and
 # src/capture/nvda/windows-trim.mjs holds the authoritative allow/deny lists with the tests that keep
 # Edge and the speech stack out of the removal set.
-$trimScript = Join-Path $RepoPath 'src\capture\nvda\windows-trim.mjs'
+$trimScript = Resolve-RepoFile 'windows-trim.mjs'
 $trimMarker = Join-Path $RepoPath '.windows-trimmed'
 if (Test-Path $trimScript) {
   if (Test-Path $trimMarker) {
@@ -359,8 +382,7 @@ Step 8 "Worker scheduled task '$TaskName'"
 # desktop session. A service, or a plain SSH command, has no desktop and NVDA
 # announces nothing. RunLevel Limited (not Highest) keeps it unelevated on
 # purpose -- see the UAC/UIAccess note above.
-$cmd = Join-Path $RepoPath 'src\capture\nvda\run-server.cmd'
-if (-not (Test-Path $cmd)) { throw "Worker launcher not found: $cmd" }
+$cmd = Resolve-RepoFile 'run-server.cmd' -Required
 
 # Use the RESOLVED identity, not "$env:USERDOMAIN\$env:USERNAME": on a workgroup
 # machine USERDOMAIN is literally "WORKGROUP", which is not an account any SID maps
@@ -395,7 +417,7 @@ OK "registered: logon=$($task.Principal.LogonType) runLevel=$($task.Principal.Ru
 # No trigger: this one is started on demand, never at logon. ExecutionTimeLimit is 30 minutes
 # rather than unlimited, because unlike the worker it IS a batch job and a wedged check should
 # not sit there forever.
-$checkCmd = Join-Path $RepoPath 'src\capture\nvda\run-capture-check.cmd'
+$checkCmd = Resolve-RepoFile 'run-capture-check.cmd'
 if (Test-Path $checkCmd) {
   $checkSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
   Register-ScheduledTask -TaskName 'a11ycheck' `
@@ -424,11 +446,9 @@ $stampPath = Join-Path $RepoPath 'provision-revision.txt'
 # 'unknown' -- so the stamp stopped describing what provisioning actually did and varied
 # only by git SHA. A Where-Object that discards its own inputs cannot report that it found
 # nothing, which is this repo's most-repeated shape.
-$scriptHashes = @('packages\worker-fleet\src\provisioning\provision-nvda-worker.ps1',
-                  'packages\nvda-worker\src\run-server.cmd',
-                  'packages\worker-fleet\src\provisioning\apply-foreground-lock-timeout.ps1') |
-  ForEach-Object { Join-Path $RepoPath $_ } |
-  Where-Object { Test-Path $_ } |
+$scriptHashes = @('provision-nvda-worker.ps1', 'run-server.cmd', 'apply-foreground-lock-timeout.ps1') |
+  ForEach-Object { Resolve-RepoFile $_ } |
+  Where-Object { $_ } |
   ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }
 $combined = if ($scriptHashes) {
   $bytes = [Text.Encoding]::UTF8.GetBytes(($scriptHashes -join ''))
