@@ -18,6 +18,17 @@
 # `<# #>` block comment and no param() block -- see diagnose-nvda-worker.ps1 beside this file.
 #   A11Y_REPO_URL   (default the public GitHub repo)
 #   A11Y_REPO_PATH  (default %USERPROFILE%\a11y-witness)
+#   A11Y_AUTOLOGON_PASSWORD  passed through to provisioning, which uses it to enable auto-logon.
+#     WITHOUT IT THE WORKER DOES NOT SURVIVE A REBOOT -- NVDA needs a logged-on console session
+#     and a11ysrv triggers at logon, so a restarted box sits at the login screen for ever. Set it
+#     in your shell for this run only:
+#
+#       $env:A11Y_AUTOLOGON_PASSWORD = Read-Host 'console password' -AsSecureString |
+#         ForEach-Object { [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+#           [Runtime.InteropServices.Marshal]::SecureStringToBSTR($_)) }
+#
+#     It is never written to the repo; provisioning hands it to Sysinternals Autologon, which
+#     stores it ENCRYPTED IN LSA rather than as plaintext in the Winlogon registry keys.
 
 $ErrorActionPreference = 'Stop'
 

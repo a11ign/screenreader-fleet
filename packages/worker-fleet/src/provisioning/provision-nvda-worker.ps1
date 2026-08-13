@@ -19,6 +19,9 @@
 # either invocation mode:
 #   A11Y_REPO_PATH        checkout location (default %USERPROFILE%\a11y-witness)
 #   A11Y_PORT             worker port; must match the client's A11Y_WORKER (default 8765)
+#   A11Y_AUTOLOGON_PASSWORD  the console account's password. Set it in YOUR shell for the
+#                         length of this run; it is never written to the repo. Without it the
+#                         worker will not survive a reboot, and this script says so loudly.
 #   A11Y_TASK_NAME        scheduled-task name (default a11ysrv)
 #   A11Y_SKIP_NPM_INSTALL set to 1 to re-apply only OS/NVDA configuration
 
@@ -506,6 +509,58 @@ $gitSha = try { (git -C $RepoPath rev-parse --short HEAD 2>$null) } catch { $nul
 OK "provision revision stamped: $(Get-Content $stampPath)"
 
 # ---------------------------------------------------------------------------
+Step 8a 'Auto-logon (or this worker does not survive a reboot)'
+
+# NVDA needs a logged-on console session, and a11ysrv triggers AT LOGON. Without auto-logon a
+# restarted box sits at the login screen and never serves -- indistinguishable, from outside,
+# from a dead machine.
+#
+# This used to be a "next step this script deliberately does not do", on the grounds that it
+# needs a password which must not be baked into a checked-in script. That argues against putting
+# the PASSWORD in the repo; it does not argue against automating the STEP. Every other setting
+# here is an environment variable, and a manual step repeated per machine is one that gets missed
+# on machine seven -- which is this file's own rule about housekeeping.
+#
+# Sysinternals Autologon rather than the Winlogon registry keys: it stores the secret ENCRYPTED
+# IN LSA, whereas DefaultPassword is world-readable plaintext for anyone who can read HKLM.
+$autoPassword = $env:A11Y_AUTOLOGON_PASSWORD
+if (-not $autoPassword) {
+  Warn 'A11Y_AUTOLOGON_PASSWORD is not set -- auto-logon NOT configured.'
+  Warn 'This worker will NOT come back after a reboot: it will sit at the login screen.'
+  Warn 'Re-run with $env:A11Y_AUTOLOGON_PASSWORD set, or configure Autologon by hand.'
+} else {
+  try {
+    $tools = Join-Path $env:TEMP 'a11y-autologon'
+    New-Item -ItemType Directory -Force -Path $tools | Out-Null
+    $zip = Join-Path $tools 'AutoLogon.zip'
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/AutoLogon.zip' -OutFile $zip -UseBasicParsing
+    Expand-Archive -Path $zip -DestinationPath $tools -Force
+    # No ARM64 build is published; the 32-bit binary runs under emulation there.
+    $exe = @('Autologon64.exe', 'Autologon.exe') |
+      ForEach-Object { Join-Path $tools $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $exe) { throw 'no Autologon binary in the Sysinternals archive' }
+
+    # The password is passed as an argument to a local process. It is NOT written to the repo,
+    # and Autologon puts it in LSA rather than the registry -- but it is visible in this process
+    # tree while it runs, so run provisioning on a box you control.
+    & $exe -accepteula $env:USERNAME $env:COMPUTERNAME $autoPassword | Out-Null
+    Remove-Item $tools -Recurse -Force -ErrorAction SilentlyContinue
+
+    # Verify by the MARK, not by the absence of an error: Autologon exits 0 in cases where it did
+    # not take. AutoAdminLogon=1 is the thing Winlogon actually reads at boot.
+    $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    $set = (Get-ItemProperty $winlogon -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon
+    $who = (Get-ItemProperty $winlogon -Name DefaultUserName -ErrorAction SilentlyContinue).DefaultUserName
+    if ("$set" -ne '1') { throw "Autologon ran but AutoAdminLogon is '$set', not 1" }
+    OK "auto-logon enabled for $who (secret in LSA, not the registry)"
+    Warn 'This box now boots to an UNLOCKED desktop. Correct for a lab worker on its own segment; not for anything else.'
+  } catch {
+    Warn "auto-logon setup failed ($($_.Exception.Message)) -- this worker will not survive a reboot"
+  }
+}
+
+# ---------------------------------------------------------------------------
 Step 9 'Start and verify'
 
 Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -564,25 +619,10 @@ Write-Host @"
 
 Next steps this script deliberately does NOT do:
 
-  1. Auto-logon. NVDA needs a logged-on console session, so AFTER A REBOOT THIS
-     WORKER DOES NOT COME BACK until someone logs in -- it sits at the login screen
-     and the a11ysrv task, whose trigger is at-logon, never fires. On a headless
-     box that is indistinguishable from a dead one.
-
-     Enabling it requires a password, which must not be baked into a checked-in
-     script. Sysinternals Autologon stores the secret encrypted in LSA rather than
-     plaintext in the registry:
-         .\Autologon.exe -accepteula $env:USERNAME $env:COMPUTERNAME <password>
-     Run it on the console, or in your own shell, so the password is not recorded.
-
-     Trade-off, stated rather than assumed: the box then boots to an unlocked
-     desktop. For a lab worker on its own network segment that is the accepted
-     cost of NVDA needing a real session; it is not appropriate for a machine
-     holding anything else.
-
-     VERIFY IT by rebooting and watching /health come back on its own. "It works
-     now" says nothing about whether it survives a restart, and every one of these
-     boxes will restart.
+  1. VERIFY IT SURVIVES A REBOOT. Auto-logon is configured above when
+     A11Y_AUTOLOGON_PASSWORD is set -- but "it works now" says nothing about
+     whether it comes back, and every box in a fleet restarts. Reboot this one and
+     watch /health answer on its own before you call it provisioned.
 
   2. Prove capture end-to-end. From the control machine:
          curl http://<this-host>:$Port/health
