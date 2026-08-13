@@ -3,7 +3,7 @@
 # Run this ONCE, in the VM, in an elevated PowerShell, right after Windows setup:
 #
 #   Set-ExecutionPolicy -Scope Process Bypass -Force
-#   irm https://raw.githubusercontent.com/DanBeckDev/a11y-witness/main/scripts/bootstrap-windows-worker.ps1 | iex
+#   irm https://raw.githubusercontent.com/DanBeckDev/a11y-witness/main/packages/worker-fleet/src/provisioning/bootstrap-windows-worker.ps1 | iex
 #
 # ...or, if you already have the repo, just run this file. It installs the
 # prerequisites, makes the box reachable over SSH, clones the repo, and then hands
@@ -15,7 +15,7 @@
 # Expect to babysit it the first time; fix and commit what it gets wrong.
 #
 # Style constraints match the other scripts: `#` line comments and env-var config, no
-# `<# #>` block comment and no param() block -- see scripts/diagnose-nvda-worker.ps1.
+# `<# #>` block comment and no param() block -- see diagnose-nvda-worker.ps1 beside this file.
 #   A11Y_REPO_URL   (default the public GitHub repo)
 #   A11Y_REPO_PATH  (default %USERPROFILE%\a11y-witness)
 
@@ -59,6 +59,25 @@ Step 2 'Install Node.js and Git (direct download, no winget)'
 # win-arm64-zip but NO arm64 .msi, so the zip is the only version-agnostic choice.
 $ProgressPreference = 'SilentlyContinue'   # or Invoke-WebRequest crawls
 
+# Which architecture to fetch binaries for. Every download below was hardcoded to arm64,
+# because this script was written from the UTM guests on an Apple-silicon Mac -- so on an
+# x64 box it downloaded ARM binaries that cannot execute, and the failure surfaces as
+# "node is not recognized" AFTER a successful-looking install.
+#
+# `OSArchitecture`, not $env:PROCESSOR_ARCHITECTURE: the env var reports the *process*
+# architecture, so an x64 PowerShell emulated on ARM64 Windows reports AMD64 and would
+# install the wrong Node. OSArchitecture asks the OS.
+#
+# The three projects spell the same architecture three different ways, which is exactly
+# the kind of thing that looks right in review and 404s at runtime -- so each mapping is
+# named rather than derived.
+$osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLower()
+if ($osArch -notin @('x64', 'arm64')) { throw "unsupported architecture '$osArch' (expected x64 or arm64)" }
+$nodeArch    = $osArch                                              # node-vX-win-x64.zip   / -win-arm64.zip
+$minGitArch  = if ($osArch -eq 'x64') { '64-bit' } else { 'arm64' } # MinGit-X-64-bit.zip   / -arm64.zip
+$openSshArch = if ($osArch -eq 'x64') { 'Win64' }  else { 'ARM64' } # OpenSSH-Win64.msi     / OpenSSH-ARM64.msi
+OK "architecture $osArch (node=$nodeArch, mingit=$minGitArch, openssh=$openSshArch)"
+
 function Get-Archive($url, $outFile) {
   Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing
   if (-not (Test-Path $outFile)) { throw "download failed: $url" }
@@ -70,12 +89,12 @@ New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 if (Get-Command node -ErrorAction SilentlyContinue) { OK "node already present ($(& node --version))" }
 else {
   $idx = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json' -UseBasicParsing
-  $rel = $idx | Where-Object { $_.lts -and $_.files -contains 'win-arm64-zip' } | Select-Object -First 1
-  if (-not $rel) { throw 'no Node LTS with a win-arm64 build found' }
+  $rel = $idx | Where-Object { $_.lts -and $_.files -contains "win-$nodeArch-zip" } | Select-Object -First 1
+  if (-not $rel) { throw "no Node LTS with a win-$nodeArch build found" }
   $zip = Join-Path $tmp 'node.zip'
-  Get-Archive "https://nodejs.org/dist/$($rel.version)/node-$($rel.version)-win-arm64.zip" $zip
+  Get-Archive "https://nodejs.org/dist/$($rel.version)/node-$($rel.version)-win-$nodeArch.zip" $zip
   Expand-Archive -Path $zip -DestinationPath $tmp -Force
-  $src = Get-ChildItem $tmp -Directory -Filter 'node-*-win-arm64' | Select-Object -First 1
+  $src = Get-ChildItem $tmp -Directory -Filter "node-*-win-$nodeArch" | Select-Object -First 1
   $dest = Join-Path $env:ProgramFiles 'nodejs'
   # run-server.cmd looks for "%ProgramFiles%\nodejs\node.exe" first, so install there.
   if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
@@ -87,8 +106,13 @@ if (Get-Command git -ErrorAction SilentlyContinue) { OK "git already present" }
 else {
   # MinGit is the portable Git build: a zip, no installer, which is all we need to clone.
   $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' -UseBasicParsing
-  $asset = $rel.assets | Where-Object { $_.name -match '^MinGit-.*-arm64\.zip$' } | Select-Object -First 1
-  if (-not $asset) { throw 'no MinGit arm64 asset found' }
+  # `[0-9.]+` rather than `.*` between the name and the architecture. Git for Windows also
+  # ships MinGit-<ver>-busybox-64-bit.zip, which a `.*` matches just as happily -- so the
+  # build you got would depend on GitHub's asset ordering rather than on this code. That is
+  # the "check that cannot discriminate" shape, and it would have installed a busybox Git
+  # that looks identical until something needs a real coreutil.
+  $asset = $rel.assets | Where-Object { $_.name -match "^MinGit-[0-9.]+-$([regex]::Escape($minGitArch))\.zip$" } | Select-Object -First 1
+  if (-not $asset) { throw "no MinGit $minGitArch asset found" }
   $zip = Join-Path $tmp 'mingit.zip'
   Get-Archive $asset.browser_download_url $zip
   $dest = Join-Path $env:ProgramFiles 'MinGit'
@@ -118,8 +142,8 @@ try {
   if (Get-Service sshd -ErrorAction SilentlyContinue) { OK 'sshd already present' }
   else {
     $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases/latest' -UseBasicParsing
-    $asset = $rel.assets | Where-Object { $_.name -match '^OpenSSH-ARM64.*\.msi$' } | Select-Object -First 1
-    if (-not $asset) { throw 'no OpenSSH ARM64 msi asset found' }
+    $asset = $rel.assets | Where-Object { $_.name -match "^OpenSSH-$([regex]::Escape($openSshArch)).*\.msi$" } | Select-Object -First 1
+    if (-not $asset) { throw "no OpenSSH $openSshArch msi asset found" }
     $msi = Join-Path $tmp 'openssh.msi'
     Get-Archive $asset.browser_download_url $msi
     Invoke-Native 'msiexec.exe' @('/i', $msi, '/qn', '/norestart') 'OpenSSH msi' 2
@@ -144,8 +168,15 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
 }
 
 Step 5 'Hand off to the provisioning script'
-$provision = Join-Path $RepoPath 'scripts\provision-nvda-worker.ps1'
-if (-not (Test-Path $provision)) { throw "Not found: $provision" }
+# Located by SEARCH, not by a hardcoded path. This read 'scripts\provision-nvda-worker.ps1'
+# and the repo has since moved everything under packages/ -- so the bootstrap cloned
+# successfully and then died here with "Not found", after doing all the expensive work.
+# A path spelled out in one script and owned by another is exactly the coupling that rots,
+# and the same restructure silently broke the provision-revision hash list below.
+$provision = Get-ChildItem -Path $RepoPath -Filter 'provision-nvda-worker.ps1' -Recurse -File `
+  -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if (-not $provision) { throw "provision-nvda-worker.ps1 not found anywhere under $RepoPath" }
+OK "provisioning script at $provision"
 $env:A11Y_REPO_PATH = $RepoPath
 & powershell -NoProfile -ExecutionPolicy Bypass -File $provision
 if ($LASTEXITCODE -ne 0) { throw "Provisioning failed (exit $LASTEXITCODE)." }

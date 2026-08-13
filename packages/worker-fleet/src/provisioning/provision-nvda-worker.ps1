@@ -419,8 +419,14 @@ if (Test-Path $checkCmd) {
 # ACTUALLY has, which is the only thing worth keying on. A host-side hash would describe the
 # script we intended to run.
 $stampPath = Join-Path $RepoPath 'provision-revision.txt'
-$scriptHashes = @('scripts\provision-nvda-worker.ps1', 'src\capture\nvda\run-server.cmd',
-                  'scripts\apply-foreground-lock-timeout.ps1') |
+# These paths moved when the repo was restructured into packages/, and because the filter
+# below DROPS anything missing, all three vanished silently and $combined fell back to
+# 'unknown' -- so the stamp stopped describing what provisioning actually did and varied
+# only by git SHA. A Where-Object that discards its own inputs cannot report that it found
+# nothing, which is this repo's most-repeated shape.
+$scriptHashes = @('packages\worker-fleet\src\provisioning\provision-nvda-worker.ps1',
+                  'packages\nvda-worker\src\run-server.cmd',
+                  'packages\worker-fleet\src\provisioning\apply-foreground-lock-timeout.ps1') |
   ForEach-Object { Join-Path $RepoPath $_ } |
   Where-Object { Test-Path $_ } |
   ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }
