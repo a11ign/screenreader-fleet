@@ -97,9 +97,77 @@ $console = (query session 2>$null | Select-String '^\s*>?\s*console\s+\S+\s+\d+\
 if ($console) { OK 'an interactive console session is logged on' }
 else { Warn 'NO active console session. NVDA cannot run until someone is logged on at the console (see the auto-logon step).' }
 
-$elevated = (New-Object Security.Principal.WindowsPrincipal(
+$elevatedEarly = (New-Object Security.Principal.WindowsPrincipal(
   [Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole(
   [Security.Principal.WindowsBuiltinRole]::Administrator)
+
+# The worker account must be LOCAL, and this is checked FIRST because everything below is
+# per-user: the a11ysrv task is registered `-AtLogOn -User <account>`, NVDA caches to
+# %LOCALAPPDATA%\guidepup, and the repo and Edge profile live in the profile. Provisioning a
+# Microsoft account's profile and then auto-logging in as someone else produces a box that boots,
+# logs in, and serves nothing -- so this refuses at the START rather than after ten minutes of
+# work that will be abandoned.
+#
+# A Microsoft account cannot hold a blank password, and a blank password is what lets this fleet
+# auto-log-on with no credential stored anywhere. So the answer is a dedicated local account,
+# which is what the UTM guests already use.
+$WorkerAccount = if ($env:A11Y_WORKER_ACCOUNT) { $env:A11Y_WORKER_ACCOUNT } else { 'witness' }
+$me = $null
+try { $me = Get-LocalUser -Name $env:USERNAME -ErrorAction Stop } catch { }
+
+if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
+  OK "running as LOCAL account '$env:USERNAME' -- correct for a worker"
+} else {
+  $kind = if ($me) { $me.PrincipalSource } else { 'non-local' }
+  Warn "running as a $kind account ('$env:USERNAME'), which cannot hold a blank password."
+
+  # Create the local account and point auto-logon at it, so the ONLY thing left is to reboot and
+  # run this again. Creating it here rather than telling you to is the difference between a
+  # repeatable setup and a per-machine ritual that gets skipped on machine seven.
+  if (-not $elevatedEarly) {
+    throw "Elevation is required to create the local '$WorkerAccount' account. Re-run this elevated."
+  }
+  $blank = New-Object System.Security.SecureString
+  if (Get-LocalUser -Name $WorkerAccount -ErrorAction SilentlyContinue) {
+    Set-LocalUser -Name $WorkerAccount -Password $blank -PasswordNeverExpires $true
+    OK "local account '$WorkerAccount' already existed; password blanked"
+  } else {
+    New-LocalUser -Name $WorkerAccount -NoPassword `
+      -FullName 'a11y-witness capture worker' `
+      -Description 'Console-only worker account. No password by design.' | Out-Null
+    # Separate call: -PasswordNeverExpires lives in a different parameter set from -NoPassword,
+    # so combining them fails to bind rather than doing what it reads like.
+    Set-LocalUser -Name $WorkerAccount -PasswordNeverExpires $true -ErrorAction SilentlyContinue
+    OK "created local account '$WorkerAccount'"
+  }
+  # Administrators because provisioning sets the firewall, Edge policy and a scheduled task.
+  Add-LocalGroupMember -Group 'Administrators' -Member $WorkerAccount -ErrorAction SilentlyContinue
+  OK "'$WorkerAccount' is an administrator"
+
+  $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+  Set-ItemProperty $winlogon -Name AutoAdminLogon    -Value '1'            -Type String -Force
+  Set-ItemProperty $winlogon -Name DefaultUserName   -Value $WorkerAccount -Type String -Force
+  Set-ItemProperty $winlogon -Name DefaultDomainName -Value $env:COMPUTERNAME -Type String -Force
+  foreach ($dead in @('DefaultPassword', 'AutoLogonCount')) {
+    Remove-ItemProperty $winlogon -Name $dead -ErrorAction SilentlyContinue
+  }
+  OK "auto-logon now points at '$WorkerAccount' with no stored credential"
+
+  throw @"
+STOPPING HERE ON PURPOSE -- nothing below would end up in the right profile.
+
+  '$WorkerAccount' now exists, is an administrator, has no password, and is the auto-logon user.
+
+  Next:  1. Reboot. You will be logged in as '$WorkerAccount' automatically.
+         2. Run the bootstrap again in an elevated PowerShell there.
+
+  Everything provisions under that profile and auto-logon is already correct, so that run
+  finishes. This detour happens ONCE per machine, and not at all on a box whose
+  autounattend.xml created a local account at install time.
+"@
+}
+
+$elevated = $elevatedEarly
 if ($elevated) { OK 'session is elevated (needed for the firewall/Edge-policy steps)' }
 else { Warn 'not elevated: the firewall and Edge-policy steps will be skipped.' }
 
