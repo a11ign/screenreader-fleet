@@ -24,6 +24,12 @@ $ErrorActionPreference = 'Stop'
 $RepoUrl  = if ($env:A11Y_REPO_URL) { $env:A11Y_REPO_URL } else { 'https://github.com/DanBeckDev/a11y-witness.git' }
 $RepoPath = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11y-witness' }
 
+# What each step did, so the end of a re-run says which steps were already good and which
+# were retried. Without this the second run looks identical to the first and you cannot tell
+# whether it fixed anything.
+$script:outcomes = [ordered]@{}
+function Record($name, $state) { $script:outcomes[$name] = $state }
+
 function Step($n, $msg) { Write-Host "`n[$n] $msg" -ForegroundColor Cyan }
 function OK($msg)       { Write-Host "    OK    $msg" -ForegroundColor Green }
 function Warn($msg)     { Write-Host "    WARN  $msg" -ForegroundColor Yellow }
@@ -111,8 +117,9 @@ function Get-Archive($url, $outFile) {
 $tmp = Join-Path $env:TEMP 'a11y-bootstrap'
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
-if (Get-Command node -ErrorAction SilentlyContinue) { OK "node already present ($(& node --version))" }
+if (Get-Command node -ErrorAction SilentlyContinue) { OK "node already present ($(& node --version))"; Record 'node' 'already present' }
 else {
+  Record 'node' 'installed'
   $idx = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json' -UseBasicParsing
   $rel = $idx | Where-Object { $_.lts -and $_.files -contains "win-$nodeArch-zip" } | Select-Object -First 1
   if (-not $rel) { throw "no Node LTS with a win-$nodeArch build found" }
@@ -131,8 +138,9 @@ else {
   OK "node installed to $dest ($($rel.version))"
 }
 
-if (Get-Command git -ErrorAction SilentlyContinue) { OK "git already present" }
+if (Get-Command git -ErrorAction SilentlyContinue) { OK "git already present"; Record 'git' 'already present' }
 else {
+  Record 'git' 'installed'
   # MinGit is the portable Git build: a zip, no installer, which is all we need to clone.
   $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' -UseBasicParsing
   # `[0-9.]+` rather than `.*` between the name and the architecture. Git for Windows also
@@ -168,14 +176,30 @@ Step 3 'Install the OpenSSH server (best effort)'
 # Deliberately NOT Add-WindowsCapability: that route can stall indefinitely on Windows
 # Update (documented in src/capture/nvda/README.md). Use the Win32-OpenSSH release.
 try {
-  if (Get-Service sshd -ErrorAction SilentlyContinue) { OK 'sshd already present' }
+  if (Get-Service sshd -ErrorAction SilentlyContinue) { OK 'sshd already present'; Record 'sshd' 'already present' }
   else {
+    Record 'sshd' 'installed'
     $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases/latest' -UseBasicParsing
     $asset = $rel.assets | Where-Object { $_.name -match "^OpenSSH-$([regex]::Escape($openSshArch)).*\.msi$" } | Select-Object -First 1
     if (-not $asset) { throw "no OpenSSH $openSshArch msi asset found" }
     $msi = Join-Path $tmp 'openssh.msi'
     Get-Archive $asset.browser_download_url $msi
-    Invoke-Native 'msiexec.exe' @('/i', $msi, '/qn', '/norestart') 'OpenSSH msi' 2
+    # Start-Process -Wait, NOT `& msiexec`. msiexec.exe is a GUI-subsystem binary, so invoking
+    # it through the call operator returns IMMEDIATELY and $LASTEXITCODE is meaningless -- the
+    # install had not happened yet when the next line ran, and `Set-Service -Name sshd` failed
+    # with "not found on computer '.'", which reads like a broken MSI rather than a race.
+    # 3010 is "success, reboot required" and is not a failure.
+    $mi = Start-Process 'msiexec.exe' -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+    if ($mi.ExitCode -notin @(0, 3010)) { throw "OpenSSH msi failed (exit $($mi.ExitCode))" }
+    # Service registration can lag the installer's exit. Poll for the CONDITION rather than
+    # guessing a sleep -- the same rule the capture path already follows.
+    $deadline = (Get-Date).AddSeconds(30)
+    while (-not (Get-Service sshd -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 500
+    }
+    if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
+      throw "OpenSSH msi reported success (exit $($mi.ExitCode)) but no sshd service appeared within 30s"
+    }
   }
   Set-Service -Name sshd -StartupType Automatic
   Start-Service sshd
@@ -184,16 +208,27 @@ try {
       -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
   }
   OK "sshd $((Get-Service sshd).Status), port 22 allowed"
+  Record 'sshd' "running on port 22"
 } catch {
+  # Non-fatal by design, and now explicitly RETRYABLE: the summary names it, and a re-run
+  # re-enters this step because its guard is "is there an sshd service", which there is not.
+  Record 'sshd' "FAILED - $($_.Exception.Message)"
   Warn "OpenSSH setup failed ($($_.Exception.Message)). Continuing -- the worker does not need it."
+  Warn "Re-run this script to retry it; every other step skips itself when already done."
 }
 
 Step 4 'Clone the repo'
 if (Test-Path (Join-Path $RepoPath '.git')) {
-  OK "already cloned at $RepoPath"
+  # PULL on a re-run. Without this, a second attempt keeps running the same buggy checkout and
+  # fails identically on something already fixed upstream -- which is exactly what the stale
+  # provisioning paths would have done.
+  Invoke-Native 'git' @('-C', $RepoPath, 'pull', '--ff-only') 'git pull' 2
+  OK "already cloned at $RepoPath (pulled)"
+  Record 'repo' 'pulled'
 } else {
   Invoke-Native 'git' @('clone', $RepoUrl, $RepoPath) 'git clone' 2
   OK "cloned to $RepoPath"
+  Record 'repo' 'cloned'
 }
 
 Step 5 'Hand off to the provisioning script'
@@ -221,8 +256,39 @@ if ($LASTEXITCODE -ne 0) { throw "Provisioning failed (exit $LASTEXITCODE)." }
 # The remedy is reliable and reproducible, so take it: auto-logon plus the at-logon trigger
 # bring the worker back on their own, ~65s later.
 Step 6 'Reboot to finish (a fresh install cannot capture until it has restarted once)'
-OK 'rebooting now; the worker restarts itself via auto-logon + the at-logon task'
-Start-Process -FilePath 'shutdown.exe' -ArgumentList '/r','/t','5' -NoNewWindow
+
+# What this run actually did. On a re-run most lines should read "already present", and the
+# ones that do not are what changed -- without this, a second run looks identical to the first
+# and you cannot tell whether it fixed anything.
+Write-Host "`n    --- what this run did ---" -ForegroundColor Cyan
+foreach ($k in $script:outcomes.Keys) {
+  $v = $script:outcomes[$k]
+  $colour = if ("$v" -like 'FAILED*') { 'Red' } elseif ("$v" -like '*already*') { 'DarkGray' } else { 'Green' }
+  Write-Host ("    {0,-8} {1}" -f $k, $v) -ForegroundColor $colour
+}
+$failed = $script:outcomes.Keys | Where-Object { "$($script:outcomes[$_])" -like 'FAILED*' }
+if ($failed) { Warn "re-run this script to retry: $($failed -join ', ')" }
+
+# Only reboot if the worker is not ALREADY answering. The reboot exists because a freshly
+# installed Windows cannot capture until it has restarted once -- it is not a general remedy,
+# and rebooting a healthy box on every re-run turns "run it again to fix one step" into an
+# outage. Checked over HTTP because that is the channel the worker actually serves on.
+$alreadyServing = $false
+# `if/else`, not the `? :` ternary: this runs on Windows PowerShell 5.1, where the ternary is a
+# PARSE error -- so it would not fail at this line, it would refuse to load the whole script.
+$workerPort = if ($env:A11Y_PORT) { $env:A11Y_PORT } else { 8765 }
+try {
+  $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$workerPort/health" -UseBasicParsing -TimeoutSec 3
+  $alreadyServing = $probe.StatusCode -eq 200
+} catch {
+  # Not answering is the normal case on a first run; it is why we are about to reboot.
+}
+if ($alreadyServing) {
+  OK 'worker is already serving /health -- skipping the reboot'
+} else {
+  OK 'rebooting now; the worker restarts itself via auto-logon + the at-logon task'
+  Start-Process -FilePath 'shutdown.exe' -ArgumentList '/r','/t','5' -NoNewWindow
+}
 
 Write-Host @"
 
