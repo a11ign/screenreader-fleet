@@ -464,18 +464,47 @@ Step 9 'Start and verify'
 Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName $TaskName
-$listening = $false
-foreach ($i in 1..20) {
-  Start-Sleep -Seconds 1
-  if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) { $listening = $true; break }
+# Both waits below are POLLED CONDITIONS with a budget, not fixed counts. They were 20s for
+# the port and a single 10s request for /health, and both are too short on a cold box -- so
+# provisioning reported failure on a worker that had actually come up fine.
+$LISTEN_BUDGET_S = 90    # node start + module load on a cold, unwarmed filesystem
+$HEALTH_BUDGET_S = 240   # see below
+$HEALTH_ATTEMPT_S = 30
+$POLL_S = 2
+
+$listenDeadline = (Get-Date).AddSeconds($LISTEN_BUDGET_S)
+while (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) -and
+       (Get-Date) -lt $listenDeadline) {
+  Start-Sleep -Seconds $POLL_S
 }
-if (-not $listening) { throw "Worker did not listen on $Port. Check $RepoPath\server.log." }
+if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+  throw "Worker did not listen on $Port within ${LISTEN_BUDGET_S}s. Check $RepoPath\server.log."
+}
 OK "listening on $Port"
 
-try {
-  $health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 10
-  OK "/health -> ok=$($health.ok) screenReader=$($health.screenReader)"
-} catch { throw "/health failed: $($_.Exception.Message)" }
+# The FIRST /health triggers NVDA's warm-up, and a cold NVDA start is ~19s -- with the worker's
+# own retry policy (3 attempts, 30s apart) the honest worst case is well over two minutes. A
+# single 10s request therefore timed out against a HEALTHY worker and reported "operation
+# timed out", which reads like a broken guest.
+#
+# The deadline must exceed the slowest honest answer, or "not ready yet" and "broken" become
+# the same observation -- the same rule the capture path follows for silence.
+$health = $null
+$healthDeadline = (Get-Date).AddSeconds($HEALTH_BUDGET_S)
+$lastErr = 'never attempted'
+while (-not $health -and (Get-Date) -lt $healthDeadline) {
+  try { $health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec $HEALTH_ATTEMPT_S }
+  catch { $lastErr = $_.Exception.Message; Start-Sleep -Seconds $POLL_S }
+}
+if (-not $health) { throw "/health did not answer within ${HEALTH_BUDGET_S}s (last error: $lastErr)" }
+OK "/health -> ok=$($health.ok) ready=$($health.readiness.ready) screenReader=$($health.screenReader)"
+
+# ready:false immediately after a boot is NORMAL and self-correcting -- it means "not yet",
+# not "broken", and each pool worker waits for its own before taking work. Failing provisioning
+# on it would sideline a healthy guest over an optimisation it does not need.
+if (-not $health.readiness.ready) {
+  Warn "not ready yet: $($health.readiness.reason). This is normal right after a boot and clears on its own."
+}
 
 # ---------------------------------------------------------------------------
 Write-Host "`n--- Provisioning complete ---" -ForegroundColor Cyan
