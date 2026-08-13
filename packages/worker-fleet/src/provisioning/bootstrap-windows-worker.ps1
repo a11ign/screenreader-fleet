@@ -170,6 +170,18 @@ else {
   } else {
     Move-Item $src.FullName $dest
   }
+
+  # RESTORE INHERITED PERMISSIONS. Move-Item on the same volume PRESERVES the source ACL rather
+  # than inheriting the destination's -- so a tree moved out of one account's %TEMP% into
+  # C:\Program Files carries that account's permissions, and nobody else can execute it.
+  #
+  # Measured: node installed by the first (Microsoft) account, then run by the worker account's
+  # UNELEVATED scheduled task -> "Access is denied", exit 5. Elevated shells worked throughout,
+  # because an administrator bypasses the ACL -- which is exactly why every manual test passed and
+  # only the task failed.
+  icacls $dest /reset /T /C /Q | Out-Null
+  OK "permissions on $dest reset to inherit (a Move-Item keeps the SOURCE acl)"
+
   OK "node installed to $dest ($($rel.version))"
 }
 
@@ -190,6 +202,7 @@ else {
   $dest = Join-Path $env:ProgramFiles 'MinGit'
   if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
   Expand-Archive -Path $zip -DestinationPath $dest -Force
+  icacls $dest /reset /T /C /Q | Out-Null
   OK "git installed to $dest ($($asset.name))"
 }
 
