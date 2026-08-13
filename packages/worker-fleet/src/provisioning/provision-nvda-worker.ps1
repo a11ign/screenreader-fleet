@@ -574,7 +574,21 @@ $cmd = Resolve-RepoFile 'run-server.cmd' -Required
 # machine USERDOMAIN is literally "WORKGROUP", which is not an account any SID maps
 # to, and Register-ScheduledTask fails with HRESULT 0x80070534.
 $account   = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$action    = New-ScheduledTaskAction -Execute $cmd
+# Resolve node HERE and pass it to the launcher, rather than letting the launcher work it out
+# from an environment the task does not have. Provisioning runs in an interactive elevated
+# session where %ProgramFiles% is correct; the task's environment has neither that nor node on
+# PATH, and every attempt to re-derive it inside cmd has failed -- including a for-set over
+# absolute literals. Baked into the task definition, it is inspectable with Get-ScheduledTask
+# and cannot be derived wrongly at launch.
+$nodeForTask = @(
+  (Join-Path $env:ProgramFiles 'nodejs\node.exe'),
+  'C:\Program Files\nodejs\node.exe',
+  (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $nodeForTask) { $nodeForTask = (Get-Command node -ErrorAction SilentlyContinue).Source }
+if (-not $nodeForTask) { throw 'node.exe not found -- cannot register a worker task that would fail at launch' }
+OK "worker will run: $nodeForTask"
+$action    = New-ScheduledTaskAction -Execute $cmd -Argument "`"$nodeForTask`"
 $principal = New-ScheduledTaskPrincipal -UserId $account -LogonType Interactive -RunLevel Limited
 # An at-logon trigger is what makes the worker self-healing across reboots. Without
 # it the task sits at "Ready" forever and the machine looks dead after a restart.
