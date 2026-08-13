@@ -658,16 +658,19 @@ Step 8a 'Auto-logon with NO stored credential'
 #
 # It is verified below rather than assumed, because "blank password" is only safe while
 # LimitBlankPasswordUse holds.
-$account = $null
-try { $account = Get-LocalUser -Name $env:USERNAME -ErrorAction Stop } catch { }
+# NOT $account: Step 8 already uses that name for the task PRINCIPAL (a domain-qualified string),
+# and this is a LocalUser object. Two meanings for one name in one scope is how somebody later reads
+# the wrong one and cannot see why.
+$localUser = $null
+try { $localUser = Get-LocalUser -Name $env:USERNAME -ErrorAction Stop } catch { }
 
-if (-not $account) {
+if (-not $localUser) {
   Warn "no LOCAL account named '$env:USERNAME' -- auto-logon NOT configured."
   Warn 'A Microsoft or domain account cannot hold a blank password. Create a local account for the'
   Warn 'worker (the UTM guests use one called `witness`) and re-provision under it.'
   Warn 'AS IT STANDS THIS WORKER WILL NOT COME BACK AFTER A REBOOT.'
-} elseif ($account.PrincipalSource -and $account.PrincipalSource -ne 'Local') {
-  Warn "'$env:USERNAME' is a $($account.PrincipalSource) account, not Local -- auto-logon NOT configured."
+} elseif ($localUser.PrincipalSource -and $localUser.PrincipalSource -ne 'Local') {
+  Warn "'$env:USERNAME' is a $($localUser.PrincipalSource) account, not Local -- auto-logon NOT configured."
   Warn 'AS IT STANDS THIS WORKER WILL NOT COME BACK AFTER A REBOOT.'
 } else {
   try {
