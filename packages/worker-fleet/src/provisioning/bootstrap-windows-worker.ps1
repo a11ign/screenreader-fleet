@@ -121,7 +121,15 @@ function Get-Archive($url, $outFile) {
 $tmp = Join-Path $env:TEMP 'a11y-bootstrap'
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
-if (Get-Command node -ErrorAction SilentlyContinue) { OK "node already present ($(& node --version))"; Record 'node' 'already present' }
+# Check the INSTALL PATH, not just the command. `Get-Command node` consults this session's PATH,
+# and a session that started before the machine PATH was updated -- or a fresh account's first
+# logon -- does not have it, so a perfectly good install looks absent and gets reinstalled.
+$nodeHome = Join-Path $env:ProgramFiles 'nodejs'
+$nodeExe  = Join-Path $nodeHome 'node.exe'
+if ((Get-Command node -ErrorAction SilentlyContinue) -or (Test-Path $nodeExe)) {
+  OK "node already present ($(& $(if (Test-Path $nodeExe) { $nodeExe } else { 'node' }) --version))"
+  Record 'node' 'already present'
+}
 else {
   Record 'node' 'installed'
   $idx = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json' -UseBasicParsing
@@ -135,10 +143,33 @@ else {
   # as the bug above. If Node ever changes its archive's top-level directory name, this must
   # say WHICH expectation broke.
   if (-not $src) { throw "expanded Node archive has no 'node-*-win-$nodeArch' directory under $tmp" }
-  $dest = Join-Path $env:ProgramFiles 'nodejs'
+  $dest = $nodeHome
   # run-server.cmd looks for "%ProgramFiles%\nodejs\node.exe" first, so install there.
-  if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-  Move-Item $src.FullName $dest
+  #
+  # DELETE ONLY AFTER the replacement is in hand. This used to remove the existing install and
+  # THEN move the new one in, so any failure between the two -- a bad download, a failed expand,
+  # a half-written archive -- left the box with NO node at all. That is worse than the state it
+  # started in, and it is silent: the next thing to notice is run-server.cmd's window opening and
+  # closing in two seconds because `node` is not a recognised command.
+  #
+  # Verify the new tree actually contains node.exe before touching the old one, then swap.
+  if (-not (Test-Path (Join-Path $src.FullName 'node.exe'))) {
+    throw "expanded Node archive at $($src.FullName) has no node.exe -- refusing to replace a working install"
+  }
+  if (Test-Path $dest) {
+    $old = "$dest.old-$PID"
+    Rename-Item $dest $old -Force
+    try {
+      Move-Item $src.FullName $dest
+      Remove-Item $old -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {
+      # Put it back rather than leaving the box with nothing.
+      if (Test-Path $old) { Rename-Item $old $dest -Force }
+      throw
+    }
+  } else {
+    Move-Item $src.FullName $dest
+  }
   OK "node installed to $dest ($($rel.version))"
 }
 
