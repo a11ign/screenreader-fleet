@@ -588,7 +588,12 @@ $nodeForTask = @(
 if (-not $nodeForTask) { $nodeForTask = (Get-Command node -ErrorAction SilentlyContinue).Source }
 if (-not $nodeForTask) { throw 'node.exe not found -- cannot register a worker task that would fail at launch' }
 OK "worker will run: $nodeForTask"
-$action    = New-ScheduledTaskAction -Execute $cmd -Argument "`"$nodeForTask`"
+# The path is quoted because it contains spaces. Built as a separate variable rather than
+# nested backtick-escaped quotes inside an interpolated string: the escaped form is easy to
+# get wrong and, when wrong, swallows the NEXT line into the string -- which is exactly what
+# happened, producing a parse error about a variable reference two lines further down.
+$nodeArg   = '"' + $nodeForTask + '"'
+$action    = New-ScheduledTaskAction -Execute $cmd -Argument $nodeArg
 $principal = New-ScheduledTaskPrincipal -UserId $account -LogonType Interactive -RunLevel Limited
 # An at-logon trigger is what makes the worker self-healing across reboots. Without
 # it the task sits at "Ready" forever and the machine looks dead after a restart.
