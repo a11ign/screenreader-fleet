@@ -356,6 +356,53 @@ if ($tp -eq $true) {
 }
 
 # ---------------------------------------------------------------------------
+Step 7a 'Never sleep, and keep the NIC awake'
+
+# A worker that sleeps is a worker that has vanished, and this is BARE-METAL ONLY: VMs do not
+# sleep, so the whole fleet ran for months without needing it. On the first physical box it
+# presented as `EHOSTUNREACH REDACTED-INTERNAL-ADDRESS:8765` for every request in an evidence-check run --
+# 48 instant failures -- and then answered a curl 30 seconds later. Intermittent unreachability
+# reads as a flaky network or a wedged worker; it was Windows power management doing its job.
+#
+# Two separate mechanisms, and fixing only one leaves the fault intermittent:
+#   - the sleep/hibernate timers put the whole machine away
+#   - the NIC's own selective suspend powers the adapter down while the OS stays up
+try {
+  # 0 = never. AC only: these boxes have no battery, and a laptop-based worker sleeping on
+  # battery is correct behaviour rather than a fault.
+  foreach ($setting in @('standby-timeout-ac', 'hibernate-timeout-ac', 'disk-timeout-ac')) {
+    Invoke-Native 'powercfg.exe' @('/change', $setting, '0') "powercfg $setting" 1
+  }
+  # Hibernation off entirely: it also reclaims hiberfil.sys, which is RAM-sized on a disk that
+  # holds a browser profile and an NVDA install.
+  & powercfg.exe /hibernate off 2>&1 | Out-Null
+  OK 'sleep, hibernate and disk timeouts disabled on AC'
+} catch {
+  Warn "powercfg failed ($($_.Exception.Message)) -- the worker may sleep and look unreachable"
+}
+
+try {
+  # "Allow the computer to turn off this device to save power" is ON by default on most NICs.
+  # Set-NetAdapterPowerManagement is not present on every SKU, so fall back to the registry
+  # value it writes: PnPCapabilities 24 = disable both power-down and wake-armed.
+  $adapters = Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' }
+  foreach ($a in $adapters) {
+    try {
+      Set-NetAdapterPowerManagement -Name $a.Name -AllowComputerToTurnOffDevice Disabled -ErrorAction Stop
+    } catch {
+      $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
+      Get-ChildItem $key -ErrorAction SilentlyContinue | Where-Object {
+        (Get-ItemProperty $_.PSPath -Name DriverDesc -ErrorAction SilentlyContinue).DriverDesc -eq $a.InterfaceDescription
+      } | ForEach-Object { Set-ItemProperty $_.PSPath -Name PnPCapabilities -Value 24 -Type DWord -Force }
+    }
+    OK "NIC '$($a.Name)' will not be powered down"
+  }
+  if (-not $adapters) { Warn 'no physical network adapter reported Up -- NIC power saving not checked' }
+} catch {
+  Warn "NIC power management not adjusted ($($_.Exception.Message))"
+}
+
+# ---------------------------------------------------------------------------
 Step 7b 'Durable browser capture profile'
 
 # browsers.mjs defaults this under %LOCALAPPDATA%, one directory PER BROWSER; A11Y_BROWSER_PROFILE
