@@ -176,9 +176,16 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
     Copy-Item $bootstrapSrc $bootstrapDst -Force
 
     Unregister-ScheduledTask -TaskName 'a11ybootstrap' -Confirm:$false -ErrorAction SilentlyContinue
+    # LOG IT. A scheduled task runs hidden, so without a redirect an unattended failure leaves
+    # nothing to read at all -- which is how this run became a guessing game. Transcript, not just
+    # stdout redirection, because PowerShell writes Write-Host to the host rather than stdout and
+    # the OK/Warn lines here are all Write-Host.
+    $bootstrapLog = Join-Path $shared 'bootstrap.log'
+    $inner = "Start-Transcript -Path '$bootstrapLog' -Append; " +
+             "try { & '$bootstrapDst' } finally { Stop-Transcript }"
     Register-ScheduledTask -TaskName 'a11ybootstrap' `
       -Action (New-ScheduledTaskAction -Execute 'powershell.exe' `
-                 -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$bootstrapDst`"") `
+                 -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$inner`"") `
       -Principal (New-ScheduledTaskPrincipal -UserId $WorkerAccount -LogonType Interactive -RunLevel Highest) `
       -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $WorkerAccount) `
       -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 1) -StartWhenAvailable) `
@@ -186,7 +193,8 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
     # The bootstrap unregisters this itself once it gets far enough to succeed, so it does not run
     # on every logon for ever -- see the note there about why continuous re-provisioning is a
     # different and more dangerous idea than finishing a first install.
-    OK "registered 'a11ybootstrap' -- it will finish setup automatically at $WorkerAccount's first logon"
+    OK "registered 'a11ybootstrap' -- finishes setup at $WorkerAccount's first logon"
+    OK "its transcript will be at $bootstrapLog"
   } else {
     Warn 'bootstrap-windows-worker.ps1 not found in the repo -- cannot continue automatically.'
     Warn "After rebooting, run the bootstrap by hand as $WorkerAccount."
