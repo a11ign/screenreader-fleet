@@ -111,6 +111,9 @@ $elevatedEarly = (New-Object Security.Principal.WindowsPrincipal(
 # A Microsoft account cannot hold a blank password, and a blank password is what lets this fleet
 # auto-log-on with no credential stored anywhere. So the answer is a dedicated local account,
 # which is what the UTM guests already use.
+# Not 0 and not 1: "I did my job and the machine is restarting to continue as another user" is a
+# third outcome, and collapsing it into either of the other two makes the caller do the wrong thing.
+$EXIT_HANDOFF_REBOOT = 75
 $WorkerAccount = if ($env:A11Y_WORKER_ACCOUNT) { $env:A11Y_WORKER_ACCOUNT } else { 'witness' }
 $me = $null
 try { $me = Get-LocalUser -Name $env:USERNAME -ErrorAction Stop } catch { }
@@ -189,19 +192,32 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
     Warn "After rebooting, run the bootstrap by hand as $WorkerAccount."
   }
 
-  throw @"
-STOPPING HERE ON PURPOSE -- nothing below would end up in the right profile.
+  Write-Host @"
 
-  '$WorkerAccount' now exists, is an administrator, has no password, and is the auto-logon user.
+--- Handing off to '$WorkerAccount' ---
 
-  Next:  REBOOT. Nothing else.
+  Nothing below this point would land in the right profile, so this run stops here.
 
-  The box logs in as '$WorkerAccount' on its own, the 'a11ybootstrap' task picks setup up
-  from here elevated, and it removes itself once it succeeds. Watch /health come up.
+  '$WorkerAccount' exists, is an administrator, has no password, and is the auto-logon user.
+  The 'a11ybootstrap' task will finish setup elevated at its first logon and then remove
+  itself. REBOOTING NOW -- no further input needed. Watch /health come up.
 
   This detour happens ONCE per machine, and not at all on a box whose autounattend.xml
   created a local account at install time.
 "@
+
+  # Reboot ourselves rather than telling somebody to. The whole point of this path is that it
+  # needs no operator, and "now go and restart it" is the manual step it exists to remove.
+  #
+  # 20s so the message is readable and an operator watching can Ctrl-C the shutdown if they
+  # were mid-something: `shutdown /a` aborts it.
+  Start-Process -FilePath 'shutdown.exe' -ArgumentList '/r', '/t', '20' -NoNewWindow
+
+  # A DISTINCT exit code, not 0 and not a throw. The caller must know this is a planned handoff:
+  #   - exit 0 would let the bootstrap continue to its final step, which UNREGISTERS
+  #     a11ybootstrap -- disarming the task we just armed, three lines after arming it.
+  #   - a throw reads as a failure in the log of a run that did exactly what it should.
+  exit $EXIT_HANDOFF_REBOOT
 }
 
 $elevated = $elevatedEarly

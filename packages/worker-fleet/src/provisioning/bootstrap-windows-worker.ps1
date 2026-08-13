@@ -247,7 +247,16 @@ if (-not $provision) { throw "provision-nvda-worker.ps1 not found anywhere under
 OK "provisioning script at $provision"
 $env:A11Y_REPO_PATH = $RepoPath
 & powershell -NoProfile -ExecutionPolicy Bypass -File $provision
-if ($LASTEXITCODE -ne 0) { throw "Provisioning failed (exit $LASTEXITCODE)." }
+$provisionExit = $LASTEXITCODE
+# 75 means provisioning created the local worker account, armed the a11ybootstrap task, and is
+# rebooting to continue as that user. It is NOT a failure, and we must not fall through to the
+# final step -- that unregisters a11ybootstrap, disarming the handoff we are relying on three
+# lines after arming it.
+if ($provisionExit -eq 75) {
+  OK 'provisioning handed off to the worker account; the machine is rebooting to continue'
+  exit 0
+}
+if ($provisionExit -ne 0) { throw "Provisioning failed (exit $provisionExit)." }
 
 # A fresh install needs ONE reboot before it can capture. Observed on two independent
 # clean builds: provisioning completes, /health answers, NVDA connects -- and every read
