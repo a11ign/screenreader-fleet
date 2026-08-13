@@ -19,9 +19,6 @@
 # either invocation mode:
 #   A11Y_REPO_PATH        checkout location (default %USERPROFILE%\a11y-witness)
 #   A11Y_PORT             worker port; must match the client's A11Y_WORKER (default 8765)
-#   A11Y_AUTOLOGON_PASSWORD  the console account's password. Set it in YOUR shell for the
-#                         length of this run; it is never written to the repo. Without it the
-#                         worker will not survive a reboot, and this script says so loudly.
 #   A11Y_TASK_NAME        scheduled-task name (default a11ysrv)
 #   A11Y_SKIP_NPM_INSTALL set to 1 to re-apply only OS/NVDA configuration
 
@@ -509,54 +506,80 @@ $gitSha = try { (git -C $RepoPath rev-parse --short HEAD 2>$null) } catch { $nul
 OK "provision revision stamped: $(Get-Content $stampPath)"
 
 # ---------------------------------------------------------------------------
-Step 8a 'Auto-logon (or this worker does not survive a reboot)'
+Step 8a 'Auto-logon with NO stored credential'
 
 # NVDA needs a logged-on console session, and a11ysrv triggers AT LOGON. Without auto-logon a
-# restarted box sits at the login screen and never serves -- indistinguishable, from outside,
-# from a dead machine.
+# rebooted box sits at the login screen and never serves -- indistinguishable, from outside, from
+# a dead machine. Every box in a fleet restarts, so this cannot be a manual step.
 #
-# This used to be a "next step this script deliberately does not do", on the grounds that it
-# needs a password which must not be baked into a checked-in script. That argues against putting
-# the PASSWORD in the repo; it does not argue against automating the STEP. Every other setting
-# here is an environment variable, and a manual step repeated per machine is one that gets missed
-# on machine seven -- which is this file's own rule about housekeeping.
+# NO PASSWORD IS STORED ANYWHERE, and that is the point rather than a shortcut. Auto-logon with a
+# real password means the secret exists in LSA, in the operator's shell, and in whatever
+# distributed it to ten machines. A local account with a BLANK password needs none of that: there
+# is no credential to leak, rotate or forget.
 #
-# Sysinternals Autologon rather than the Winlogon registry keys: it stores the secret ENCRYPTED
-# IN LSA, whereas DefaultPassword is world-readable plaintext for anyone who can read HKLM.
-$autoPassword = $env:A11Y_AUTOLOGON_PASSWORD
-if (-not $autoPassword) {
-  Warn 'A11Y_AUTOLOGON_PASSWORD is not set -- auto-logon NOT configured.'
-  Warn 'This worker will NOT come back after a reboot: it will sit at the login screen.'
-  Warn 'Re-run with $env:A11Y_AUTOLOGON_PASSWORD set, or configure Autologon by hand.'
+# The security maths favours it, which is not obvious and is worth writing down:
+#
+#   - Auto-logon ALREADY means the box boots to an unlocked desktop. Anyone with physical access
+#     owns that session whether the password is blank or forty characters. The marginal exposure
+#     of blanking it is close to zero.
+#   - Windows ships LimitBlankPasswordUse=1, which blocks blank-password accounts from NETWORK
+#     logon entirely -- no SMB, no RDP, no password-auth SSH. The account becomes console-only,
+#     which is strictly narrower than it was before.
+#   - SSH still works, because provisioning sets up KEY auth. Key auth is unaffected by this.
+#
+# It is verified below rather than assumed, because "blank password" is only safe while
+# LimitBlankPasswordUse holds.
+$account = $null
+try { $account = Get-LocalUser -Name $env:USERNAME -ErrorAction Stop } catch { }
+
+if (-not $account) {
+  Warn "no LOCAL account named '$env:USERNAME' -- auto-logon NOT configured."
+  Warn 'A Microsoft or domain account cannot hold a blank password. Create a local account for the'
+  Warn 'worker (the UTM guests use one called `witness`) and re-provision under it.'
+  Warn 'AS IT STANDS THIS WORKER WILL NOT COME BACK AFTER A REBOOT.'
+} elseif ($account.PrincipalSource -and $account.PrincipalSource -ne 'Local') {
+  Warn "'$env:USERNAME' is a $($account.PrincipalSource) account, not Local -- auto-logon NOT configured."
+  Warn 'AS IT STANDS THIS WORKER WILL NOT COME BACK AFTER A REBOOT.'
 } else {
   try {
-    $tools = Join-Path $env:TEMP 'a11y-autologon'
-    New-Item -ItemType Directory -Force -Path $tools | Out-Null
-    $zip = Join-Path $tools 'AutoLogon.zip'
-    $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/AutoLogon.zip' -OutFile $zip -UseBasicParsing
-    Expand-Archive -Path $zip -DestinationPath $tools -Force
-    # No ARM64 build is published; the 32-bit binary runs under emulation there.
-    $exe = @('Autologon64.exe', 'Autologon.exe') |
-      ForEach-Object { Join-Path $tools $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $exe) { throw 'no Autologon binary in the Sysinternals archive' }
+    # An empty SecureString IS the blank password; there is no separate "clear" verb.
+    Set-LocalUser -Name $env:USERNAME -Password (New-Object System.Security.SecureString) -ErrorAction Stop
+    # Never expires: a worker that stops logging in because a password aged out is the same
+    # outage arriving on a timer.
+    Set-LocalUser -Name $env:USERNAME -PasswordNeverExpires $true -ErrorAction SilentlyContinue
 
-    # The password is passed as an argument to a local process. It is NOT written to the repo,
-    # and Autologon puts it in LSA rather than the registry -- but it is visible in this process
-    # tree while it runs, so run provisioning on a box you control.
-    & $exe -accepteula $env:USERNAME $env:COMPUTERNAME $autoPassword | Out-Null
-    Remove-Item $tools -Recurse -Force -ErrorAction SilentlyContinue
-
-    # Verify by the MARK, not by the absence of an error: Autologon exits 0 in cases where it did
-    # not take. AutoAdminLogon=1 is the thing Winlogon actually reads at boot.
     $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-    $set = (Get-ItemProperty $winlogon -Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon
-    $who = (Get-ItemProperty $winlogon -Name DefaultUserName -ErrorAction SilentlyContinue).DefaultUserName
-    if ("$set" -ne '1') { throw "Autologon ran but AutoAdminLogon is '$set', not 1" }
-    OK "auto-logon enabled for $who (secret in LSA, not the registry)"
+    Set-ItemProperty $winlogon -Name AutoAdminLogon  -Value '1'               -Type String -Force
+    Set-ItemProperty $winlogon -Name DefaultUserName -Value $env:USERNAME     -Type String -Force
+    Set-ItemProperty $winlogon -Name DefaultDomainName -Value $env:COMPUTERNAME -Type String -Force
+    # Any leftover DefaultPassword would be world-readable plaintext, and AutoLogonCount makes
+    # auto-logon one-shot -- it decrements to zero and then the box silently stops coming back.
+    foreach ($dead in @('DefaultPassword', 'AutoLogonCount')) {
+      Remove-ItemProperty $winlogon -Name $dead -ErrorAction SilentlyContinue
+    }
+
+    # Verify by the MARKS Winlogon actually reads, not by the absence of an exception.
+    $w = Get-ItemProperty $winlogon -ErrorAction Stop
+    if ("$($w.AutoAdminLogon)" -ne '1')        { throw "AutoAdminLogon is '$($w.AutoAdminLogon)', not 1" }
+    if ("$($w.DefaultUserName)" -ne "$env:USERNAME") { throw "DefaultUserName is '$($w.DefaultUserName)'" }
+    if ($w.PSObject.Properties.Name -contains 'DefaultPassword') { throw 'DefaultPassword still present' }
+    OK "auto-logon enabled for $env:USERNAME with NO stored credential"
+
+    # The guard that makes a blank password narrow rather than wide. 1 (or absent, which defaults
+    # to 1) confines the account to console logon. If somebody has set it to 0, say so loudly --
+    # that combination really would be a blank-password account reachable over the network.
+    $lanman = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+    $limit = (Get-ItemProperty $lanman -Name LimitBlankPasswordUse -ErrorAction SilentlyContinue).LimitBlankPasswordUse
+    if ($null -eq $limit -or "$limit" -eq '1') {
+      OK 'LimitBlankPasswordUse is on: this account cannot be used over the network'
+    } else {
+      Warn "LimitBlankPasswordUse is $limit -- a blank-password account IS reachable over the network."
+      Warn 'Set it back to 1 unless you know why it was changed.'
+    }
     Warn 'This box now boots to an UNLOCKED desktop. Correct for a lab worker on its own segment; not for anything else.'
   } catch {
-    Warn "auto-logon setup failed ($($_.Exception.Message)) -- this worker will not survive a reboot"
+    Warn "auto-logon setup failed ($($_.Exception.Message))"
+    Warn 'AS IT STANDS THIS WORKER WILL NOT COME BACK AFTER A REBOOT.'
   }
 }
 
@@ -619,10 +642,10 @@ Write-Host @"
 
 Next steps this script deliberately does NOT do:
 
-  1. VERIFY IT SURVIVES A REBOOT. Auto-logon is configured above when
-     A11Y_AUTOLOGON_PASSWORD is set -- but "it works now" says nothing about
-     whether it comes back, and every box in a fleet restarts. Reboot this one and
-     watch /health answer on its own before you call it provisioned.
+  1. VERIFY IT SURVIVES A REBOOT. Auto-logon is configured above, with no stored
+     credential -- but "it works now" says nothing about whether it comes back, and
+     every box in a fleet restarts. Reboot this one and watch /health answer on its
+     own before you call it provisioned.
 
   2. Prove capture end-to-end. From the control machine:
          curl http://<this-host>:$Port/health
