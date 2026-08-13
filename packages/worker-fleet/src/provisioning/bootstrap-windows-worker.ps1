@@ -128,7 +128,16 @@ $nodeHome = Join-Path $env:ProgramFiles 'nodejs'
 $nodeExe  = Join-Path $nodeHome 'node.exe'
 if ((Get-Command node -ErrorAction SilentlyContinue) -or (Test-Path $nodeExe)) {
   OK "node already present ($(& $(if (Test-Path $nodeExe) { $nodeExe } else { 'node' }) --version))"
-  Record 'node' 'already present'
+  # REPAIR the ACL even when we did not install it. An existing install may carry the permissions
+  # of whichever account put it there -- see the Move-Item note below -- and a re-run that skips
+  # the install would otherwise never fix a box that is already broken. Idempotent, so it costs
+  # nothing to do every time, and it makes "run it again" a real remedy rather than a hope.
+  if (Test-Path $nodeHome) {
+    icacls $nodeHome /reset /T /C /Q | Out-Null
+    Record 'node' 'already present (permissions reset)'
+  } else {
+    Record 'node' 'already present'
+  }
 }
 else {
   Record 'node' 'installed'
