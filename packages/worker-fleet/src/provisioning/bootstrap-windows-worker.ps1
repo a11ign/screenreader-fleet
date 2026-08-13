@@ -252,11 +252,20 @@ $provisionExit = $LASTEXITCODE
 # rebooting to continue as that user. It is NOT a failure, and we must not fall through to the
 # final step -- that unregisters a11ybootstrap, disarming the handoff we are relying on three
 # lines after arming it.
+# A FLAG, not `exit`. This script is designed to be run as `irm <url> | iex`, and Invoke-Expression
+# evaluates in the CALLER's session -- so `exit` here does not end the script, it terminates the
+# operator's entire PowerShell window. Which it did.
+#
+# `return` would work in both invocation modes, but its behaviour under iex is exactly the kind of
+# thing that is obvious right up until it is wrong, and there is no way to test PowerShell from the
+# machine this is written on. A guarded block cannot be ambiguous.
+$handedOff = $false
 if ($provisionExit -eq 75) {
   OK 'provisioning handed off to the worker account; the machine is rebooting to continue'
-  exit 0
+  $handedOff = $true
+} elseif ($provisionExit -ne 0) {
+  throw "Provisioning failed (exit $provisionExit)."
 }
-if ($provisionExit -ne 0) { throw "Provisioning failed (exit $provisionExit)." }
 
 # A fresh install needs ONE reboot before it can capture. Observed on two independent
 # clean builds: provisioning completes, /health answers, NVDA connects -- and every read
@@ -268,76 +277,82 @@ if ($provisionExit -ne 0) { throw "Provisioning failed (exit $provisionExit)." }
 # settling, or first-logon shell state holding the foreground) and is not yet pinned down.
 # The remedy is reliable and reproducible, so take it: auto-logon plus the at-logon trigger
 # bring the worker back on their own, ~65s later.
-Step 6 'Reboot to finish (a fresh install cannot capture until it has restarted once)'
+# Skipped entirely on the handoff path: provisioning has already armed a11ybootstrap and
+# scheduled the reboot, and the block below would UNREGISTER that task -- dismantling the
+# handoff moments after it was set up.
+if (-not $handedOff) {
+  Step 6 'Reboot to finish (a fresh install cannot capture until it has restarted once)'
 
-# What this run actually did. On a re-run most lines should read "already present", and the
-# ones that do not are what changed -- without this, a second run looks identical to the first
-# and you cannot tell whether it fixed anything.
-Write-Host "`n    --- what this run did ---" -ForegroundColor Cyan
-foreach ($k in $script:outcomes.Keys) {
-  $v = $script:outcomes[$k]
-  $colour = if ("$v" -like 'FAILED*') { 'Red' } elseif ("$v" -like '*already*') { 'DarkGray' } else { 'Green' }
-  Write-Host ("    {0,-8} {1}" -f $k, $v) -ForegroundColor $colour
-}
-$failed = $script:outcomes.Keys | Where-Object { "$($script:outcomes[$_])" -like 'FAILED*' }
-if ($failed) { Warn "re-run this script to retry: $($failed -join ', ')" }
+  # What this run actually did. On a re-run most lines should read "already present", and the
+  # ones that do not are what changed -- without this, a second run looks identical to the first
+  # and you cannot tell whether it fixed anything.
+  Write-Host "`n    --- what this run did ---" -ForegroundColor Cyan
+  foreach ($k in $script:outcomes.Keys) {
+    $v = $script:outcomes[$k]
+    $colour = if ("$v" -like 'FAILED*') { 'Red' } elseif ("$v" -like '*already*') { 'DarkGray' } else { 'Green' }
+    Write-Host ("    {0,-8} {1}" -f $k, $v) -ForegroundColor $colour
+  }
+  $failed = $script:outcomes.Keys | Where-Object { "$($script:outcomes[$_])" -like 'FAILED*' }
+  if ($failed) { Warn "re-run this script to retry: $($failed -join ', ')" }
 
-# Remove the first-run continuation task, if provisioning left one. Getting this far means setup
-# succeeded, and leaving it armed would re-run the whole bootstrap at EVERY logon.
-#
-# That is not merely untidy, it is a boot loop: this script reboots when /health is not answering,
-# and /health is never answering at the moment a logon task fires. Run once, then disarm.
-#
-# Deliberately NOT turned into a general update-on-boot mechanism, tempting as that is. Three
-# reasons, all of which matter more than the convenience:
-#   - `workerCode` is recorded on every capture so you know what produced it. A worker that
-#     silently updates itself on reboot can span two code versions inside one corpus run, and the
-#     provenance stops meaning anything.
-#   - `worker:deploy` exists and VERIFIES over /health.code, which shares no failure mode with the
-#     push. An unattended self-update has no such check.
-#   - one bad push would then brick every box in the fleet at its next restart, simultaneously.
-if (Get-ScheduledTask -TaskName 'a11ybootstrap' -ErrorAction SilentlyContinue) {
-  Unregister-ScheduledTask -TaskName 'a11ybootstrap' -Confirm:$false -ErrorAction SilentlyContinue
-  OK "removed the 'a11ybootstrap' first-run task -- setup is complete, it will not run again"
-  Record 'first-run task' 'removed'
-}
+  # Remove the first-run continuation task, if provisioning left one. Getting this far means setup
+  # succeeded, and leaving it armed would re-run the whole bootstrap at EVERY logon.
+  #
+  # That is not merely untidy, it is a boot loop: this script reboots when /health is not answering,
+  # and /health is never answering at the moment a logon task fires. Run once, then disarm.
+  #
+  # Deliberately NOT turned into a general update-on-boot mechanism, tempting as that is. Three
+  # reasons, all of which matter more than the convenience:
+  #   - `workerCode` is recorded on every capture so you know what produced it. A worker that
+  #     silently updates itself on reboot can span two code versions inside one corpus run, and the
+  #     provenance stops meaning anything.
+  #   - `worker:deploy` exists and VERIFIES over /health.code, which shares no failure mode with the
+  #     push. An unattended self-update has no such check.
+  #   - one bad push would then brick every box in the fleet at its next restart, simultaneously.
+  if (Get-ScheduledTask -TaskName 'a11ybootstrap' -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName 'a11ybootstrap' -Confirm:$false -ErrorAction SilentlyContinue
+    OK "removed the 'a11ybootstrap' first-run task -- setup is complete, it will not run again"
+    Record 'first-run task' 'removed'
+  }
 
-# Only reboot if the worker is not ALREADY answering. The reboot exists because a freshly
-# installed Windows cannot capture until it has restarted once -- it is not a general remedy,
-# and rebooting a healthy box on every re-run turns "run it again to fix one step" into an
-# outage. Checked over HTTP because that is the channel the worker actually serves on.
-$alreadyServing = $false
-# `if/else`, not the `? :` ternary: this runs on Windows PowerShell 5.1, where the ternary is a
-# PARSE error -- so it would not fail at this line, it would refuse to load the whole script.
-$workerPort = if ($env:A11Y_PORT) { $env:A11Y_PORT } else { 8765 }
-try {
-  $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$workerPort/health" -UseBasicParsing -TimeoutSec 3
-  $alreadyServing = $probe.StatusCode -eq 200
-} catch {
-  # Not answering is the normal case on a first run; it is why we are about to reboot.
-}
-if ($alreadyServing) {
-  OK 'worker is already serving /health -- skipping the reboot'
-} else {
-  OK 'rebooting now; the worker restarts itself via auto-logon + the at-logon task'
-  Start-Process -FilePath 'shutdown.exe' -ArgumentList '/r','/t','5' -NoNewWindow
-}
+  # Only reboot if the worker is not ALREADY answering. The reboot exists because a freshly
+  # installed Windows cannot capture until it has restarted once -- it is not a general remedy,
+  # and rebooting a healthy box on every re-run turns "run it again to fix one step" into an
+  # outage. Checked over HTTP because that is the channel the worker actually serves on.
+  $alreadyServing = $false
+  # `if/else`, not the `? :` ternary: this runs on Windows PowerShell 5.1, where the ternary is a
+  # PARSE error -- so it would not fail at this line, it would refuse to load the whole script.
+  $workerPort = if ($env:A11Y_PORT) { $env:A11Y_PORT } else { 8765 }
+  try {
+    $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$workerPort/health" -UseBasicParsing -TimeoutSec 3
+    $alreadyServing = $probe.StatusCode -eq 200
+  } catch {
+    # Not answering is the normal case on a first run; it is why we are about to reboot.
+  }
+  if ($alreadyServing) {
+    OK 'worker is already serving /health -- skipping the reboot'
+  } else {
+    OK 'rebooting now; the worker restarts itself via auto-logon + the at-logon task'
+    Start-Process -FilePath 'shutdown.exe' -ArgumentList '/r','/t','5' -NoNewWindow
+  }
 
-Write-Host @"
+  Write-Host @"
 
---- Bootstrap complete ---
+  --- Bootstrap complete ---
 
-Reach it from your Mac:
+  Reach it from your Mac:
 
-  ssh-copy-id is not on Windows; append your public key to:
-      C:\Users\$env:USERNAME\.ssh\authorized_keys
-  (for an ADMIN account Windows uses C:\ProgramData\ssh\administrators_authorized_keys
-   instead -- a very common reason key auth silently fails on Windows)
+    ssh-copy-id is not on Windows; append your public key to:
+        C:\Users\$env:USERNAME\.ssh\authorized_keys
+    (for an ADMIN account Windows uses C:\ProgramData\ssh\administrators_authorized_keys
+     instead -- a very common reason key auth silently fails on Windows)
 
-  Then, from the Mac:
-      A11Y_WORKER=http://<vm-ip>:8765 npm run witness -- https://example.com --task "..."
+    Then, from the Mac:
+        A11Y_WORKER=http://<vm-ip>:8765 npm run witness -- https://example.com --task "..."
 
-Remaining manual step: auto-logon, so the interactive session survives a reboot.
-provision-nvda-worker.ps1 prints the exact command; it needs a password, so it is
-deliberately not automated here.
+  Auto-logon, so the interactive session survives a reboot:
+  Auto-logon is configured automatically and needs NO password: provisioning gives the
+  console account a blank password, which LimitBlankPasswordUse confines to console
+  logon only.
 "@
+}
