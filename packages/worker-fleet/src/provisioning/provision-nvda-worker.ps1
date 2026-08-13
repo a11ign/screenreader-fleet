@@ -132,9 +132,12 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
     Set-LocalUser -Name $WorkerAccount -Password $blank -PasswordNeverExpires $true
     OK "local account '$WorkerAccount' already existed; password blanked"
   } else {
+    # -Description is capped at 48 characters by a ValidateLength attribute, and going over it
+    # fails argument binding rather than truncating -- "Cannot validate argument on parameter
+    # 'Description'", which does not mention a length. This one is 43.
     New-LocalUser -Name $WorkerAccount -NoPassword `
       -FullName 'a11y-witness capture worker' `
-      -Description 'Console-only worker account. No password by design.' | Out-Null
+      -Description 'Console-only worker. No password by design.' | Out-Null
     # Separate call: -PasswordNeverExpires lives in a different parameter set from -NoPassword,
     # so combining them fails to bind rather than doing what it reads like.
     Set-LocalUser -Name $WorkerAccount -PasswordNeverExpires $true -ErrorAction SilentlyContinue
