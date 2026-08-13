@@ -273,6 +273,26 @@ foreach ($k in $script:outcomes.Keys) {
 $failed = $script:outcomes.Keys | Where-Object { "$($script:outcomes[$_])" -like 'FAILED*' }
 if ($failed) { Warn "re-run this script to retry: $($failed -join ', ')" }
 
+# Remove the first-run continuation task, if provisioning left one. Getting this far means setup
+# succeeded, and leaving it armed would re-run the whole bootstrap at EVERY logon.
+#
+# That is not merely untidy, it is a boot loop: this script reboots when /health is not answering,
+# and /health is never answering at the moment a logon task fires. Run once, then disarm.
+#
+# Deliberately NOT turned into a general update-on-boot mechanism, tempting as that is. Three
+# reasons, all of which matter more than the convenience:
+#   - `workerCode` is recorded on every capture so you know what produced it. A worker that
+#     silently updates itself on reboot can span two code versions inside one corpus run, and the
+#     provenance stops meaning anything.
+#   - `worker:deploy` exists and VERIFIES over /health.code, which shares no failure mode with the
+#     push. An unattended self-update has no such check.
+#   - one bad push would then brick every box in the fleet at its next restart, simultaneously.
+if (Get-ScheduledTask -TaskName 'a11ybootstrap' -ErrorAction SilentlyContinue) {
+  Unregister-ScheduledTask -TaskName 'a11ybootstrap' -Confirm:$false -ErrorAction SilentlyContinue
+  OK "removed the 'a11ybootstrap' first-run task -- setup is complete, it will not run again"
+  Record 'first-run task' 'removed'
+}
+
 # Only reboot if the worker is not ALREADY answering. The reboot exists because a freshly
 # installed Windows cannot capture until it has restarted once -- it is not a general remedy,
 # and rebooting a healthy box on every re-run turns "run it again to fix one step" into an

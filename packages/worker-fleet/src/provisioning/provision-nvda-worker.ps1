@@ -156,17 +156,51 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
   }
   OK "auto-logon now points at '$WorkerAccount' with no stored credential"
 
+  # Continue AUTOMATICALLY at that account's first logon, rather than leaving a manual step.
+  #
+  # A scheduled task, not RunOnce or a Startup shortcut: those run without elevation, and the rest
+  # of provisioning needs it for the firewall, Edge policy and task registration. -RunLevel Highest
+  # is the only mechanism here that gets an elevated, INTERACTIVE session -- which NVDA needs too.
+  #
+  # The script is copied to ProgramData rather than run from the old profile: `witness` is an
+  # administrator and could read C:\Users\borem\..., but a machine-wide appliance should not depend
+  # on the profile of the human who happened to unbox it.
+  $bootstrapSrc = Resolve-RepoFile 'bootstrap-windows-worker.ps1'
+  if ($bootstrapSrc) {
+    $shared = 'C:\ProgramData\a11y-witness'
+    New-Item -ItemType Directory -Force -Path $shared | Out-Null
+    $bootstrapDst = Join-Path $shared 'bootstrap.ps1'
+    Copy-Item $bootstrapSrc $bootstrapDst -Force
+
+    Unregister-ScheduledTask -TaskName 'a11ybootstrap' -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName 'a11ybootstrap' `
+      -Action (New-ScheduledTaskAction -Execute 'powershell.exe' `
+                 -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$bootstrapDst`"") `
+      -Principal (New-ScheduledTaskPrincipal -UserId $WorkerAccount -LogonType Interactive -RunLevel Highest) `
+      -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $WorkerAccount) `
+      -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 1) -StartWhenAvailable) `
+      -Force | Out-Null
+    # The bootstrap unregisters this itself once it gets far enough to succeed, so it does not run
+    # on every logon for ever -- see the note there about why continuous re-provisioning is a
+    # different and more dangerous idea than finishing a first install.
+    OK "registered 'a11ybootstrap' -- it will finish setup automatically at $WorkerAccount's first logon"
+  } else {
+    Warn 'bootstrap-windows-worker.ps1 not found in the repo -- cannot continue automatically.'
+    Warn "After rebooting, run the bootstrap by hand as $WorkerAccount."
+  }
+
   throw @"
 STOPPING HERE ON PURPOSE -- nothing below would end up in the right profile.
 
   '$WorkerAccount' now exists, is an administrator, has no password, and is the auto-logon user.
 
-  Next:  1. Reboot. You will be logged in as '$WorkerAccount' automatically.
-         2. Run the bootstrap again in an elevated PowerShell there.
+  Next:  REBOOT. Nothing else.
 
-  Everything provisions under that profile and auto-logon is already correct, so that run
-  finishes. This detour happens ONCE per machine, and not at all on a box whose
-  autounattend.xml created a local account at install time.
+  The box logs in as '$WorkerAccount' on its own, the 'a11ybootstrap' task picks setup up
+  from here elevated, and it removes itself once it succeeds. Watch /health come up.
+
+  This detour happens ONCE per machine, and not at all on a box whose autounattend.xml
+  created a local account at install time.
 "@
 }
 
