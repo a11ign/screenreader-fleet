@@ -71,7 +71,32 @@ $ProgressPreference = 'SilentlyContinue'   # or Invoke-WebRequest crawls
 # The three projects spell the same architecture three different ways, which is exactly
 # the kind of thing that looks right in review and 404s at runtime -- so each mapping is
 # named rather than derived.
-$osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLower()
+function Get-OsArchitecture {
+  # RuntimeInformation is the RIGHT answer and is NOT reliably available here. This script is
+  # run via `irm | iex`, which means Windows PowerShell 5.1 on .NET Framework, where the
+  # System.Runtime.InteropServices.RuntimeInformation assembly is not loaded by default -- so
+  # the static property yields $null and `.ToString()` on it dies with "You cannot call a
+  # method on a null-valued expression", an error that names neither the variable nor the
+  # line. Try it, never depend on it.
+  try {
+    $ri = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    if ($ri) { return $ri.ToString().ToLower() }
+  } catch {
+    # Type not resolvable on this runtime. Fall through to the environment.
+  }
+  # PROCESSOR_ARCHITEW6432 is set ONLY inside a 32-bit process on a 64-bit OS, and it carries
+  # the OS architecture -- so reading it first is what makes this report the machine rather
+  # than the process. Preserving that distinction is the entire reason for preferring
+  # RuntimeInformation in the first place; the fallback must not quietly lose it.
+  $pa = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+  switch ($pa) {
+    'AMD64' { return 'x64' }
+    'ARM64' { return 'arm64' }
+    'x86'   { return 'x86' }
+    default { return "$pa".ToLower() }   # quoted: .ToLower() on a $null would repeat the bug
+  }
+}
+$osArch = Get-OsArchitecture
 if ($osArch -notin @('x64', 'arm64')) { throw "unsupported architecture '$osArch' (expected x64 or arm64)" }
 $nodeArch    = $osArch                                              # node-vX-win-x64.zip   / -win-arm64.zip
 $minGitArch  = if ($osArch -eq 'x64') { '64-bit' } else { 'arm64' } # MinGit-X-64-bit.zip   / -arm64.zip
@@ -95,6 +120,10 @@ else {
   Get-Archive "https://nodejs.org/dist/$($rel.version)/node-$($rel.version)-win-$nodeArch.zip" $zip
   Expand-Archive -Path $zip -DestinationPath $tmp -Force
   $src = Get-ChildItem $tmp -Directory -Filter "node-*-win-$nodeArch" | Select-Object -First 1
+  # Named, because `$src.FullName` on a $null gives the same useless "null-valued expression"
+  # as the bug above. If Node ever changes its archive's top-level directory name, this must
+  # say WHICH expectation broke.
+  if (-not $src) { throw "expanded Node archive has no 'node-*-win-$nodeArch' directory under $tmp" }
   $dest = Join-Path $env:ProgramFiles 'nodejs'
   # run-server.cmd looks for "%ProgramFiles%\nodejs\node.exe" first, so install there.
   if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
