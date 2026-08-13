@@ -4,7 +4,7 @@
 # VERDICT per layer rather than raw dumps, so the first FAIL is the thing to fix.
 # Exits non-zero if any check failed. Copy it over and run it with -File:
 #
-#   scp scripts/diagnose-nvda-worker.ps1 user@host:C:/Users/user/
+#   scp packages/worker-fleet/src/provisioning/diagnose-nvda-worker.ps1 user@host:C:/Users/user/
 #   ssh user@host "powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\user\diagnose-nvda-worker.ps1"
 #
 # Do NOT pipe this to `powershell -Command -`. That mode silently truncated this

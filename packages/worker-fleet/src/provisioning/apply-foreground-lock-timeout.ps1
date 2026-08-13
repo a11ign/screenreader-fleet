@@ -10,7 +10,7 @@
 # foreground, so NVDA has nothing to read. The capture then returns 0 phrases with NO
 # error anywhere -- nvda.start() succeeds, windowsActivate reports ok, and every read comes
 # back empty. It is the single most misleading failure in the pipeline, and
-# src/capture/nvda/README.md calls it the #1 flakiness fix.
+# packages/nvda-worker/README.md calls it the #1 flakiness fix.
 #
 # MUST run in the interactive desktop session. Per the API docs, "the calling thread must
 # be able to change the foreground window, otherwise the call fails" -- so running this as
@@ -22,7 +22,7 @@
 # and run-server.cmd (so every worker start re-applies it for that session).
 #
 # Style note: `#` line comments and no param() block, matching the other scripts here --
-# see scripts/diagnose-nvda-worker.ps1 for why.
+# see packages/worker-fleet/src/provisioning/diagnose-nvda-worker.ps1 for why.
 
 $ErrorActionPreference = 'Stop'
 

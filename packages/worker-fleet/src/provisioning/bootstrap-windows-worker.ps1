@@ -174,7 +174,7 @@ Step 3 'Install the OpenSSH server (best effort)'
 # channel. SSH is a convenience, so a failure here must not abort provisioning.
 #
 # Deliberately NOT Add-WindowsCapability: that route can stall indefinitely on Windows
-# Update (documented in src/capture/nvda/README.md). Use the Win32-OpenSSH release.
+# Update (documented in packages/nvda-worker/README.md). Use the Win32-OpenSSH release.
 try {
   if (Get-Service sshd -ErrorAction SilentlyContinue) { OK 'sshd already present'; Record 'sshd' 'already present' }
   else {

@@ -23,7 +23,7 @@
   strictly better than disabling it.
 
   Everything else that could be trimmed already has been, from the running guest, by
-  src/capture/nvda/windows-trim.mjs. That yielded ~60 MB, because this ARM64 image ships with exactly
+  packages/nvda-worker/src/windows-trim.mjs. That yielded ~60 MB, because this ARM64 image ships with exactly
   three provisioned Appx packages (Edge, DevHome, CrossDevice) and none of nano11's targets.
 
 .NOTES
@@ -90,7 +90,7 @@ $RemovableFeaturePatterns = @(
   'Windows-Defender-Client-Package'
 )
 
-# Provisioned Appx. Kept in sync with src/capture/nvda/windows-trim.mjs, which has the unit tests
+# Provisioned Appx. Kept in sync with packages/nvda-worker/src/windows-trim.mjs, which has the unit tests
 # proving Edge and the speech stack can never appear in a removal set.
 $RemovableAppxPrefixes = @(
   'Clipchamp.Clipchamp', 'Microsoft.BingNews', 'Microsoft.BingWeather', 'Microsoft.GamingApp',

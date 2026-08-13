@@ -321,7 +321,7 @@ Step 7 'Trim Windows background services and apps'
 # The list is nano11builder's technique with none of its choices: nano11 deletes Edge and
 # LanguageFeatures-Speech/-TextToSpeech (the browser we capture through and NVDA's `oneCore` synth), and
 # hardcodes amd64 package names while these guests are ARM64. So names are read from the guest, and
-# src/capture/nvda/windows-trim.mjs holds the authoritative allow/deny lists with the tests that keep
+# packages/nvda-worker/src/windows-trim.mjs holds the authoritative allow/deny lists with the tests that keep
 # Edge and the speech stack out of the removal set.
 $trimScript = Resolve-RepoFile 'windows-trim.mjs'
 $trimMarker = Join-Path $RepoPath '.windows-trimmed'
@@ -564,16 +564,29 @@ Write-Host @"
 
 Next steps this script deliberately does NOT do:
 
-  1. Auto-logon. NVDA needs a logged-on console session, so after a reboot the
-     worker cannot run until someone logs in. Enabling it requires a password,
-     which must not be baked into a checked-in script. Prefer Sysinternals
-     Autologon (stores the secret encrypted in LSA, not plaintext in the registry):
+  1. Auto-logon. NVDA needs a logged-on console session, so AFTER A REBOOT THIS
+     WORKER DOES NOT COME BACK until someone logs in -- it sits at the login screen
+     and the a11ysrv task, whose trigger is at-logon, never fires. On a headless
+     box that is indistinguishable from a dead one.
+
+     Enabling it requires a password, which must not be baked into a checked-in
+     script. Sysinternals Autologon stores the secret encrypted in LSA rather than
+     plaintext in the registry:
          .\Autologon.exe -accepteula $env:USERNAME $env:COMPUTERNAME <password>
      Run it on the console, or in your own shell, so the password is not recorded.
 
+     Trade-off, stated rather than assumed: the box then boots to an unlocked
+     desktop. For a lab worker on its own network segment that is the accepted
+     cost of NVDA needing a real session; it is not appropriate for a machine
+     holding anything else.
+
+     VERIFY IT by rebooting and watching /health come back on its own. "It works
+     now" says nothing about whether it survives a restart, and every one of these
+     boxes will restart.
+
   2. Prove capture end-to-end. From the control machine:
          curl http://<this-host>:$Port/health
-         node src/capture/nvda/capture-check.mjs     # on THIS box, in the console session
+         node packages/lab/src/harnesses/capture-check.mjs   # on THIS box, in the console session
 
-  3. Diagnose a broken worker: scripts/diagnose-nvda-worker.ps1
+  3. Diagnose a broken worker: packages/worker-fleet/src/provisioning/diagnose-nvda-worker.ps1
 "@
