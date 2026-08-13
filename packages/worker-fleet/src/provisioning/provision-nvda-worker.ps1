@@ -147,8 +147,18 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
     OK "created local account '$WorkerAccount'"
   }
   # Administrators because provisioning sets the firewall, Edge policy and a scheduled task.
+  #
+  # VERIFIED, not assumed. This was `-ErrorAction SilentlyContinue` followed by an unconditional
+  # OK saying the account was an administrator -- so a silent failure printed success, which is
+  # the exact shape this file has spent the day removing, written by me while removing it.
+  # It also matters beyond provisioning: sshd picks administrators_authorized_keys for a member
+  # of that group and the profile's own authorized_keys for anyone else, so getting this wrong
+  # makes key auth fail later with no error that mentions group membership.
   Add-LocalGroupMember -Group 'Administrators' -Member $WorkerAccount -ErrorAction SilentlyContinue
-  OK "'$WorkerAccount' is an administrator"
+  $inAdmins = Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "*\$WorkerAccount" }
+  if ($inAdmins) { OK "'$WorkerAccount' is an administrator" }
+  else { throw "could not add '$WorkerAccount' to Administrators -- provisioning needs it for the firewall, Edge policy and task registration" }
 
   $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
   Set-ItemProperty $winlogon -Name AutoAdminLogon    -Value '1'            -Type String -Force
