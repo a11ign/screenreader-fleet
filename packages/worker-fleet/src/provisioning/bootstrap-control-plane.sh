@@ -82,7 +82,60 @@ cd "$REPO_PATH"
 npm install --silent --no-audit --no-fund
 ok 'dependencies installed'
 
-step 4 'Baseline corpus'
+step 4 'Ansible, and the fleet key'
+# The control plane MANAGES the workers as well as capturing with them, and this script predates that
+# half entirely -- it installed node and a checkout and left you without the thing that provisions,
+# deploys, wakes and sleeps a box.
+#
+# pipx rather than apt: Windows-over-SSH support is ansible-core 2.18+, and Debian ships older. That
+# version gap is not cosmetic -- on an older core every Windows task fails at connection time.
+if command -v ansible-playbook >/dev/null; then
+  ok "ansible already present ($(ansible --version | head -1))"
+else
+  $SUDO apt-get install -y -qq pipx >/dev/null 2>&1 || $SUDO apt-get install -y -qq python3-pip >/dev/null
+  if command -v pipx >/dev/null; then
+    pipx install ansible-core >/dev/null
+    pipx ensurepath >/dev/null 2>&1 || true
+  else
+    $SUDO pip3 install --break-system-packages -q ansible-core
+  fi
+  export PATH="$HOME/.local/bin:$PATH"
+  ok "ansible installed ($(ansible --version 2>/dev/null | head -1))"
+fi
+
+# -p is load-bearing: ansible.cfg puts the repo's own collections path FIRST, so a bare install vendors
+# third-party collections into the git tree. Only a11y.worker belongs there.
+export PATH="$HOME/.local/bin:$PATH"
+if [ -f "$REPO_PATH/packages/worker-fleet/ansible/requirements.yml" ]; then
+  ansible-galaxy collection install -r "$REPO_PATH/packages/worker-fleet/ansible/requirements.yml" \
+    -p "$HOME/.ansible/collections" >/dev/null
+  ok 'collections installed (ansible.windows, community.windows, community.general)'
+else
+  warn 'requirements.yml not found -- is the checkout complete?'
+fi
+
+# The fleet's SSH key lives HERE, not on somebody's laptop. That is the whole point of moving the
+# control plane: a key on a Mac makes that Mac load-bearing again by a different route.
+#
+# Generated rather than copied, so this box is self-contained. The PUBLIC half is printed, because it
+# has to reach the workers -- serve-bootstrap.sh hands it to a PXE install, and ssh-key.yml installs it
+# on a box that is already up.
+FLEET_KEY="$HOME/.ssh/a11y-witness_ed25519"
+if [ -f "$FLEET_KEY" ]; then
+  ok "fleet key present ($(ssh-keygen -lf "$FLEET_KEY.pub" 2>/dev/null | awk '{print $2}'))"
+else
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  ssh-keygen -t ed25519 -N '' -C 'a11y-witness-capture-worker' -f "$FLEET_KEY" >/dev/null
+  ok "fleet key generated at $FLEET_KEY"
+fi
+echo
+echo "    The workers must trust this public key. Stage it into a PXE install with"
+echo "    serve-bootstrap.sh, or install it on a running box with ssh-key.yml:"
+echo
+echo "      $(cat "$FLEET_KEY.pub")"
+echo
+
+step 5 'Baseline corpus'
 # runs/ is gitignored — 2,122 captures worth hours of worker time, and the thing evidence:check
 # diffs against. Without it the control plane can capture but cannot COMPARE, and evidence:check
 # refuses rather than silently reporting that nothing changed.
@@ -97,7 +150,7 @@ else
   warn "Copy it once:  rsync -az <mac>:<repo>/runs/ $REPO_PATH/runs/"
 fi
 
-step 5 'Workers'
+step 6 'Workers'
 if [ -z "${A11Y_WORKERS:-}" ]; then
   warn 'A11Y_WORKERS is not set. Without it the orchestrator looks for LOCAL VMs, which do not'
   warn 'exist here — that path is macOS/UTM only. Set it to your bare-metal workers:'
@@ -117,7 +170,7 @@ else
   [ "$reachable" -gt 0 ] || warn 'no worker answered /health — a run would fail immediately'
 fi
 
-step 6 'This host as the workers see it'
+step 7 'This host as the workers see it'
 # The page server must be addressed by LAN IP, never localhost: a worker cannot reach our
 # loopback, and a capture that fetches the wrong URL reads an error page and records it as
 # evidence rather than failing.
@@ -132,12 +185,29 @@ cat <<EOF
 
 --- Control plane ready ---
 
-  export A11Y_WORKERS=${A11Y_WORKERS:-http://<worker-ip>:8765}
+  Find and adopt workers:
+    npm run fleet:discover                 # scan, and reconcile against inventory.yml
+    \$EDITOR packages/worker-fleet/ansible/inventory.yml     # ansible_host + mac per box
+    eval "\$(npm run --silent fleet:env)"   # A11Y_WORKERS, derived from that inventory
 
-  npm run doctor
-  npm run evidence:check -- \${A11Y_WORKERS%%,*}
-  npm run training:capture
+  Build one:
+    packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub
+
+  Manage them (from packages/worker-fleet/ansible):
+    ansible-playbook provision-role.yml -l <host> --check --diff
+    ansible-playbook deploy.yml
+    ansible-playbook wake.yml / sleep.yml
+
+  Capture:
+    npm run doctor
+    npm run fleet:status
+    npm run training:capture
 
 Nothing here depends on a Mac. Re-run this script any time; every step skips itself
 when it is already done, and the corpus and repo are updated in place.
+
+NOTE: this box must be on the SAME LAYER-2 SEGMENT as the workers. Wake-on-LAN magic
+packets are broadcast and do not route, so a NAT'd or separately-VLAN'd control plane
+can provision a worker over SSH and then be unable to wake it. On Proxmox that means a
+bridged veth on vmbr0, not the default NAT.
 EOF
