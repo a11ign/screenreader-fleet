@@ -296,13 +296,28 @@
           <Description>Disable screensaver (it steals foreground mid-capture)</Description>
           <CommandLine>reg add "HKCU\Control Panel\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f</CommandLine>
         </SynchronousCommand>
-        <!-- Hands off to first-boot.cmd, which waits for DHCP, plants the operator SSH key if one was
-             staged beside it, and runs the bootstrap elevated via a RunLevel Highest scheduled task.
-             After that the box is reachable by Ansible and no console visit is needed at all. -->
+        <!-- Fetch the payload over HTTP rather than looking for it on the install media.
+             ==================== SET THE ADDRESS BELOW BEFORE USE ====================
+             iVentoy injects files to X:, which is the WinPE RAM disk and is GONE by the time this runs,
+             so scanning drive letters (which the UTM path does, from a support ISO that stays attached)
+             finds nothing here. Fetching also means one small file to serve rather than a repacked ISO,
+             and this project already has scar tissue from El Torito boot catalogues.
+
+             The box PXE-booted from this host moments ago, so it can certainly reach it.
+             `serve-bootstrap.sh` on the control plane serves exactly these two files. -->
         <SynchronousCommand wcm:action="add">
           <Order>3</Order>
+          <Description>Fetch the bootstrap payload from the control plane</Description>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$h='http://REDACTED-INTERNAL-ADDRESS:8099'; $d='C:\a11y'; New-Item -ItemType Directory -Force $d | Out-Null; foreach($f in 'first-boot.cmd','bootstrap-windows-worker.ps1','operator-key.pub'){ for($i=0;$i -lt 60;$i++){ try{ Invoke-WebRequest -UseBasicParsing -Uri ($h+'/'+$f) -OutFile ($d+'\'+$f); break }catch{ Start-Sleep -Seconds 5 } } }"</CommandLine>
+        </SynchronousCommand>
+        <!-- Then hand off. first-boot.cmd waits for DHCP, stages the operator key, and runs the bootstrap
+             elevated via a RunLevel Highest scheduled task, because a UAC prompt here would render on the secure
+             desktop where no automation can reach it. After this the box is reachable by Ansible and needs
+             no console visit at all. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
           <Description>Run the worker bootstrap elevated, without a UAC prompt</Description>
-          <CommandLine>cmd /c for %i in (D E F G H) do if exist %i:\first-boot.cmd start /wait %i:\first-boot.cmd</CommandLine>
+          <CommandLine>cmd /c if exist C:\a11y\first-boot.cmd start /wait C:\a11y\first-boot.cmd</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
     </component>

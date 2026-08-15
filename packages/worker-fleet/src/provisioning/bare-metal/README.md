@@ -3,36 +3,69 @@
 PXE-boot a mini PC and it joins the fleet: Windows installs, `witness` logs in, sshd comes up with your
 key already installed, and the worker serves `/health`. **No console visit.**
 
-## What goes on the install media
+## How a box gets installed, end to end
 
-Alongside the Windows ISO contents, at the **root** of the media Windows Setup sees:
-
-| File | Where it comes from | Why |
-|---|---|---|
-| `autounattend.xml` | this directory | Setup reads it automatically from the root of removable media |
-| `first-boot.cmd` | `../../local-worker/first-boot.cmd` | waits for DHCP, stages the key, runs the bootstrap elevated |
-| `bootstrap-windows-worker.ps1` | `../bootstrap-windows-worker.ps1` | node, git, sshd, `DefaultShell`, the operator key, then hands off |
-| `operator-key.pub` | **your** public key — see below | what makes every later run unattended |
-
-```bash
-# Stage your PUBLIC key next to the others. It is not a secret, but it is yours, so it is staged at
-# build time rather than committed — a checked-in key would silently grant access to anyone in the repo.
-cp ~/.ssh/id_ed25519.pub /path/to/media/operator-key.pub
+```
+PXE  ->  iVentoy serves the Windows ISO + autounattend.xml
+     ->  Windows installs unattended, creates `witness`, auto-logs on
+     ->  FirstLogonCommands fetches 3 files over HTTP from the control plane
+     ->  first-boot.cmd waits for DHCP, stages the key, runs bootstrap elevated
+     ->  bootstrap installs node/git/sshd, sets DefaultShell, installs the operator key
+     ->  the box is reachable by Ansible. No console visit after the firmware step.
 ```
 
-Without `operator-key.pub` the box still installs and serves; it just needs
-`ansible-playbook ssh-key.yml -l <host> -e a11y_operator_key="$(cat ~/.ssh/id_ed25519.pub)"` once,
-from a control plane that can already reach it.
+### 1. At the machine, once — do both while you are there
 
-## Then
+Nothing can automate this: the box is off and has no OS to ask.
+
+- **Enable Wake-on-LAN** in firmware. Usually under Power Management; may be called *Wake on LAN/WLAN*,
+  *Power On By PCIe*, or *Resume by PCI-E Device*. On HP and Dell business desktops **Deep Sleep must
+  also be disabled** — it cuts the NIC's standby power and silently defeats WoL.
+- **Note the MAC.** It goes in `inventory.yml` and is the one fact about a box that cannot be discovered
+  while it is off.
+- Set it to network-boot.
+
+### 2. On the control plane, serve the payload
 
 ```bash
-# The box comes up with a DHCP address. Add it to the fleet — the ONE place a machine is defined.
-$EDITOR ../../../ansible/inventory.yml
-cd ../../../ansible && ansible-playbook provision.yml -l a11y-worker-N
+./serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub        # port 8099
 ```
 
-## Four things this file does differently from the UTM one, and why
+It refuses a private key, and it is not a service — Ctrl-C when the box is up.
+
+### 3. In iVentoy
+
+Point the Windows 11 x64 ISO's **Auto Install Script** at this directory's `autounattend.xml`, and set a
+non-zero boot timeout so the install starts without a keypress.
+
+**Edit the address in `autounattend.xml` first.** It has `http://REDACTED-INTERNAL-ADDRESS:8099` baked in; that must
+be the machine running `serve-bootstrap.sh`. The box PXE-booted from the iVentoy host moments earlier, so
+serving from there is the safe choice.
+
+### Why the files are fetched rather than injected
+
+iVentoy's file injection decompresses into **`X:`** — the WinPE RAM disk, which is gone by the time
+`FirstLogonCommands` runs. The UTM path can scan drive letters because its support ISO stays attached;
+nothing stays attached here. Rebuilding the install ISO to carry the files is the other option, and this
+project has already spent a day on El Torito boot catalogues and `0xc0000225` to earn the opinion that it
+is not worth it for three small files.
+
+### 4. Then, entirely remotely
+
+```bash
+$EDITOR ../../../ansible/inventory.yml          # add the box: ansible_host + mac
+cd ../../../ansible
+ansible a11y_workers -m ansible.windows.win_ping -l a11y-worker-N
+ansible-playbook provision-role.yml -l a11y-worker-N --check --diff
+ansible-playbook provision-role.yml -l a11y-worker-N
+ansible-playbook sleep.yml -l a11y-worker-N && ansible-playbook wake.yml -l a11y-worker-N
+```
+
+That last line is the point of the firmware step: WoL is only really verified by powering a box down and
+getting it back, and it is far better to find a wrong firmware setting while you are still next to the
+machine.
+
+## Four things this file does differently## Four things this file does differently from the UTM one, and why
 
 The sibling at `../../local-worker/autounattend.xml` is the proven recipe. This is that recipe on real
 hardware and a real network, and the differences are not cosmetic:
