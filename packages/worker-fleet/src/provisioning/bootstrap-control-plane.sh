@@ -183,8 +183,34 @@ else
 # A11Y_CORPUS_URL accepts either a git remote (preferred -- versioned, and every clone is a verified
 # copy) or a tar.gz URL, because a box without access to the private repo should still be able to be
 # handed a bundle.
+# A DEPLOY KEY for the corpus, separate from the fleet key on purpose. Two different things are being
+# authorised -- reading one private repo, and reconfiguring twelve Windows machines -- and one key for
+# both means revoking either revokes the other. GitHub also refuses the same deploy key on two repos.
+#
+# A Host alias rather than a bare IdentityFile, so this key is used for THIS clone and nothing else. On a
+# box with any other GitHub credential, ssh would otherwise offer keys in whatever order it likes and the
+# failure ("Permission denied (publickey)") says nothing about which one it tried.
+CORPUS_KEY="$HOME/.ssh/a11y-corpus_ed25519"
+if is_lab && [ ! -f "$CORPUS_KEY" ]; then
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  ssh-keygen -t ed25519 -N '' -C 'a11y-corpus deploy key (read-only)' -f "$CORPUS_KEY" >/dev/null
+  if ! grep -q 'Host a11y-corpus.github.com' "$HOME/.ssh/config" 2>/dev/null; then
+    printf 'Host a11y-corpus.github.com\n  HostName github.com\n  User git\n  IdentityFile %s\n  IdentitiesOnly yes\n' \
+      "$CORPUS_KEY" >> "$HOME/.ssh/config"
+    chmod 600 "$HOME/.ssh/config"
+  fi
+  echo
+  echo "    The corpus repo is PRIVATE. Add this as a READ-ONLY deploy key at"
+  echo "    https://github.com/DanBeckDev/a11y-corpus/settings/keys  (do NOT tick write access):"
+  echo
+  echo "      $(cat "$CORPUS_KEY.pub")"
+  echo
+  echo "    Then re-run this script; the clone below will pick it up."
+  echo
+fi
+
 CORPUS_DIR="$REPO_PATH/runs/screenreader-dataset"
-CORPUS_URL="${A11Y_CORPUS_URL:-git@github.com:DanBeckDev/a11y-corpus.git}"
+CORPUS_URL="${A11Y_CORPUS_URL:-git@a11y-corpus.github.com:DanBeckDev/a11y-corpus.git}"
 if [ -d "$CORPUS_DIR/captures" ]; then
   ok "corpus present ($(find "$CORPUS_DIR/captures" -name '*.json' | wc -l | tr -d ' ') captures)"
   # A checkout can be updated; an unpacked tarball cannot, and saying which is which beats guessing.
