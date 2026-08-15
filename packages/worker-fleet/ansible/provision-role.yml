@@ -1,20 +1,16 @@
 ---
 # Provision a worker with the ROLE rather than the PowerShell script.
 #
+#     ansible-playbook provision-role.yml -l a11y-worker-1 --check --diff   # look first
 #     ansible-playbook provision-role.yml -l a11y-worker-1
 #     ansible-playbook provision-role.yml -l a11y-worker-1 --tags policy    # one concern
 #
-# ## `--check` IS NOT SAFE ON THIS ROLE YET, and saying so is the point
+# ## `--check` is safe here, and was not
 #
-# Ansible's check mode is only as honest as its least honest task. Measured on this role: 15 `win_shell`
-# tasks are SKIPPED (the module declares `supports_check_mode = $false`), and 12 `win_powershell` tasks
-# RUN — that module supports check mode by passing `$Ansible.CheckMode` to the script, and none of these
-# scripts reads it. So `--check` would skip the harmless half and really uninstall OneDrive, really
-# change powercfg, really run npm install.
-#
-# The module-backed tasks (win_regedit, win_user, win_group_membership, win_scheduled_task,
-# win_firewall_rule, win_file) do honour it correctly, which is exactly the argument for turning the
-# remaining PowerShell into real modules rather than leaving it as inline script.
+# `win_powershell` SUPPORTS check mode by handing `$Ansible.CheckMode` to the script -- acting on it is
+# the script's job, and twelve tasks did not, so a dry run really uninstalled OneDrive and really changed
+# powercfg. The mutating ones are modules or guarded now; the `win_shell` tasks are skipped, which is
+# honest because they are commands rather than reconcilable state.
 #
 # ## Why this exists ALONGSIDE provision.yml rather than replacing it
 #

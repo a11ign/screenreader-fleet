@@ -48,40 +48,53 @@
       delegate_to: localhost
       run_once: true
 
-    # `win_powershell` rather than `win_shell`, and not by preference: `win_shell` is a FREE-FORM module, so
-    # Ansible parses the script as module arguments before it ever reaches the box. A PowerShell here-string
-    # (@' ... '@) reads as unbalanced quotes to that parser and the play fails with "failed at splitting
-    # arguments", which points at the YAML rather than at the quoting that caused it.
+    # Three stock modules instead of a PowerShell block, and this is the shape to prefer: no custom code
+    # at all, and every one of them honours `--check`, which the script did not. The script computed
+    # `changed` correctly but wrote unconditionally, so a dry run installed a key.
     #
-    # Passing the key as a PARAMETER instead of interpolating it into the script is the other half. A key
-    # is attacker-influenced text from this script's point of view, and Jinja-substituting it into source
-    # about to be executed is the shape of an injection even when the value is benign.
-    - name: Add the key to administrators_authorized_keys and lock the file down
+    # It also removes an injection shape. The key is attacker-influenced text from the script's point of
+    # view, and it was passed as a PARAMETER to avoid Jinja-substituting it into source about to be
+    # executed. A module argument is not source at all, so the question does not arise.
+    - name: Add the key to administrators_authorized_keys
+      # APPEND, never overwrite: another operator's key in this file is not ours to remove, and replacing
+      # it is how you lock a colleague out of a box they are mid-way through debugging. `regex` matches
+      # the key itself, so re-running is a no-op rather than a duplicate line.
       become: true
-      ansible.windows.win_powershell:
-        parameters:
-          Key: "{{ a11y_operator_key | trim }}"
-        script: |
-          param([string]$Key)
-          $ErrorActionPreference = 'Stop'
-          $path = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
-          if (-not (Test-Path $path)) { New-Item -ItemType File -Path $path -Force | Out-Null }
-          $existing = @(Get-Content -Path $path -ErrorAction SilentlyContinue)
-          if ($existing -contains $Key) {
-            $Ansible.Changed = $false
-            'present'
-          } else {
-            # Append, never overwrite: another operator's key in this file is not ours to remove, and
-            # replacing it is how you lock a colleague out of a box they are mid-way through debugging.
-            Add-Content -Path $path -Value $Key
-            $Ansible.Changed = $true
-            'added'
-          }
-          # sshd silently ignores this file if anyone but Administrators/SYSTEM can write it, and it does so
-          # without telling the client — so the ACL is part of installing a key, not a tidy-up afterwards.
-          icacls.exe $path /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null
+      community.windows.win_lineinfile:
+        path: '%ProgramData%\ssh\administrators_authorized_keys'
+        line: "{{ a11y_operator_key | trim }}"
+        regex: "^{{ a11y_operator_key | trim | regex_escape }}$"
+        state: present
+        create: true
+        # LF, not CRLF. sshd on Windows reads this file itself and is tolerant, but the file is also read
+        # by anything that greps it, and a mixed-ending authorized_keys is a needless thing to debug.
+        newline: unix
       register: key_install
+
+    # sshd silently IGNORES this file if anyone but Administrators/SYSTEM can write it — and it does so
+    # without telling the client, so the symptom is a permission denial that looks like a wrong key. The
+    # ACL is part of installing a key, not a tidy-up afterwards.
+    - name: Stop the key file inheriting anything
+      become: true
+      ansible.windows.win_acl_inheritance:
+        path: '%ProgramData%\ssh\administrators_authorized_keys'
+        state: absent
+        # Do NOT copy the inherited ACEs down before removing inheritance — that is exactly what would
+        # preserve the non-admin write sshd objects to.
+        reorganize: false
+
+    - name: Only Administrators and SYSTEM may write it
+      become: true
+      ansible.windows.win_acl:
+        path: '%ProgramData%\ssh\administrators_authorized_keys'
+        user: "{{ item }}"
+        rights: FullControl
+        type: allow
+        state: present
+      loop:
+        - BUILTIN\Administrators
+        - NT AUTHORITY\SYSTEM
 
     - name: Report
       ansible.builtin.debug:
-        msg: "{{ inventory_hostname }}: operator key {{ key_install.output | first | default('?') }}"
+        msg: "{{ inventory_hostname }}: operator key {{ 'added' if key_install.changed else 'already present' }}"

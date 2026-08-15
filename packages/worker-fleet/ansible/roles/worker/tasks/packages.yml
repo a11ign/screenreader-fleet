@@ -87,6 +87,10 @@
           Arch: "{{ os_arch.output | first }}"
         script: |
           param([string]$Version, [string]$Arch)
+          # Under --check the download and unpack above did not happen, so there is nothing to move and
+          # nothing to verify. Reporting "would install" is the honest answer; throwing on the absent
+          # source would make a dry run look like a broken box.
+          if ($Ansible.CheckMode) { $Ansible.Changed = $true; 'would install node'; return }
           $src = "C:\Windows\Temp\node-unpacked\node-$Version-win-$Arch"
           if (-not (Test-Path (Join-Path $src 'node.exe'))) {
             throw "no node.exe in $src -- the archive layout changed; do not install a broken tree"

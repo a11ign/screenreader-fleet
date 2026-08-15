@@ -63,7 +63,7 @@ comments recording things that have already cost days, and it cannot be tested i
 the role is proven equivalent means finding the gaps one silent capture at a time. Prove parity first:
 
 ```bash
-# NOT --check: see "check mode is not honest here yet" below.
+ansible-playbook provision-role.yml -l a11y-worker-1 --check --diff   # safe now; see "Check mode"
 ansible-playbook provision-role.yml -l a11y-worker-1
 # then compare against a script-provisioned box:
 #   /health.environment  — browser, NVDA, guidepup, OS, protocol
@@ -92,29 +92,27 @@ written can do it. `run-server.cmd` re-applies it per session, which works. The 
 which is the opposite behaviour; and `build-lean-worker-image.ps1`, because offline DISM servicing has no
 module and it builds an ISO rather than configuring a host.
 
-## Check mode is not honest here yet
+## Check mode
 
-Ansible's `--check` is only as truthful as its least truthful task, and on this role it is neither safe
-nor informative:
+`--check` is safe on this role. It was not, and the fix is worth recording because the trap is easy to
+walk back into: `win_powershell` *supports* check mode by handing `$Ansible.CheckMode` to your script —
+**acting on it is the script's job**. Twelve tasks did not, so a dry run really uninstalled OneDrive and
+really changed `powercfg`.
 
-| tasks | in `--check` |
+| tasks | under `--check` |
 |---|---|
-| `win_regedit`, `win_user`, `win_group_membership`, `win_scheduled_task`, `win_firewall_rule`, `win_file` | correct — they honour it |
-| the six `a11y.worker` modules | correct — they were written for it |
-| `win_shell` | **skipped** (`supports_check_mode = $false`), so those tasks verify nothing |
-| the remaining `win_powershell` | **they run** — the module honours check mode by handing `$Ansible.CheckMode` to the script, and those scripts do not read it |
+| the six `a11y.worker` modules | correct — written for it |
+| `win_regedit`, `win_user`, `win_group_membership`, `win_scheduled_task`, `win_firewall_rule`, `win_acl`, `win_lineinfile`, `win_file`, `win_path`, `win_get_url`, `win_unzip` | correct |
+| 4 read-only `win_powershell` | run, and only read — architecture, node path, guidepup version, task read-back |
+| 2 mutating `win_powershell` | **guarded** — `NotifyOnListen` and the node move check `$Ansible.CheckMode` |
+| `win_shell` | **skipped** (`supports_check_mode = $false`) |
 
-The dangerous half is gone: OneDrive, `powercfg`, the NIC and Defender are modules now. Seven inline
-`win_powershell` blocks remain, and they are not equal:
+The `win_shell` skips are honest rather than a gap: `npm install`, `git clone` and `guidepup setup` are
+commands, not reconcilable state, so there is nothing for a dry run to predict.
 
-- **four are read-only** (`changed_when: false`) — architecture detection, the node-path lookup, the
-  guidepup version read, the scheduled-task read-back. They run under `--check` and that is harmless.
-- **three still MUTATE** — moving node into Program Files (`packages.yml`), `NotifyOnListen`
-  (`firewall.yml`), and the operator key install (`ssh-key.yml`). Those three are why `--check` is not
-  yet trustworthy end to end. They need a `$Ansible.CheckMode` guard or their own modules.
-
-The `win_shell` tasks — `npm install`, `git`, `guidepup setup` — are genuinely commands rather than
-state, so being skipped under `--check` is honest rather than a gap.
+```bash
+ansible-playbook provision-role.yml -l a11y-worker-1 --check --diff
+```
 
 ## Why SSH and not WinRM
 

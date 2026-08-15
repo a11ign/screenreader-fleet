@@ -6,14 +6,21 @@
   # blocks the ENTIRE interactive session until someone dismisses it. On a headless fleet nobody will,
   # so the box sits there looking hung with a perfectly healthy worker behind a modal.
   #
-  # `win_firewall` manages the profiles; NotifyOnListen is not one of its parameters, so this stays
-  # PowerShell. Idempotent by nature — setting it twice is setting it once.
+  # `win_firewall` manages the profiles but exposes only inbound_action, outbound_action, profiles and
+  # state -- NotifyOnListen is not among them -- so this stays a script. Verified against the installed
+  # module rather than assumed.
+  #
+  # It reads before it writes, and it does not write under --check. `win_powershell` supports check mode
+  # by handing $Ansible.CheckMode to the script; ACTING on it is the script's job, and not doing so is
+  # what made `--check` on this role dangerous.
   become: true
   ansible.windows.win_powershell:
     script: |
       $before = (Get-NetFirewallProfile -Profile Domain, Private, Public).NotifyOnListen
-      Set-NetFirewallProfile -Profile Domain, Private, Public -NotifyOnListen False
       $Ansible.Changed = ($before -contains $true)
+      if ($Ansible.Changed -and -not $Ansible.CheckMode) {
+        Set-NetFirewallProfile -Profile Domain, Private, Public -NotifyOnListen False
+      }
       "NotifyOnListen was: $($before -join ',')"
 
 - name: Inbound rule for the worker port
