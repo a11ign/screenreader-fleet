@@ -237,6 +237,27 @@ if is_lab && [ ! -f "$CORPUS_KEY" ]; then
   echo
 fi
 
+# Seed GitHub's host key, VERIFIED rather than trusted on first use. A fresh container has no
+# known_hosts at all, so the clone below fails with "Host key verification failed" -- and the warning it
+# prints blames the deploy key, which is the wrong diagnosis and cost real time chasing a key that was
+# already correctly installed. `ssh-keyscan >> known_hosts` on its own is trust-on-first-use over the
+# network, so the scanned key is compared against GitHub's published ed25519 fingerprint and REFUSED on
+# a mismatch. Verified against two independent channels (a keyscan from a known-good host and
+# api.github.com/meta over HTTPS), which agree.
+GITHUB_ED25519_FP='SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+if is_lab && ! ssh-keygen -F github.com >/dev/null 2>&1; then
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  SCANNED="$(ssh-keyscan -t ed25519 github.com 2>/dev/null)"
+  SCANNED_FP="$(printf '%s\n' "$SCANNED" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')"
+  if [ -n "$SCANNED" ] && [ "$SCANNED_FP" = "$GITHUB_ED25519_FP" ]; then
+    printf '%s\n' "$SCANNED" >> "$HOME/.ssh/known_hosts"
+    ok 'github.com host key seeded (fingerprint verified against the published key)'
+  else
+    warn "github.com host key did not match the published fingerprint (got ${SCANNED_FP:-nothing}) --"
+    warn 'NOT recorded. The corpus clone will fail; investigate before working around this.'
+  fi
+fi
+
 CORPUS_DIR="$REPO_PATH/runs/screenreader-dataset"
 CORPUS_URL="${A11Y_CORPUS_URL:-git@a11y-corpus.github.com:DanBeckDev/a11y-corpus.git}"
 if [ -d "$CORPUS_DIR/captures" ]; then
@@ -248,10 +269,17 @@ if [ -d "$CORPUS_DIR/captures" ]; then
   fi
 elif printf '%s' "$CORPUS_URL" | grep -qE '\.git$|^git@|^ssh://'; then
   mkdir -p "$REPO_PATH/runs"
-  if git clone --quiet "$CORPUS_URL" "$CORPUS_DIR" 2>/dev/null; then
+  # Keep git's OWN error. `2>/dev/null` here replaced "Host key verification failed" with a guess about
+  # the deploy key, and the guess was wrong -- the key was installed and correct, and the container
+  # simply had no known_hosts. A diagnostic that states a cause it did not observe is worse than none,
+  # because it is believed.
+  if CLONE_ERR="$(git clone --quiet "$CORPUS_URL" "$CORPUS_DIR" 2>&1)"; then
     ok "corpus cloned ($(find "$CORPUS_DIR/captures" -name '*.json' | wc -l | tr -d ' ') captures)"
   else
-    warn "could not clone $CORPUS_URL -- it is PRIVATE, so this box needs a key with access."
+    warn "could not clone $CORPUS_URL"
+    warn "git said: ${CLONE_ERR:-(no output)}"
+    warn 'The repo is PRIVATE, so this box needs a deploy key with access -- but read the line above'
+    warn 'before assuming that is the cause.'
     warn 'Capture will work; evidence:check has nothing to diff against until it is present.'
   fi
 else
