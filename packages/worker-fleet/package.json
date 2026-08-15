@@ -14,6 +14,10 @@
     },
     "./capacity": {
       "default": "./dist/host-capacity.mjs"
+    },
+    "./worker-http": {
+      "types": "./dist/worker-http.d.mts",
+      "default": "./dist/worker-http.mjs"
     }
   },
   "bin": {
