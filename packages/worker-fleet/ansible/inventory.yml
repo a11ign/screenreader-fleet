@@ -41,6 +41,9 @@ all:
     a11y_workers:
       hosts:
         a11y-worker-1:
+          # DHCP moved this box from .83 to .102 and a probe of the old address found nothing, which
+          # reads exactly like a dead machine. Give it a DHCP RESERVATION on the router, or this file
+          # will keep going stale in the one way that is indistinguishable from a fault.
           ansible_host: REDACTED-INTERNAL-ADDRESS
           # The MAC is what `wake.yml` sends the magic packet to, and it is the ONE fact about a box that
           # cannot be discovered while the box is off. Get it once, from the box or the DHCP lease:

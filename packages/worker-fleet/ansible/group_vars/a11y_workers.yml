@@ -21,6 +21,10 @@
 ansible_connection: ssh
 ansible_user: witness
 ansible_port: 22
+# The fleet's own key, not whatever ~/.ssh/id_ed25519 happens to be. An operator with several keys would
+# otherwise have ssh pick one by luck, and the failure ("Permission denied (publickey)") says nothing
+# about which key was offered.
+ansible_ssh_private_key_file: "{{ lookup('env', 'A11Y_SSH_KEY') | default('~/.ssh/a11y-witness_ed25519', true) }}"
 
 # Windows OpenSSH's stock DefaultShell is cmd.exe. Provisioning sets it to PowerShell, because Ansible's
 # Windows modules ARE PowerShell and running them through cmd adds a quoting layer with nothing to gain.
