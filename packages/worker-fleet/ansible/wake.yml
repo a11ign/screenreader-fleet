@@ -1,0 +1,94 @@
+---
+# Wake the fleet, and wait until it can actually take work.
+#
+#     ansible-playbook wake.yml                    # the whole fleet
+#     ansible-playbook wake.yml -l a11y-worker-3   # one box
+#
+# ## Why the fleet is off in the first place
+#
+# Twelve mini PCs idling is real power for no evidence. The boxes are meant to be down between runs and
+# woken when there is something to capture — so "off" is the resting state here in exactly the way
+# "stopped" is the resting state for the UTM guests, and `doctor` already refuses to treat that as a
+# fault.
+#
+# ## This play does not use the SSH connection, and cannot
+#
+# A sleeping box has no sshd, no Python, no anything. So every task runs on the CONTROL PLANE
+# (`delegate_to: localhost`, `gather_facts: false`, and `connection: local` on the play) and addresses
+# the worker by MAC and by HTTP. Attempting to gather facts here would hang against every box that is
+# off, which is all of them, which is the point.
+#
+# ## Prerequisites live in inventory.yml
+#
+# Firmware WoL is a per-box console visit and cannot be automated. The two software halves are:
+# `a11y_nic_power` leaves the adapter armed to wake (PnPCapabilities 8, not 24), and
+# `a11y_power_timeouts` turns hibernation off, which also disables Fast Startup — without which many
+# boards never truly reach S5 and never wake.
+- name: Wake the capture workers
+  hosts: a11y_workers
+  gather_facts: false
+  connection: local
+
+  tasks:
+    - name: Is it already up
+      # Asked first, so waking a fleet that is already awake is a no-op that says so rather than a
+      # broadcast storm followed by a wait.
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ a11y_port }}/health"
+        method: GET
+        timeout: 5
+      register: already_up
+      failed_when: false
+      changed_when: false
+
+    - name: Refuse to wake a box whose MAC we do not know
+      # NAMED rather than silently skipped. A worker that is never woken looks exactly like a worker that
+      # is broken, and the fleet would simply be smaller than you think — which is the same invisible
+      # shortfall `fleet-env.mjs` refuses to produce.
+      ansible.builtin.assert:
+        that: mac | default('') | length > 0
+        fail_msg: >-
+          {{ inventory_hostname }} has no `mac` in inventory.yml, so it cannot be woken. Get it once
+          while the box is up:
+          ansible {{ inventory_hostname }} -m win_shell -a "(Get-NetAdapter -Physical | ? Status -eq Up).MacAddress"
+      when: already_up.status is not defined or already_up.status != 200
+
+    - name: Send the magic packet
+      # `community.general.wakeonlan`, NOT `community.windows.win_wakeonlan` — that one sends the packet
+      # FROM a Windows host, and this control plane is Linux. The names are one word apart and only one
+      # of them can work here.
+      #
+      # Sent three times: a magic packet is UDP to the broadcast address and nothing acknowledges it, so
+      # the only mitigation for a dropped frame is another frame. This is cheap.
+      community.general.wakeonlan:
+        mac: "{{ mac }}"
+        broadcast: "{{ a11y_wol_broadcast | default('255.255.255.255') }}"
+        port: 9
+      loop: [1, 2, 3]
+      loop_control:
+        label: "packet {{ item }} -> {{ mac }}"
+      when: already_up.status is not defined or already_up.status != 200
+
+    - name: Wait for it to serve /health
+      # A cold boot has to POST, start Windows, auto-log-on, fire the at-logon task and warm NVDA up. The
+      # budget is generous for the same reason every deadline in this project is: a check that gives up
+      # early turns "still coming up" and "did not wake" into the same observation, and here the two have
+      # completely different remedies (wait, versus go and check the firmware).
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ a11y_port }}/health"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: woke
+      retries: 30
+      delay: 10
+      until: woke.status is defined and woke.status == 200
+      when: already_up.status is not defined or already_up.status != 200
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}
+          {{ 'was already up' if (already_up.status | default(0)) == 200 else 'woken' }} —
+          ready={{ (woke.json | default(already_up.json, true)).ready | default('?') }}
+          code={{ (woke.json | default(already_up.json, true)).code | default('?') }}

@@ -1,7 +1,10 @@
 ---
 # Collections these playbooks need, pinned.
 #
-#     ansible-galaxy collection install -r requirements.yml
+#     ansible-galaxy collection install -r requirements.yml -p ~/.ansible/collections
+#
+# The `-p` matters: ansible.cfg puts the repo's own `collections/` path FIRST, so a bare install vendors
+# third-party collections into git. Only a11y.worker belongs there.
 #
 # `ansible.windows` is not enough on its own, and the way that failure presents is worth stating:
 # `ansible-doc -t module community.windows.win_scheduled_task` RESOLVES even when the collection is not
@@ -23,3 +26,9 @@ collections:
   # and node/MinGit arrive as zips.
   - name: community.windows
     version: ">=3.0.0"
+
+  # `wakeonlan`, for waking a powered-down worker from the control plane. Note it must be THIS one and
+  # not community.windows.win_wakeonlan: that module sends the magic packet FROM a Windows host, and our
+  # control plane is Linux. The two are easy to confuse and only one of them can work here.
+  - name: community.general
+    version: ">=8.0.0"

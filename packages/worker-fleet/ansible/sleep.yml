@@ -1,0 +1,97 @@
+---
+# Power the fleet down — but never underneath a capture.
+#
+#     ansible-playbook sleep.yml                     # the whole fleet
+#     ansible-playbook sleep.yml -l a11y-worker-3    # one box
+#     ansible-playbook sleep.yml -e a11y_force_sleep=true   # even if busy (you had better mean it)
+#
+# The counterpart to wake.yml. Twelve mini PCs idling is real power for no evidence, so "off" is the
+# resting state for this fleet, exactly as "stopped" is for the UTM guests.
+#
+# ## The refusal is the important part
+#
+# `local-vm.ts` already learned this for the VM pool and the comment there is the rule: a run must never
+# shut down a worker somebody else is using. A capture is 12–520 s of real screen-reader work and there
+# is no way to resume one — killing the box mid-capture destroys the evidence and, because the host sees
+# a dropped socket rather than a refusal, it reads as a flaky worker rather than as us.
+#
+# So `busy` is checked immediately before shutting down, and a busy box is SKIPPED and named. The
+# capture-result store means a capture whose socket died can be recovered, but only if the worker is
+# still running to be asked — which is precisely what this play would take away.
+- name: Power the capture workers down
+  hosts: a11y_workers
+  gather_facts: false
+
+  tasks:
+    - name: What is it doing right now
+      # From the control plane over HTTP, and deliberately NOT over the SSH connection: this is the same
+      # question the dispatcher asks, answered the same way, so the two cannot disagree about "busy".
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ a11y_port }}/health"
+        method: GET
+        timeout: 5
+      delegate_to: localhost
+      register: state
+      failed_when: false
+      changed_when: false
+
+    - name: Already off
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} is not answering — already down, nothing to do"
+      when: state.status is not defined or state.status != 200
+
+    - name: Leave a busy worker alone
+      # Named, not silent. "Twelve boxes asked to sleep, eleven did" is a fact worth seeing; discovering
+      # it later as one machine still drawing power is not.
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} is CAPTURING and will be left running.
+          A capture is 12–520 s of screen-reader work with no way to resume it, and from the host a
+          killed box looks like a flaky worker rather than like us. Re-run when it is idle, or pass
+          -e a11y_force_sleep=true if you genuinely mean to discard the capture.
+      when:
+        - state.status | default(0) == 200
+        - state.json.busy | default(false)
+        - not (a11y_force_sleep | default(false) | bool)
+
+    - name: Shut it down
+      # `shutdown /s`, not `Stop-Computer`: the delay gives an operator a window to `shutdown /a` if they
+      # realise mid-command, which has already saved a guest once in this project's history.
+      #
+      # Fast Startup is off on these boxes (a11y_power_timeouts disables hibernation), so this is a real
+      # S5 rather than a hybrid hibernate — which is what makes Wake-on-LAN work afterwards. Those two
+      # facts are a dependency, not a coincidence.
+      ansible.windows.win_shell: shutdown.exe /s /t 10 /c "a11y-witness fleet sleep"
+      when:
+        - state.status | default(0) == 200
+        - (not (state.json.busy | default(false))) or (a11y_force_sleep | default(false) | bool)
+      changed_when: true
+      # The box goes away mid-command by design, so a dropped connection here is success, not failure.
+      failed_when: false
+
+    - name: Wait for it to actually stop answering
+      # Confirmed by the mark, not by the command returning: `shutdown` returning 0 means the request was
+      # accepted, which is the same distinction that made `utmctl exec` untrustworthy for an hour. A box
+      # that accepted the request and then hung is a box still drawing power.
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ a11y_port }}/health"
+        method: GET
+        timeout: 5
+      delegate_to: localhost
+      register: gone
+      failed_when: false
+      changed_when: false
+      retries: 24
+      delay: 5
+      until: gone.status is not defined or gone.status != 200
+      when:
+        - state.status | default(0) == 200
+        - (not (state.json.busy | default(false))) or (a11y_force_sleep | default(false) | bool)
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'still capturing, left up' if (state.json.busy | default(false)) and not (a11y_force_sleep | default(false) | bool)
+             else ('was already down' if (state.status | default(0)) != 200
+             else ('powered down' if (gone.status | default(0)) != 200 else 'STILL ANSWERING — it did not go down')) }}

@@ -14,6 +14,9 @@ ansible-playbook provision.yml                  # drives the PowerShell (today's
 ansible-playbook provision-role.yml             # the ported role (see "The role" below)
 ansible-playbook collect-logs.yml               # every worker's logs, into runs/worker-logs/
 
+ansible-playbook wake.yml                       # power the fleet on (magic packet + wait for /health)
+ansible-playbook sleep.yml                      # power it down, REFUSING any box mid-capture
+
 python3 check-modules.py                        # do the module ARGUMENTS exist? syntax-check cannot tell
 ```
 
@@ -113,6 +116,38 @@ commands, not reconcilable state, so there is nothing for a dry run to predict.
 ```bash
 ansible-playbook provision-role.yml -l a11y-worker-1 --check --diff
 ```
+
+## Powering the fleet, because it is not meant to run 24/7
+
+Twelve mini PCs idling is real power for no evidence, so **off is the resting state** — the same
+position `doctor` already takes for stopped UTM guests.
+
+```bash
+ansible-playbook wake.yml -l a11y-worker-3     # magic packet, then wait until it serves /health
+ansible-playbook sleep.yml                     # graceful shutdown, skipping anything that is capturing
+```
+
+`sleep.yml` **refuses a busy worker and says so.** A capture is 12–520 s of screen-reader work with no
+way to resume it, and from the host a killed box looks like a flaky worker rather than like us —
+`local-vm.ts` learned the same rule for the VM pool. `-e a11y_force_sleep=true` overrides it.
+
+`wake.yml` runs entirely on the control plane (`connection: local`): a sleeping box has no sshd and no
+Python, so every task addresses it by MAC and by HTTP. It uses **`community.general.wakeonlan`**, not
+`community.windows.win_wakeonlan` — the latter sends the packet *from* a Windows host, and this control
+plane is Linux. One word apart, and only one of them can work here.
+
+Three prerequisites, and only two are automated:
+
+1. **WoL enabled in each box's firmware.** A console visit, once per machine. Nothing can automate it —
+   the box is off and has no OS to ask.
+2. The adapter must stay armed to wake. `a11y_nic_power` handles it, and this is where the danger was:
+   its registry fallback originally wrote `PnPCapabilities = 24`, which Microsoft documents as *also*
+   preventing the adapter from waking the computer. On any box without the cmdlet that would have made
+   Wake-on-LAN impossible while reporting success. It writes `8` now, and sets `WakeOnMagicPacket`
+   explicitly via the cmdlet where it exists.
+3. **Fast Startup must be off**, or many boards never truly reach S5 and never wake.
+   `a11y_power_timeouts` turns hibernation off, which disables Fast Startup as a side effect. That is a
+   real dependency between two modules, not a coincidence — do not "tidy" the hibernation setting.
 
 ## Why SSH and not WinRM
 

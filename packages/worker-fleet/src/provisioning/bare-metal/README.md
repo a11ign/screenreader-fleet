@@ -48,6 +48,30 @@ hardware and a real network, and the differences are not cosmetic:
 - **The TPM/CPU bypasses are load-bearing, not a VM workaround.** The 6th- and 7th-gen boxes in this fleet
   are not on Windows 11's supported-CPU list and Setup refuses them without these.
 
+## It installs on unsupported hardware, deliberately
+
+The fleet is second-hand mini PCs, and several generations of them are not on Windows 11's supported-CPU
+list at all. The bypasses are therefore load-bearing rather than a lab convenience, and they are applied
+in **two places**, because one is not enough:
+
+| where | what it covers |
+|---|---|
+| `windowsPE` → `HKLM\System\Setup\LabConfig` | the install itself: CPU, TPM, Secure Boot, RAM, storage |
+| `specialize` → `HKLM\SYSTEM\Setup\LabConfig` + `MoSetup` | the INSTALLED system, so later feature updates do not refuse |
+
+The second one is the easy thing to miss. The WinPE keys live in the installer's registry and do not
+survive into the running OS, so a box installs happily and then, months later on a machine nobody is
+watching, declines a feature update with "this PC doesn't meet the minimum requirements".
+`AllowUpgradesWithUnsupportedTPMOrCPU` under `MoSetup` is what covers the upgrade path specifically.
+
+Two names, deliberately both: `BypassStorageCheck` is what Setup reads; `BypassDiskCheck` was inherited
+from the arm64 file and appears in no Microsoft documentation. An ignored registry value costs nothing
+and a missing one costs the install, so both are written.
+
+`BypassNRO` removes 24H2's "connect to the internet and sign in with a Microsoft account" wall at OOBE.
+`HideOnlineAccountScreens` plus a local account usually carries it — but *usually* is not a property you
+want on a fleet whose screens you cannot see.
+
 ## It wipes disk 0 without asking
 
 That is what makes it hands-off, and it is why the PXE entry serving this must be aimed at machines you

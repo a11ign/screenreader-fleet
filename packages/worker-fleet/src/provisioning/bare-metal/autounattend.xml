@@ -146,6 +146,20 @@
           <Order>5</Order>
           <Path>reg add HKLM\System\Setup\LabConfig /v BypassDiskCheck /t REG_DWORD /d 0x00000001 /f</Path>
         </RunSynchronousCommand>
+        <!-- BypassStorageCheck is the name Setup actually reads; BypassDiskCheck was inherited from the
+             arm64 file and appears in no Microsoft documentation. Both are kept: an ignored registry
+             value costs nothing, and a missing one costs the install. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassStorageCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <!-- The install-time bypasses above do not cover the UPGRADE path, which is what a later feature
+             update takes. Without this a box installs happily and then refuses 25H2 with "this PC doesn't
+             meet the minimum requirements", months later, on a machine nobody is watching. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <Path>reg add HKLM\System\Setup\MoSetup /v AllowUpgradesWithUnsupportedTPMOrCPU /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
       </RunSynchronous>
 
       <UserData>
@@ -169,6 +183,49 @@
            real network; the workers are addressed by IP from ansible/inventory.yml regardless. -->
       <ComputerName>*</ComputerName>
       <TimeZone>GMT Standard Time</TimeZone>
+    </component>
+    <!-- The windowsPE LabConfig keys live in the INSTALLER's registry and do not survive into the
+         installed system. Written again here so the running OS carries them, which is what a feature
+         update and any in-place repair will consult. Without this the box installs on unsupported
+         hardware and then quietly stops being able to update itself.
+
+         BypassNRO removes the "you must connect to the internet and sign in with a Microsoft account"
+         wall that 24H2 reintroduced at OOBE. The LocalAccount + HideOnlineAccountScreens below usually
+         carry it, but usually is not a property you want on a fleet you cannot see the screen of. -->
+    <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Persist the hardware bypasses into the installed OS</Description>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassStorageCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Description>Allow feature updates on unsupported TPM/CPU</Description>
+          <Path>reg add HKLM\SYSTEM\Setup\MoSetup /v AllowUpgradesWithUnsupportedTPMOrCPU /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <Description>No Microsoft account / network wall at OOBE</Description>
+          <Path>reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE /v BypassNRO /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
     </component>
     <component name="Microsoft-Windows-Security-SPP-UX" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <SkipAutoActivation>true</SkipAutoActivation>

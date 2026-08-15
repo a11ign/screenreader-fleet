@@ -21,12 +21,23 @@ description:
   writes (PnPCapabilities 24, disabling both power-down and wake-armed).
 - Fails when no physical adapter is Up, rather than reporting ok having adjusted nothing - this module
   exists because the network disappears.
+- 'Sets two INDEPENDENT things: the adapter is not powered down while the machine runs, and it may still
+  wake the machine. Conflating them is how Wake-on-LAN gets silently disabled.'
 options:
   interface:
     description:
     - Adapter name or wildcard to adjust.
     type: str
     default: '*'
+  wake_on_lan:
+    description:
+    - Whether the adapter may wake the machine with a magic packet.
+    - On by default, because this fleet is meant to be POWERED DOWN between runs and woken by wake.yml.
+    - The registry fallback used to write PnPCapabilities 24, which Microsoft documents as also preventing
+      the adapter from waking the computer - so on a box without the cmdlet it would have made Wake-on-LAN
+      impossible while reporting success. It writes 8 now.
+    type: bool
+    default: true
 author:
 - a11y-witness
 """

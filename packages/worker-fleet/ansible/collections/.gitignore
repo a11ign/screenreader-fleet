@@ -1,0 +1,6 @@
+# Only OUR collection is committed here. Third-party ones come from requirements.yml, because vendoring
+# them into the repo means a pinned copy nobody updates and a diff nobody reads — and `ansible-galaxy
+# install` lands here by default, since ansible.cfg puts this path first.
+ansible_collections/*
+!ansible_collections/a11y
+*.info
