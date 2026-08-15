@@ -36,6 +36,25 @@ set -euo pipefail
 REPO_URL="${A11Y_REPO_URL:-https://github.com/DanBeckDev/a11y-witness.git}"
 REPO_PATH="${A11Y_REPO_PATH:-$HOME/a11y-witness}"
 
+# WHICH HALF OF THE CONTROL PLANE IS THIS?  (A11Y_ROLE=control|lab, default both)
+#
+# ADR 0012 splits them, and the reason is credentials rather than tidiness: the SSH key that can
+# reconfigure twelve Windows machines should not sit next to 100 MB of npm transitive dependencies and a
+# Python venv, which are the largest supply-chain surface in the system.
+#
+#   control  ansible + the fleet key. No node_modules, no venv, no corpus. Rebuildable in a minute.
+#   lab      npm install + venv + the corpus. Talks to workers over HTTP only. Holds NO key.
+#
+# `both` remains the default so a single-box setup still works and nobody is forced into two containers
+# on day one -- but it is the thing to grow out of, not the target.
+ROLE="${A11Y_ROLE:-both}"
+case "$ROLE" in
+  control|lab|both) ;;
+  *) echo "A11Y_ROLE must be control, lab or both (got '$ROLE')" >&2; exit 1 ;;
+esac
+is_control() { [ "$ROLE" = control ] || [ "$ROLE" = both ]; }
+is_lab()     { [ "$ROLE" = lab ]     || [ "$ROLE" = both ]; }
+
 step() { printf '\n\033[36m[%s] %s\033[0m\n' "$1" "$2"; }
 ok()   { printf '    \033[32mOK    %s\033[0m\n' "$1"; }
 warn() { printf '    \033[33mWARN  %s\033[0m\n' "$1"; }
@@ -53,6 +72,8 @@ if [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo"
 fi
 if [ -n "$SUDO" ]; then ok 'using sudo'; else ok 'running as root'; fi
+ok "role: $ROLE"
+
 
 step 2 'Node.js and git'
 if command -v node >/dev/null && node -e 'process.exit(process.versions.node.split(".")[0] >= 20 ? 0 : 1)'; then
@@ -79,10 +100,20 @@ else
   ok "cloned to $REPO_PATH ($(git -C "$REPO_PATH" rev-parse --short HEAD))"
 fi
 cd "$REPO_PATH"
-npm install --silent --no-audit --no-fund
-ok 'dependencies installed'
+if is_lab; then
+  npm install --silent --no-audit --no-fund
+  ok 'dependencies installed'
+else
+  # The control container deliberately has NO node_modules. deploy.yml computes codeVersion by importing
+  # code-version.mjs BY PATH -- it needs nothing but node stdlib, and verified identical to the workspace
+  # import. 100 MB of transitive dependencies next to the fleet's SSH key is the coupling ADR 0012 removes.
+  ok 'skipped (control role) -- no node_modules beside the fleet key'
+fi
 
 step 4 'Ansible, and the fleet key'
+if ! is_control; then
+  ok 'skipped (lab role) -- the lab holds NO fleet key and runs no Ansible, by design (ADR 0012)'
+else
 # The control plane MANAGES the workers as well as capturing with them, and this script predates that
 # half entirely -- it installed node and a checkout and left you without the thing that provisions,
 # deploys, wakes and sleeps a box.
@@ -134,8 +165,12 @@ echo "    serve-bootstrap.sh, or install it on a running box with ssh-key.yml:"
 echo
 echo "      $(cat "$FLEET_KEY.pub")"
 echo
+fi
 
 step 5 'Baseline corpus'
+if ! is_lab; then
+  ok 'skipped (control role) -- the corpus belongs to the lab'
+else
 # runs/ is gitignored — 2,122 captures worth hours of worker time, and the thing evidence:check
 # diffs against. Without it the control plane can capture but cannot COMPARE, and evidence:check
 # refuses rather than silently reporting that nothing changed.
@@ -148,6 +183,7 @@ elif [ -n "${A11Y_CORPUS_URL:-}" ]; then
 else
   warn 'no corpus. Capture works; evidence:check has nothing to diff against.'
   warn "Copy it once:  rsync -az <mac>:<repo>/runs/ $REPO_PATH/runs/"
+fi
 fi
 
 step 6 'Workers'

@@ -38,10 +38,20 @@
       # second implementation is a second chance for the two sides to disagree. A git-cloned Windows guest
       # checks the files out with CRLF, and a byte-for-byte hasher therefore never matched it: measured
       # 31979b551b7a2cfa against this checkout's 22822b7a3a08969c, which read as "permanently stale".
+      #
+      # Imported BY PATH, not as `@a11y-witness/nvda-worker`. The package name needs npm workspace
+      # resolution, which would mean 100 MB of node_modules on the fleet-control container -- the box
+      # that holds the SSH key able to reconfigure every worker. It does not need a dependency tree, and
+      # putting the largest supply-chain surface in the system next to that credential is the coupling
+      # this split exists to remove (ADR 0012).
+      #
+      # Still the ONE hasher: code-version.mjs imports nothing but node stdlib and its sibling
+      # worker-files.mjs, so a path import is the same function, and code-version.test.ts still forbids
+      # a second copy. Verified identical: d1c98aa032198754 either way.
       ansible.builtin.command:
         cmd: >-
-          node -e 'import("@a11y-witness/nvda-worker").then(m =>
-          process.stdout.write(m.codeVersion(m.workerSourceDir())))'
+          node --input-type=module -e 'const m = await import("./packages/nvda-worker/src/code-version.mjs");
+          process.stdout.write(m.codeVersion(m.workerSourceDir()))'
         chdir: "{{ a11y_repo_root }}"
       delegate_to: localhost
       run_once: true
