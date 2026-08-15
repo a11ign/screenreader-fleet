@@ -40,9 +40,25 @@ The PXE server is **Proxmox CT 110 `iventoy-pxe`, `REDACTED-INTERNAL-ADDRESS`**,
 Point the Windows 11 x64 ISO's **Auto Install Script** at this directory's `autounattend.xml`, and set a
 non-zero boot timeout so the install starts without a keypress.
 
-**Start the PXE service in the web UI.** The container running is not the same as the service running:
-with it stopped, port 69/TFTP is closed and a machine set to network-boot finds nothing at all, which
-looks exactly like a firmware boot-order mistake and is not one.
+**Check the PXE service is started** — the container running is not the same as the service running, and
+with it stopped a machine set to network-boot finds nothing at all, which looks exactly like a firmware
+boot-order mistake and is not one.
+
+Ask iVentoy, do not probe the port:
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"method":"query_status"}' http://REDACTED-INTERNAL-ADDRESS:26000/iventoy/json     # {"status": "running"}
+```
+
+**TFTP is UDP.** A TCP connect to port 69 fails whether the service is up or down, so it cannot
+distinguish the two — which is this repo's recurring rule (a check that shares a failure mode with the
+thing it checks verifies nothing) in its cheapest possible form. It was got wrong here first time and
+reported a running server as stopped. `nc -zvu` is the port-level check if you want one; `query_status`
+is better, because it asks the service rather than the socket.
+
+The same endpoint drives the rest: `start_server`, `stop_server`, `sys_ip_list`, `get_img_tree`,
+`img_add_auto_script`, `img_set_auto_id`, `img_set_auto_timeout`.
 
 **Check the address in `autounattend.xml`.** It has `http://REDACTED-INTERNAL-ADDRESS:8099` baked in, and that must be
 the machine running `serve-bootstrap.sh`.

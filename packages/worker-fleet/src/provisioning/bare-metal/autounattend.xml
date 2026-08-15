@@ -42,14 +42,35 @@
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
 
   <settings pass="windowsPE">
+    <!-- The locale MUST be one the INSTALL MEDIA actually carries, and this is the defect that made
+         every unattended install fall back to a fully interactive one.
+
+         Our media is Win11_23H2_EnglishInternational_x64v2, whose volume label is
+         CCCOMA_X64FRE_EN-GB_DV9: it ships en-GB resources and no en-US ones. Asking for en-US
+         therefore fails at the point Setup tries to load them, and Setup's response is not an error
+         but a FALLBACK to the language-selection page. From the console that is indistinguishable
+         from the answer file never being read, which is how it was misdiagnosed repeatedly: the
+         edition name, the boot mode, iVentoy's injection and the payload server were each blamed and
+         each was fine.
+
+         The proof is in Setup's own log, which reports success right up to this point:
+
+           Found usable unattend file for pass [windowsPE] at [C:\autounattend.xml]
+           Successfully deserialized and validated unattend file
+           Product key is valid ... User accepted the EULA in the unattend file
+           SetSetupKeyboardLayout: Failed to set the key board layout to [en-US]      <- here
+           CLanguages::v_InitLanguage - Failed to load en-US resources with error 2
+
+         Error 2 is FILE NOT FOUND. Check the media before changing these: the volume label encodes
+         the language, and `Callback_Locale_*` in X:\Windows\Panther\setupact.log names the failure. -->
     <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <SetupUILanguage>
-        <UILanguage>en-US</UILanguage>
+        <UILanguage>en-GB</UILanguage>
       </SetupUILanguage>
-      <InputLocale>en-US</InputLocale>
-      <SystemLocale>en-US</SystemLocale>
-      <UILanguage>en-US</UILanguage>
-      <UserLocale>en-US</UserLocale>
+      <InputLocale>en-GB</InputLocale>
+      <SystemLocale>en-GB</SystemLocale>
+      <UILanguage>en-GB</UILanguage>
+      <UserLocale>en-GB</UserLocale>
     </component>
 
     <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
@@ -102,17 +123,39 @@
         </Disk>
       </DiskConfiguration>
 
-      <!-- Match /IMAGE/NAME to the WIM's NAME, which is "Windows 11 Professional".
-           "Windows 11 Pro" is its DESCRIPTION, and matching that leaves Setup sitting on
-           the edition picker. Keep this block byte-for-byte simple: substituting
-           /IMAGE/INDEX here, or adding a comment inside <InstallFrom>, made Setup reject
-           the whole answer file and revert to a fully interactive install. -->
+      <!-- /IMAGE/NAME must match an image NAME in the media's own install.wim EXACTLY, and the
+           value is a property of the ISO rather than of Windows. Read it, never assume it:
+
+             mount -o loop,ro <iso> /mnt
+             tail -c 200000 /mnt/sources/install.wim | tr -d '\0' | grep -oE '<NAME>[^<]*</NAME>'
+
+           This said "Windows 11 Professional". On Win11_23H2_EnglishInternational_x64v2 both NAME
+           and DESCRIPTION are "Windows 11 Pro", and "Professional" is Windows 7-era naming that
+           appears nowhere in that WIM, so it named no image at all.
+
+           HONESTY ABOUT WHAT THIS DID AND DID NOT CAUSE: it was found while chasing an interactive
+           install, and written up at the time as the cause of it. It was not — the locale mismatch
+           above was, proven afterwards from Setup's own log. This value was genuinely wrong and had
+           to be fixed, but it was never demonstrated to produce a symptom, because the locale bug
+           stopped Setup before the image was ever selected. Treat it as a latent defect corrected,
+           not as a diagnosis.
+
+           NOTE FOR THE NEXT EDITOR: an XML comment may not contain two consecutive hyphens. Using
+           them as a dash here broke the file a third time in this repo's history, and a malformed
+           answer file fails in exactly the same silent way as a wrong edition name. Validate with
+           `python3 -c "import xml.dom.minidom as m; m.parse('autounattend.xml')"` before pushing.
+
+           The generic key below is Microsoft's public KMS key for Pro, so this file always meant
+           Pro; only the spelling was wrong.
+
+           Keep this block byte-for-byte simple: substituting /IMAGE/INDEX here, or adding a
+           comment inside <InstallFrom>, made Setup reject the whole answer file the same way. -->
       <ImageInstall>
         <OSImage>
           <InstallFrom>
             <MetaData wcm:action="add">
               <Key>/IMAGE/NAME</Key>
-              <Value>Windows 11 Professional</Value>
+              <Value>Windows 11 Pro</Value>
             </MetaData>
           </InstallFrom>
           <InstallTo>
@@ -237,10 +280,10 @@
 
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <InputLocale>en-US</InputLocale>
-      <SystemLocale>en-US</SystemLocale>
-      <UILanguage>en-US</UILanguage>
-      <UserLocale>en-US</UserLocale>
+      <InputLocale>en-GB</InputLocale>
+      <SystemLocale>en-GB</SystemLocale>
+      <UILanguage>en-GB</UILanguage>
+      <UserLocale>en-GB</UserLocale>
     </component>
 
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">

@@ -49,6 +49,8 @@ all:
           # cannot be discovered while the box is off. Get it once, from the box or the DHCP lease:
           #     ansible a11y-worker-1 -m win_shell -a "(Get-NetAdapter -Physical | ? Status -eq Up).MacAddress"
           # A worker with no `mac` is skipped by wake.yml and NAMED, rather than silently not woken.
-          mac: ""
+          # Read off the PXE server's DHCP log during the first network boot: the one moment a machine
+          # announces its MAC before it has an OS to ask. Dell Wyse thin client (OUI 00:80:64).
+          mac: "00:80:64:da:18:e9"
           # The first bare-metal box. x64, Edge; the ARM64 guests it replaced are UTM VMs and are NOT
           # managed from here — they have their own lifecycle through worker-ctl.sh.
