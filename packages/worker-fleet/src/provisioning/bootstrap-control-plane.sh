@@ -171,18 +171,40 @@ step 5 'Baseline corpus'
 if ! is_lab; then
   ok 'skipped (control role) -- the corpus belongs to the lab'
 else
-# runs/ is gitignored — 2,122 captures worth hours of worker time, and the thing evidence:check
-# diffs against. Without it the control plane can capture but cannot COMPARE, and evidence:check
-# refuses rather than silently reporting that nothing changed.
-if [ -d "$REPO_PATH/runs/screenreader-dataset/captures" ]; then
-  ok "corpus present ($(find "$REPO_PATH/runs/screenreader-dataset/captures" -name '*.json' | wc -l | tr -d ' ') captures)"
-elif [ -n "${A11Y_CORPUS_URL:-}" ]; then
+# The corpus is a GIT REPO of its own -- private, because these are our internal test pages and the
+# main repo is public, so committing them there would publish the benchmark the tool is validated
+# against. It is versioned rather than regenerated because a capture is NOT reproducible: browserVersion
+# is in the capture cache key precisely so that evidence taken under one Edge release is not confused
+# with another's, and recapturing after an update gives a DIFFERENT corpus rather than the same one.
+#
+# Without it the lab can capture but cannot COMPARE, and evidence:check refuses rather than silently
+# reporting that nothing changed.
+#
+# A11Y_CORPUS_URL accepts either a git remote (preferred -- versioned, and every clone is a verified
+# copy) or a tar.gz URL, because a box without access to the private repo should still be able to be
+# handed a bundle.
+CORPUS_DIR="$REPO_PATH/runs/screenreader-dataset"
+CORPUS_URL="${A11Y_CORPUS_URL:-git@github.com:DanBeckDev/a11y-corpus.git}"
+if [ -d "$CORPUS_DIR/captures" ]; then
+  ok "corpus present ($(find "$CORPUS_DIR/captures" -name '*.json' | wc -l | tr -d ' ') captures)"
+  # A checkout can be updated; an unpacked tarball cannot, and saying which is which beats guessing.
+  if [ -d "$CORPUS_DIR/.git" ]; then
+    git -C "$CORPUS_DIR" pull --ff-only --quiet 2>/dev/null && ok 'corpus updated from its remote' \
+      || warn 'corpus is a checkout but could not be updated -- check the remote and your key'
+  fi
+elif printf '%s' "$CORPUS_URL" | grep -qE '\.git$|^git@|^ssh://'; then
   mkdir -p "$REPO_PATH/runs"
-  curl -fsSL "$A11Y_CORPUS_URL" | tar -xz -C "$REPO_PATH/runs"
-  ok "corpus fetched from A11Y_CORPUS_URL"
+  if git clone --quiet "$CORPUS_URL" "$CORPUS_DIR" 2>/dev/null; then
+    ok "corpus cloned ($(find "$CORPUS_DIR/captures" -name '*.json' | wc -l | tr -d ' ') captures)"
+  else
+    warn "could not clone $CORPUS_URL -- it is PRIVATE, so this box needs a key with access."
+    warn 'Capture will work; evidence:check has nothing to diff against until it is present.'
+  fi
 else
-  warn 'no corpus. Capture works; evidence:check has nothing to diff against.'
-  warn "Copy it once:  rsync -az <mac>:<repo>/runs/ $REPO_PATH/runs/"
+  mkdir -p "$REPO_PATH/runs"
+  curl -fsSL "$CORPUS_URL" | tar -xz -C "$REPO_PATH/runs" \
+    && ok 'corpus fetched from a tarball' \
+    || warn "could not fetch $CORPUS_URL"
 fi
 fi
 
