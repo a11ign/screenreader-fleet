@@ -1,0 +1,75 @@
+---
+# The steps with no module, kept as PowerShell because inventing one would be worse.
+#
+# Every task here was checked for a first-class equivalent and does not have one: `win_power_plan`
+# selects a plan rather than individual AC timeouts, nothing exposes NIC selective-suspend, and there is
+# no Defender module. Wrapping them in `win_powershell` at least gives them Ansible's changed/failed
+# reporting, which the hand-rolled Step/OK/Warn ledger was doing by hand.
+
+- name: Never sleep, on AC
+  # A worker that sleeps is a worker that has vanished, and this is BARE-METAL ONLY: VMs do not sleep,
+  # so the fleet ran for months without needing it. On the first physical box it presented as
+  # `EHOSTUNREACH REDACTED-INTERNAL-ADDRESS:8765` for every request in an evidence-check run — 48 instant failures —
+  # and then answered a curl thirty seconds later. Intermittent unreachability reads as a flaky network
+  # or a wedged worker; it was Windows power management doing exactly its job.
+  #
+  # AC only, deliberately: these boxes have no battery, and a laptop-based worker sleeping on battery is
+  # correct behaviour rather than a fault.
+  become: true
+  ansible.windows.win_powershell:
+    script: |
+      foreach ($setting in @('standby-timeout-ac', 'hibernate-timeout-ac', 'disk-timeout-ac')) {
+        & powercfg.exe /change $setting 0 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "powercfg /change $setting failed (exit $LASTEXITCODE)" }
+      }
+      # Hibernation off entirely: it also reclaims hiberfil.sys, which is RAM-sized on a disk that holds
+      # a browser profile and an NVDA install.
+      & powercfg.exe /hibernate off 2>&1 | Out-Null
+      $Ansible.Changed = $true
+      'sleep, hibernate and disk timeouts disabled on AC'
+
+- name: Keep the NIC awake
+  # The SECOND mechanism, and fixing only one leaves the fault intermittent: the sleep timers put the
+  # whole machine away, while the NIC's own selective suspend powers the adapter down with the OS still
+  # running. That second one is what produced the 48 EHOSTUNREACH failures above.
+  #
+  # `Set-NetAdapterPowerManagement` is not present on every SKU, hence the registry fallback to the value
+  # it would have written: PnPCapabilities 24 disables both power-down and wake-armed.
+  become: true
+  ansible.windows.win_powershell:
+    script: |
+      $adapters = Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' }
+      if (-not $adapters) {
+        $Ansible.Changed = $false
+        'no physical adapter reported Up -- NIC power saving NOT checked'
+        return
+      }
+      foreach ($a in $adapters) {
+        try {
+          Set-NetAdapterPowerManagement -Name $a.Name -AllowComputerToTurnOffDevice Disabled -ErrorAction Stop
+        } catch {
+          $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
+          Get-ChildItem $key -ErrorAction SilentlyContinue | Where-Object {
+            (Get-ItemProperty $_.PSPath -Name DriverDesc -ErrorAction SilentlyContinue).DriverDesc -eq $a.InterfaceDescription
+          } | ForEach-Object { Set-ItemProperty $_.PSPath -Name PnPCapabilities -Value 24 -Type DWord -Force }
+        }
+        "NIC '$($a.Name)' will not be powered down"
+      }
+      $Ansible.Changed = $true
+
+- name: Durable browser capture profiles
+  # `browsers.mjs` defaults these under %LOCALAPPDATA%, one directory PER BROWSER. Provisioning
+  # preparing one path while the worker uses another leaves a FIRST-RUN browser, which NVDA records as
+  # phantom elements on pages with no headings. They must not sit in %TEMP%, for the same reason the
+  # NVDA install must not.
+  #
+  # Unbecomed: %LOCALAPPDATA% is per-user and the worker is `witness`.
+  #
+  # Both are created regardless of which browser this guest drives — they cost an empty directory, and a
+  # guest whose browser is switched later should not need re-provisioning to get a prepared profile.
+  ansible.windows.win_file:
+    path: '%LOCALAPPDATA%\a11y-witness\{{ item }}'
+    state: directory
+  loop:
+    - edge-profile
+    - chrome-profile

@@ -1,0 +1,114 @@
+---
+# The worker service, and the on-demand capture-check runner.
+#
+# Every parameter below was chosen for a reason that has already cost this project something, so none of
+# them is a default worth "tidying". `win_scheduled_task` expresses all of them declaratively, which is
+# the single clearest module win in the port — but the values are the asset, not the module.
+
+- name: Find the node the task must launch
+  # Baked into the task definition as an ABSOLUTE path rather than derived at launch. The task's
+  # environment has neither %ProgramFiles% set correctly nor node on PATH, and the symptom of getting
+  # that wrong is a console window that opens and closes in two seconds with nothing written anywhere.
+  ansible.windows.win_powershell:
+    script: |
+      $candidates = @(
+        (Join-Path $env:ProgramFiles 'nodejs\node.exe'),
+        'C:\Program Files\nodejs\node.exe',
+        (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')
+      )
+      $found = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+      if (-not $found) { $found = (Get-Command node -ErrorAction SilentlyContinue).Source }
+      if (-not $found) { throw 'node.exe not found -- refusing to register a task that would fail at launch' }
+      $Ansible.Changed = $false
+      $found
+  register: node_exe
+  changed_when: false
+
+- name: Register the worker task
+  become: true
+  community.windows.win_scheduled_task:
+    name: "{{ worker_task_name }}"
+    description: a11y-witness NVDA capture worker
+    actions:
+      - path: "{{ worker_repo_path }}\\packages\\nvda-worker\\src\\run-server.cmd"
+        # Quoted because the path contains spaces.
+        arguments: '"{{ node_exe.output | first }}"'
+    username: "{{ ansible_user }}"
+    # MANDATORY. A service, or anything launched over plain SSH, has no desktop — and guidepup reports
+    # that as "nvda.start failed: NVDA is not supported", which reads like a broken install and is not
+    # one. NVDA is a GUI application; it needs a real logged-on session.
+    logon_type: interactive_token
+    # `limited`, NOT `highest`, and deliberately so: guidepup drives nvda_noUIAccess.exe, which cannot
+    # read ELEVATED windows at all. An elevated worker captures nothing, silently.
+    run_level: limited
+    triggers:
+      # What makes the worker self-healing across reboots. Without it the task sits at "Ready" forever
+      # and the machine looks dead after a restart.
+      - type: logon
+        username: "{{ ansible_user }}"
+    # The at-logon trigger covers a reboot but NOT a crash: when the worker process died the task went
+    # back to "Ready" and stayed there, so the box answered nothing until someone logged on again.
+    # Observed for real — an NVDA socket error killed the worker and it never came back. This is why
+    # server.mjs exits 1 on an unrecoverable error instead of limping on.
+    restart_count: 5
+    restart_interval: PT1M
+    # No limit. This is a long-running service, not a batch job, and the DEFAULT three-day limit would
+    # silently kill it.
+    execution_time_limit: PT0S
+    # A laptop-class worker must still start and keep running on mains-adjacent power states.
+    disallow_start_if_on_batteries: false
+    stop_if_going_on_batteries: false
+    state: present
+    enabled: true
+
+- name: Register the capture-check task
+  # Its own task because `utmctl exec` and SSH land in SESSION 0, and guidepup reports that as
+  # "NVDA is not supported". The gate needs the same interactive desktop the worker does. Registering it
+  # here means every worker can run the gate; it used to be reconstructed by hand each time.
+  become: true
+  community.windows.win_scheduled_task:
+    name: "{{ worker_check_task_name }}"
+    description: a11y-witness capture regression gate (on demand)
+    actions:
+      - path: "{{ worker_repo_path }}\\packages\\nvda-worker\\src\\run-capture-check.cmd"
+    username: "{{ ansible_user }}"
+    logon_type: interactive_token
+    run_level: limited
+    # NO trigger: started on demand, never at logon.
+    # 30 minutes rather than unlimited, because unlike the worker this IS a batch job and a wedged check
+    # should not sit there forever.
+    execution_time_limit: PT30M
+    state: present
+    enabled: true
+
+- name: Remove the one-shot bootstrap task if it is still armed
+  # `a11ybootstrap` exists only to carry a machine across the reboot that follows account creation. It is
+  # deliberately NOT a general update-on-boot mechanism, for three reasons worth keeping:
+  #   - workerCode provenance would span two versions inside one corpus run;
+  #   - a self-update has no equivalent of the /health.code verification a deploy gets;
+  #   - one bad push would brick the whole fleet simultaneously, with no staged rollout anywhere.
+  become: true
+  community.windows.win_scheduled_task:
+    name: a11ybootstrap
+    state: absent
+
+- name: Report what was registered
+  # Read BACK, not assumed. `Register-ScheduledTask` returning cleanly means the request was accepted;
+  # this is the same distinction that made `utmctl exec` untrustworthy for an hour.
+  become: true
+  ansible.windows.win_powershell:
+    script: |
+      $Ansible.Changed = $false
+      foreach ($n in @('{{ worker_task_name }}', '{{ worker_check_task_name }}')) {
+        $t = Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue
+        if ($t) {
+          "$n logon=$($t.Principal.LogonType) runLevel=$($t.Principal.RunLevel) " +
+          "triggers=$(($t.Triggers | Measure-Object).Count) restarts=$($t.Settings.RestartCount)"
+        } else { "$n MISSING" }
+      }
+  register: registered_tasks
+  changed_when: false
+
+- name: Say so
+  ansible.builtin.debug:
+    var: registered_tasks.output

@@ -1,0 +1,126 @@
+---
+# Dependencies, guidepup, NVDA, and the one NVDA setting that decides whether interaction evidence is
+# usable at all.
+#
+# NOT elevated, and that is deliberate rather than an omission. guidepup caches NVDA to
+# `%LOCALAPPDATA%\guidepup`, which is per-USER: run any of this as SYSTEM and the screen reader installs
+# into SYSTEM's profile while the worker looks for it in the witness profile. An SSH session is already
+# `witness`, so unbecomed tasks land in the right place.
+
+- name: Install dependencies
+  # `ansible.builtin.npm` is POSIX-oriented, so this stays a shell call. Unconditional and idempotent:
+  # skipping it when package-lock.json looks unchanged is the optimisation that leaves one box on last
+  # week's guidepup — and guidepup's version is EVIDENCE, in the capture cache key, because it parses
+  # NVDA's speech before this project ever sees it.
+  ansible.windows.win_shell: npm install
+  args:
+    chdir: "{{ worker_repo_path }}"
+  changed_when: true
+
+- name: Read the guidepup version, and refuse a version that cannot drive NVDA 2026
+  # guidepup <0.29 looks for the old NVDA Remote ADD-ON certificate. NVDA 2026.1.x ships Remote Access
+  # in core and has no such add-on, so the pair fails at NVDAClient.connect and reports it — misleadingly
+  # — as "NVDA not installed". That error string has sent people looking for a missing install more than
+  # once, which is why it is checked here rather than discovered there.
+  ansible.windows.win_powershell:
+    script: |
+      $manifest = Join-Path '{{ worker_repo_path }}' 'node_modules\@guidepup\guidepup\package.json'
+      if (-not (Test-Path $manifest)) { throw '@guidepup/guidepup is not installed. npm install failed.' }
+      $Ansible.Changed = $false
+      (Get-Content $manifest -Raw | ConvertFrom-Json).version
+  register: guidepup_version
+  changed_when: false
+
+- name: It must be at least 0.29
+  ansible.builtin.assert:
+    that: (guidepup_version.output | first | regex_replace('-.*$', '')) is version('0.29.0', '>=')
+    fail_msg: >-
+      guidepup {{ guidepup_version.output | first }} cannot drive NVDA 2026.x — it looks for the old
+      Remote add-on certificate, and the failure surfaces as the misleading "NVDA not installed".
+      Bump it to >=0.29.2 in package.json.
+    success_msg: "guidepup {{ guidepup_version.output | first }}"
+
+- name: Set up the guidepup environment
+  ansible.windows.win_shell: npx.cmd --yes @guidepup/setup setup
+  args:
+    chdir: "{{ worker_repo_path }}"
+  changed_when: true
+
+# ForegroundLockTimeout is NOT applied here, and that is a decision rather than an oversight.
+#
+# `SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT)` requires a thread that can change the foreground
+# window: the value is cached PER SESSION, and a registry write alone is documented as insufficient.
+# Anything Ansible runs — becomed or not — is a network logon, so applying it from here would report
+# success and change nothing for the session that matters.
+#
+# `run-server.cmd` re-applies it at every worker start, in the session that will actually drive the
+# browser, which is the correct mechanism and already ships. Left non-zero the symptom is captures
+# returning 0 phrases with NO error anywhere — nvda.start() succeeds, windowsActivate reports ok, and
+# every read comes back empty because the browser is refused the foreground. `verify.yml` gates on
+# readiness, which is where a failure would actually show up.
+
+- name: Install NVDA
+  # Run FROM the repo: the installer reads the LOCAL @guidepup/guidepup manifest.json to decide which
+  # NVDA build to fetch, so this is what keeps the screen reader and its driver in lockstep.
+  ansible.windows.win_shell: npx.cmd --yes @guidepup/setup install nvda
+  args:
+    chdir: "{{ worker_repo_path }}"
+  changed_when: true
+
+- name: Prove the NVDA install is not gutted
+  # The failure this whole step exists to prevent: %TEMP% cleanup once deleted library.zip and left
+  # nvda.exe as a stub that launches and dies, producing "Timed out waiting for NVDA to be running" and
+  # NO nvda.log at all. Which is also why the cache must live under %LOCALAPPDATA%\guidepup and never
+  # under %TEMP%.
+  #
+  # The thresholds are the knowledge here: ~1700+ files is a healthy install, and the two named payload
+  # files are the ones whose absence produces that symptom.
+  ansible.windows.win_powershell:
+    script: |
+      $root = if ($env:GUIDEPUP_SCREEN_READERS_PATH) { $env:GUIDEPUP_SCREEN_READERS_PATH }
+              else { Join-Path $env:LOCALAPPDATA 'guidepup' }
+      $exe = Get-ChildItem (Join-Path $root 'nvda') -Recurse -Filter 'nvda.exe' -ErrorAction SilentlyContinue |
+             Sort-Object FullName -Descending | Select-Object -First 1
+      if (-not $exe) { throw "NVDA not found under $root. The install step failed." }
+      $dir = Split-Path $exe.FullName
+      $count = (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue).Count
+      if ($count -lt 500) { throw "NVDA at $dir looks gutted ($count files; expect ~1700+). Delete it and re-run." }
+      foreach ($required in @('library.zip', 'nvda_slave.exe')) {
+        if (-not (Test-Path (Join-Path $dir $required))) { throw "NVDA install is incomplete: $required missing." }
+      }
+      $Ansible.Changed = $false
+      $dir
+  register: nvda_dir
+  changed_when: false
+
+- name: Turn the NVDA Speech Viewer off, and assert it took
+  # The highest-value setting in the whole role. Guidepup's bundled config ships the Speech Viewer ON.
+  # That window's focus event is ANNOUNCED, so it lands in the spokenPhraseLog delta captured right
+  # after activating a control: every interaction probe returns "NVDA Speech Viewer" instead of the
+  # page's response, which makes an accessible page and an inaccessible one INDISTINGUISHABLE.
+  #
+  # It fails silently by construction — capture-check asserts that the probe fired, not what it heard —
+  # so the re-grep at the end is not belt and braces, it is the only thing that can catch it.
+  #
+  # Reinstalling NVDA resets this, which is why it runs after the install every time rather than once.
+  ansible.windows.win_powershell:
+    parameters:
+      NvdaDir: "{{ nvda_dir.output | first }}"
+    script: |
+      param([string]$NvdaDir)
+      $patched = 0
+      foreach ($ini in (Get-ChildItem $NvdaDir -Recurse -Filter 'nvda.ini' -ErrorAction SilentlyContinue)) {
+        $body = Get-Content $ini.FullName -Raw
+        $new = $body -replace 'showSpeechViewerAtStartup = True', 'showSpeechViewerAtStartup = False'
+        if ($new -ne $body) { Set-Content -Path $ini.FullName -Value $new -NoNewline; $patched++ }
+      }
+      $stillOn = Get-ChildItem $NvdaDir -Recurse -Filter 'nvda.ini' -ErrorAction SilentlyContinue |
+                 Select-String 'showSpeechViewerAtStartup = True'
+      if ($stillOn) { throw 'Speech Viewer is still enabled; interaction probes would be unusable.' }
+      $Ansible.Changed = ($patched -gt 0)
+      "Speech Viewer off (patched $patched file(s))"
+  register: speech_viewer
+
+- name: Say what happened
+  ansible.builtin.debug:
+    msg: "{{ nvda_dir.output | first }} — {{ speech_viewer.output | first }}"

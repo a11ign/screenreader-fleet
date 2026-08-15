@@ -1,0 +1,32 @@
+---
+# The worker port, and the dialog that would otherwise block the whole desktop.
+
+- name: No "allow this app" alerts
+  # A program that starts listening with no matching rule raises the allow-app alert, and that alert
+  # blocks the ENTIRE interactive session until someone dismisses it. On a headless fleet nobody will,
+  # so the box sits there looking hung with a perfectly healthy worker behind a modal.
+  #
+  # `win_firewall` manages the profiles; NotifyOnListen is not one of its parameters, so this stays
+  # PowerShell. Idempotent by nature — setting it twice is setting it once.
+  become: true
+  ansible.windows.win_powershell:
+    script: |
+      $before = (Get-NetFirewallProfile -Profile Domain, Private, Public).NotifyOnListen
+      Set-NetFirewallProfile -Profile Domain, Private, Public -NotifyOnListen False
+      $Ansible.Changed = ($before -contains $true)
+      "NotifyOnListen was: $($before -join ',')"
+
+- name: Inbound rule for the worker port
+  # Profile Any on purpose: a bare-metal box's NIC profile can flip between Private and Public after a
+  # DHCP lease change or a network rename, and a rule bound to one profile then silently stops applying
+  # — which presents as a worker that was reachable yesterday and is not today.
+  become: true
+  community.windows.win_firewall_rule:
+    name: "a11y-witness worker {{ worker_port }}"
+    localport: "{{ worker_port }}"
+    protocol: tcp
+    direction: in
+    action: allow
+    profiles: [domain, private, public]
+    enabled: true
+    state: present

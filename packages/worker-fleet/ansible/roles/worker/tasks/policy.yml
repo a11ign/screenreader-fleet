@@ -1,0 +1,125 @@
+---
+# Machine and user policy: keep the desktop silent and the browser predictable.
+#
+# This is what `normalise-fleet.mjs` + `guest/normalise-fleet.cmd` did, except that pair could only ever
+# reach UTM guests -- it enumerated VMs from `utmctl list` and pushed a .cmd through a bespoke 150-line
+# remote-exec transport. Bare-metal workers had no equivalent at all, which is how a fleet drifts.
+#
+# Drift here is not cosmetic. `environmentKey()` puts browser and OS versions in the CAPTURE CACHE KEY,
+# and fleet-consistency.mjs records how a split fleet presents: "the cache merely stopped hitting, which
+# reads as ordinary churn rather than as a split fleet."
+#
+# ## The HKLM / HKCU split is load-bearing
+#
+# Elevated tasks below are `become: true`, which runs as SYSTEM. The HKCU tasks deliberately are NOT:
+# an SSH session is already `witness`, so unbecomed tasks write the worker's own hive. Becoming SYSTEM
+# for these would write SYSTEM's HKCU instead -- the screensaver would stay on for the account that
+# actually runs captures, and nothing would report a thing. That is precisely the defect the previous
+# `become: true` on the whole script introduced.
+
+- name: Edge policy — first run, background work, and autofill
+  become: true
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge
+    name: "{{ item.name }}"
+    data: "{{ item.value }}"
+    type: dword
+  loop: "{{ worker_edge_policy }}"
+  loop_control:
+    label: "{{ item.name }}={{ item.value }}"
+
+- name: Edge auto-update off
+  become: true
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate
+    name: "{{ item.name }}"
+    data: "{{ item.value }}"
+    type: dword
+  loop: "{{ worker_edge_update_policy }}"
+  loop_control:
+    label: "{{ item.name }}={{ item.value }}"
+
+- name: Nothing pops to the foreground uninvited
+  become: true
+  ansible.windows.win_regedit:
+    path: "{{ item.path }}"
+    name: "{{ item.name }}"
+    data: "{{ item.value }}"
+    type: dword
+  loop: "{{ worker_quiet_policy }}"
+  loop_control:
+    label: "{{ item.path | basename }}\\{{ item.name }}"
+
+# --- HKCU from here down. NO `become` — see the header. ---
+
+- name: Suggestion surfaces off for the worker's own account
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager
+    name: "{{ item }}"
+    data: 0
+    type: dword
+  loop: "{{ worker_content_delivery_values }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Screensaver off
+  # It can take the foreground mid-capture and steal focus from the browser. String values, not DWORDs:
+  # this is where Windows has always kept them, and a DWORD here is silently ignored.
+  ansible.windows.win_regedit:
+    path: HKCU:\Control Panel\Desktop
+    name: "{{ item }}"
+    data: "0"
+    type: string
+  loop:
+    - ScreenSaveActive
+    - ScreenSaveTimeOut
+
+# The policy above stops OneDrive starting again. It does NOT remove the per-user Run entry that
+# relaunches it at logon, and it does not dismiss a toast already on screen — observed, with the policy
+# applied cleanly and "Turn On Windows Backup" still sitting over the desktop.
+- name: Remove OneDrive's per-user Run entries
+  ansible.windows.win_regedit:
+    path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Run
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - OneDrive
+    - OneDriveSetup
+
+- name: Evict OneDrive itself
+  # No module uninstalls OneDrive, so this stays PowerShell. SysWOW64 first, System32 second — which one
+  # exists depends on the image.
+  ansible.windows.win_powershell:
+    script: |
+      $ErrorActionPreference = 'SilentlyContinue'
+      Get-Process OneDrive | Stop-Process -Force
+      $setup = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe"
+      if (-not (Test-Path $setup)) { $setup = "$env:SystemRoot\System32\OneDriveSetup.exe" }
+      if (Test-Path $setup) {
+        Start-Process $setup -ArgumentList '/uninstall' -Wait
+        $Ansible.Changed = $true
+        'uninstalled'
+      } else {
+        $Ansible.Changed = $false
+        'not present'
+      }
+  register: onedrive_evicted
+
+- name: Report the UAC posture, and do not change it
+  # UAC prompts land on the secure desktop, where NVDA cannot read them and automation cannot click
+  # them. The answer is to NEED no elevation at runtime, never to turn UAC off: guidepup drives
+  # nvda_noUIAccess.exe, which cannot read elevated windows at all, so an elevated browser would
+  # capture nothing. Reported so a surprising value is visible, and deliberately not written.
+  become: true
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+    name: PromptOnSecureDesktop
+  register: uac_posture
+  changed_when: false
+
+- name: Say what it is
+  ansible.builtin.debug:
+    msg: >-
+      PromptOnSecureDesktop={{ uac_posture.value | default('unset') }} —
+      fine either way, because nothing in the capture path elevates.
+      OneDrive: {{ onedrive_evicted.output | default(['?']) | first }}

@@ -1,0 +1,59 @@
+---
+# The worker baseline, as a role.
+#
+# ## Order matters, and each boundary is a real dependency
+#
+#   packages  node, git and the repo — literally everything else needs them
+#   account   the worker identity must exist before a task can name it as a principal
+#   policy    machine and user policy; independent of the rest, cheap, and the thing that drifts
+#   firewall  the port must be open before anything can verify /health across the network
+#   nvda      needs the repo and npm; caches per-USER, so it must not be becomed
+#   tasks     names the account and the node it will launch, so it comes after both exist
+#   bespoke   power and NIC state; no module, no dependency either way
+#   verify    last, because it is the only step that can prove any of the others took
+#
+# ## What is deliberately NOT here
+#
+# `apply-foreground-lock-timeout.ps1` — see nvda.yml. `SystemParametersInfo` needs a thread that can
+# change the foreground window, and everything Ansible runs is a network logon. `run-server.cmd`
+# re-applies it per session, which is the only mechanism that works.
+#
+# `diagnose-nvda-worker.ps1` — kept as a script and invoked, never ported. Its product is ORDERED
+# VERDICTS WITH FIXES ("fix the FIRST one; later failures are usually downstream"), and `assert` fails
+# fast, which is the opposite behaviour. Porting it would mean `ignore_errors` on every check plus a
+# hand-rolled aggregator — exactly the machinery it already is.
+#
+# `build-lean-worker-image.ps1` — offline DISM servicing that produces an ISO. Not host configuration,
+# and there is no Ansible module for it.
+
+- name: Node, Git and the repo
+  ansible.builtin.import_tasks: packages.yml
+  tags: [packages]
+
+- name: Account and credential-free auto-logon
+  ansible.builtin.import_tasks: account.yml
+  tags: [account]
+
+- name: Machine and user policy
+  ansible.builtin.import_tasks: policy.yml
+  tags: [policy]
+
+- name: Firewall
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [firewall]
+
+- name: Dependencies, guidepup and NVDA
+  ansible.builtin.import_tasks: nvda.yml
+  tags: [nvda]
+
+- name: Scheduled tasks
+  ansible.builtin.import_tasks: tasks.yml
+  tags: [tasks]
+
+- name: Power, NIC and browser profiles
+  ansible.builtin.import_tasks: bespoke.yml
+  tags: [bespoke]
+
+- name: Start it and prove it serves
+  ansible.builtin.import_tasks: verify.yml
+  tags: [verify]

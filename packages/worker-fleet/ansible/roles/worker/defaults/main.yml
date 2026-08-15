@@ -1,0 +1,80 @@
+---
+# Everything the worker role can be pointed at. These mirror provision-nvda-worker.ps1's own env-var
+# defaults (A11Y_REPO_PATH, A11Y_TASK_NAME, A11Y_PORT) rather than re-deciding them, because a role that
+# configures one path while the worker reads another leaves a box that provisions cleanly and serves
+# nothing.
+worker_repo_url: https://github.com/DanBeckDev/a11y-witness.git
+worker_repo_path: 'C:\Users\witness\a11y-witness'
+worker_task_name: a11ysrv
+worker_check_task_name: a11ycheck
+worker_port: 8765
+
+# ---------------------------------------------------------------------------------------------------
+# Browser policy. The VALUES here are trivial; their derivation is the asset, so each carries its own
+# reason. Applied under HKLM, so these tasks are elevated.
+#
+# Read this list as evidence control, not as preference. Every entry changes what a capture HEARS.
+# ---------------------------------------------------------------------------------------------------
+worker_edge_policy:
+  # A brand-new Edge profile shows a welcome/sign-in surface. On a page with no headings, NVDA quick-nav
+  # escapes the empty document into that browser UI and records it as phantom elements
+  # ("Welcome to Microsoft Edge") -- page findings that are not about the page.
+  - { name: HideFirstRunExperience, value: 1 }
+  - { name: BrowserSignin, value: 0 }
+
+  # Stop Edge doing anything we did not ask for. A capture launches and kills Edge once per capture --
+  # 90 times in a dataset run -- and background work racing that leaks processes and adds guest noise.
+  #
+  # Observed after a 45-pair run: 5 msedge processes alive on an idle, freshly booted machine with zero
+  # captures run, plus WER crash reports from MicrosoftEdgeUpdate.exe and Edge's own setup.exe
+  # (EdgeInstallerError 0x220). Edge was updating itself underneath the run.
+  - { name: BackgroundModeEnabled, value: 0 }
+  - { name: StartupBoostEnabled, value: 0 }
+
+  # Autofill draws a suggestion icon inside recognised inputs, and NVDA announces it as an embedded
+  # object (U+FFFC) appended to the field announcement. Whether it appears depends on what the durable
+  # profile has LEARNED, so the same page announces differently over the life of a run -- measured
+  # rising from 3% to 31% of affected captures as the profile accumulated, with 26 good/bad pairs in the
+  # corpus disagreeing about it. Off, so a form-field announcement is a property of the PAGE.
+  - { name: AutofillAddressEnabled, value: 0 }
+  - { name: AutofillCreditCardEnabled, value: 0 }
+  - { name: PasswordManagerEnabled, value: 0 }
+
+# On a workstation Edge auto-update is right; on a capture appliance it means an installer runs
+# unannounced while we are driving the browser.
+worker_edge_update_policy:
+  - { name: UpdateDefault, value: 0 }
+  - { name: AutoUpdateCheckPeriodMinutes, value: 0 }
+
+# Nothing may pop to the foreground uninvited. A capture works by forcing the browser to the front and
+# reading what NVDA announces; a notification that steals focus mid-capture corrupts the evidence, and
+# one that merely sits over the page does it silently. Observed on the guest: OneDrive offering
+# "Turn On Windows Backup" during a run.
+worker_quiet_policy:
+  - path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer'
+    name: DisableNotificationCenter
+    value: 1
+  - path: 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive'
+    name: DisableFileSyncNGSC
+    value: 1
+  - path: 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive'
+    name: PreventNetworkTrafficPreUserSignIn
+    value: 1
+  # Windows must not choose its own downtime. During one 94-minute dataset run Windows Update rebooted
+  # the worker TWICE mid-capture -- event id 1074, "winlogon.exe has initiated the power off ... on
+  # behalf of NT AUTHORITY\SYSTEM", at 09:02:55 and 09:09:30. The run only survived because auto-logon
+  # plus the at-logon task self-heal, and the outages happened to fall between cases.
+  #
+  # Updates still download and install; only the REBOOT waits for a human. The policy keys on "a user is
+  # logged on", which auto-logon guarantees on this fleet.
+  - path: 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+    name: NoAutoRebootWithLoggedOnUsers
+    value: 1
+
+# Per-USER suggestion surfaces. These live in HKCU, which is why the tasks that write them must not be
+# becomed to SYSTEM -- see tasks/policy.yml.
+worker_content_delivery_values:
+  - SubscribedContent-338389Enabled
+  - SubscribedContent-310093Enabled
+  - SoftLandingEnabled
+  - SystemPaneSuggestionsEnabled

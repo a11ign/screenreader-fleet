@@ -1,0 +1,163 @@
+---
+# Node, Git and the repo — the prerequisites the rest of the role runs on.
+#
+# ## Why the version is resolved ONCE, on the control plane
+#
+# The script asked nodejs.org for the current LTS on each box independently. Across twelve machines
+# provisioned over a week that straddles a Node release, and the fleet ends up on two versions — which
+# `/health.environment.nodeVersion` reports and `fleet-consistency.mjs` flags, but only after the fact.
+# Resolving it here, `run_once`, means every box in a run gets the same answer by construction.
+#
+# ## What disappeared with `win_unzip`
+#
+# The script had ~17 lines of transactional install — verify node.exe exists in the NEW tree, rename the
+# old aside, move the new in, delete the old, and rename back on any failure — because an earlier
+# delete-then-move left boxes with no node at all. It also ran `icacls /reset /T` three times, because
+# `Move-Item` on the same volume preserves the SOURCE ACL, so a tree moved out of %TEMP% into
+# Program Files carried the installing account's permissions and the unelevated worker task got
+# "Access is denied, exit 5".
+#
+# Extracting straight into the destination inherits the destination's ACL, so the ACL repair is not
+# simplified here — its CAUSE is gone. That is the difference between porting a workaround and removing
+# the need for one.
+
+- name: Which Node LTS, decided once for the whole run
+  ansible.builtin.uri:
+    url: https://nodejs.org/dist/index.json
+    return_content: true
+    timeout: 30
+  delegate_to: localhost
+  run_once: true
+  register: node_index
+  changed_when: false
+
+- name: Pin it
+  ansible.builtin.set_fact:
+    node_lts: "{{ (node_index.json | selectattr('lts') | first).version }}"
+  run_once: true
+
+- name: What architecture is this box
+  # `OSArchitecture`, not %PROCESSOR_ARCHITECTURE%: the env var reports the PROCESS architecture, so an
+  # x64 PowerShell emulated on ARM64 Windows reports AMD64 and would install the wrong Node. The
+  # symptom is "node is not recognized" AFTER a successful-looking install.
+  ansible.windows.win_powershell:
+    script: |
+      $Ansible.Changed = $false
+      $pa = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+      switch ($pa) { 'AMD64' { 'x64' } 'ARM64' { 'arm64' } default { "$pa".ToLower() } }
+  register: os_arch
+  changed_when: false
+
+- name: Refuse an architecture we have no binaries for
+  ansible.builtin.assert:
+    that: (os_arch.output | first) in ['x64', 'arm64']
+    fail_msg: "unsupported architecture '{{ os_arch.output | first }}' (expected x64 or arm64)"
+
+- name: Is Node already installed
+  # Checked by PATH-on-disk rather than `Get-Command`, because a session that started before the machine
+  # PATH was updated does not have it, and a perfectly good install then looks absent and gets replaced.
+  ansible.windows.win_stat:
+    path: 'C:\Program Files\nodejs\node.exe'
+  register: node_installed
+
+- name: Fetch and unpack Node
+  when: not node_installed.stat.exists
+  become: true
+  block:
+    - name: Download it
+      # Archives, not MSIs: Node's current LTS line publishes win-arm64-zip but NO arm64 .msi, so the
+      # zip is the only version-agnostic choice — and this fleet has both architectures.
+      ansible.windows.win_get_url:
+        url: "https://nodejs.org/dist/{{ node_lts }}/node-{{ node_lts }}-win-{{ os_arch.output | first }}.zip"
+        dest: 'C:\Windows\Temp\node.zip'
+
+    - name: Unpack it
+      community.windows.win_unzip:
+        src: 'C:\Windows\Temp\node.zip'
+        dest: 'C:\Windows\Temp\node-unpacked'
+        delete_archive: true
+
+    - name: Move it into place
+      # The archive contains a single versioned top-level directory; the install is that directory's
+      # contents. Named rather than globbed so a changed layout fails loudly instead of installing
+      # nothing.
+      ansible.windows.win_powershell:
+        parameters:
+          Version: "{{ node_lts }}"
+          Arch: "{{ os_arch.output | first }}"
+        script: |
+          param([string]$Version, [string]$Arch)
+          $src = "C:\Windows\Temp\node-unpacked\node-$Version-win-$Arch"
+          if (-not (Test-Path (Join-Path $src 'node.exe'))) {
+            throw "no node.exe in $src -- the archive layout changed; do not install a broken tree"
+          }
+          $dest = 'C:\Program Files\nodejs'
+          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          Move-Item $src $dest
+          # Move-Item preserves the SOURCE acl, so reset to inherit. Kept even though extraction now
+          # happens under Program Files' parent, because this line IS the move.
+          icacls.exe $dest /reset /T /C /Q | Out-Null
+          Remove-Item 'C:\Windows\Temp\node-unpacked' -Recurse -Force -ErrorAction SilentlyContinue
+          $Ansible.Changed = $true
+          (& (Join-Path $dest 'node.exe') --version)
+
+- name: Node on the machine PATH
+  become: true
+  ansible.windows.win_path:
+    elements: 'C:\Program Files\nodejs'
+    scope: machine
+    state: present
+
+- name: Is Git already installed
+  ansible.windows.win_stat:
+    path: 'C:\Program Files\MinGit\cmd\git.exe'
+  register: git_installed
+
+- name: Fetch and unpack MinGit
+  when: not git_installed.stat.exists
+  become: true
+  block:
+    - name: Find the release asset
+      # The asset regex is `[0-9.]+` and not `.*` on purpose: `.*` also matches the `-busybox-` builds,
+      # which look right in review and produce a git that behaves differently at runtime.
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/git-for-windows/git/releases/latest
+        return_content: true
+        timeout: 30
+      delegate_to: localhost
+      run_once: true
+      register: git_release
+      changed_when: false
+
+    - name: Download it
+      ansible.windows.win_get_url:
+        url: >-
+          {{ (git_release.json.assets
+              | selectattr('name', 'match', '^MinGit-[0-9.]+-' ~ (os_arch.output | first | replace('x64', '64-bit')) ~ '\.zip$')
+              | first).browser_download_url }}
+        dest: 'C:\Windows\Temp\mingit.zip'
+
+    - name: Unpack it straight into place
+      # No move, so no ACL to repair — extraction inherits the destination's permissions.
+      community.windows.win_unzip:
+        src: 'C:\Windows\Temp\mingit.zip'
+        dest: 'C:\Program Files\MinGit'
+        delete_archive: true
+
+- name: Git on the machine PATH
+  become: true
+  ansible.windows.win_path:
+    elements: 'C:\Program Files\MinGit\cmd'
+    scope: machine
+    state: present
+
+- name: The repo exists on the box
+  # Cloned as `witness`, not SYSTEM: the checkout lives in the worker's profile and everything downstream
+  # (npm, guidepup's cache, the scheduled task's command line) reads it from there.
+  ansible.windows.win_shell: |
+    if (-not (Test-Path '{{ worker_repo_path }}\.git')) {
+      & 'C:\Program Files\MinGit\cmd\git.exe' clone --quiet '{{ worker_repo_url }}' '{{ worker_repo_path }}'
+      'cloned'
+    } else { 'present' }
+  register: repo_state
+  changed_when: "'cloned' in repo_state.stdout"

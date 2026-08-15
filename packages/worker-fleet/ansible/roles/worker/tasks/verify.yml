@@ -1,0 +1,67 @@
+---
+# Start the worker and prove it is actually serving.
+#
+# The budgets here are the knowledge, not the polling. Every one of them was set because a shorter
+# deadline turned "not ready yet" and "broken" into the same observation — the rule this project applies
+# to capture probes, applied to provisioning.
+
+- name: Start the worker task
+  become: true
+  ansible.windows.win_shell: |
+    Stop-ScheduledTask -TaskName '{{ worker_task_name }}' -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName '{{ worker_task_name }}'
+  changed_when: true
+
+- name: Wait for the port to listen
+  # 90 s. The task has to start node, which has to bind before anything else can be true.
+  become: true
+  ansible.windows.win_wait_for:
+    port: "{{ worker_port }}"
+    state: started
+    timeout: 90
+
+- name: Wait for /health, from the control plane
+  # 240 s, and the reason is specific: the FIRST /health triggers NVDA's warm-up, a cold NVDA start is
+  # ~19 s, and the worker's own retry policy is 3 attempts 30 s apart. The honest worst case therefore
+  # exceeds two minutes, and a single 10 s request once timed out against a perfectly healthy worker.
+  #
+  # Asked from the CONTROL PLANE rather than the guest: a box asking itself whether it is reachable
+  # answers a different question from the one the fleet needs answered.
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:{{ worker_port }}/health"
+    method: GET
+    return_content: true
+    status_code: 200
+    timeout: 30
+  delegate_to: localhost
+  register: worker_health
+  retries: 24
+  delay: 10
+  until: worker_health.status is defined and worker_health.status == 200
+
+# Deliberately NOT gated on `ready`. `ready: false` right after a boot is normal and self-correcting —
+# it means "not yet", not "broken" — and provisioning that failed on it would fail on every fresh box.
+# The run waits for readiness itself, per worker, before taking work.
+- name: What this worker now reports
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} ready={{ worker_health.json.ready | default('?') }}
+      code={{ worker_health.json.code | default('?') }}
+      browser={{ worker_health.json.environment.browser | default('?') }}
+      {{ worker_health.json.environment.browserVersion | default('') }}
+      NVDA={{ worker_health.json.environment.screenReaderVersion | default('?') }}
+      guidepup={{ worker_health.json.environment.guidepupVersion | default('?') }}
+      provisionRevision={{ worker_health.json.environment.provisionRevision | default('?') }}
+
+- name: The browser this worker is configured for must actually be present
+  # Nothing falls back. A guest whose configured browser is missing reports `browserAvailable: false`
+  # and says which browser and which paths — it does not quietly capture in whatever else is installed,
+  # because a silent fallback puts two browsers' evidence in one corpus. That is the failure the cache
+  # key exists to prevent, arriving by a different door.
+  ansible.builtin.assert:
+    that: worker_health.json.readiness.checks.browser | default(true)
+    fail_msg: >-
+      {{ inventory_hostname }} cannot find its configured browser
+      ({{ worker_health.json.environment.browser | default('?') }}). A tiny11 image ships without Edge;
+      set A11Y_BROWSER=chrome in run-server.cmd on that box, or install the browser it expects.
+    success_msg: "browser present"

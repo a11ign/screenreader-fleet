@@ -1,0 +1,111 @@
+---
+# The worker account, and credential-free auto-logon.
+#
+# ## Why auto-logon is a requirement, not a convenience
+#
+# NVDA needs a logged-on console session, and `a11ysrv` triggers AT LOGON. Without auto-logon a rebooted
+# box sits at the login screen and never serves — indistinguishable, from outside, from a dead machine.
+# Every box in a fleet restarts, so this cannot be a manual step.
+#
+# ## NO PASSWORD IS STORED ANYWHERE, and that is the point rather than a shortcut
+#
+# Auto-logon with a real password means the secret exists in LSA, in the operator's shell, and in
+# whatever distributed it to twelve machines. A local account with a BLANK password needs none of that:
+# there is no credential to leak, rotate or forget.
+#
+# The security maths favours it, which is not obvious and is worth keeping written down:
+#
+#   - Auto-logon ALREADY means the box boots to an unlocked desktop. Anyone with physical access owns
+#     that session whether the password is blank or forty characters. The marginal exposure of blanking
+#     it is close to zero.
+#   - Windows ships `LimitBlankPasswordUse=1`, which blocks blank-password accounts from NETWORK logon
+#     entirely — no SMB, no RDP, no password-auth SSH. The account becomes console-only, which is
+#     strictly NARROWER than it was before.
+#   - SSH still works, because the fleet uses KEY auth. Key auth is unaffected by that policy.
+#
+# It is VERIFIED below rather than assumed, because "blank password is fine" is only true while
+# LimitBlankPasswordUse holds. `ansible/README.md`'s "Why SSH and not WinRM" rests on this exact
+# property: WinRM would require turning that guard off.
+#
+# ## With zero-touch install, most of this is already done
+#
+# `provisioning/bare-metal/autounattend.xml` creates the account blank and in Administrators, and turns
+# auto-logon on, before this role ever runs. These tasks are therefore usually no-ops — which is the
+# point of a role: it states the intended end state rather than the steps to reach it, so a hand-built
+# box and a PXE-built one converge.
+
+- name: The worker account exists, is local, and has no password
+  # `win_user` collapses two Windows gotchas the script had to work around by hand: `-Description` is
+  # ValidateLength-capped at 48 characters and FAILS BINDING rather than truncating, and
+  # `-PasswordNeverExpires` sits in a different parameter set from `-NoPassword` so the two cannot be
+  # combined. Neither exists here.
+  become: true
+  ansible.windows.win_user:
+    name: "{{ ansible_user }}"
+    password: ""
+    password_never_expires: true
+    account_disabled: false
+    state: present
+
+- name: It is an Administrator
+  # Not for provisioning's sake — for sshd's. Windows OpenSSH reads
+  # `%ProgramData%\ssh\administrators_authorized_keys` for members of this group and the per-user
+  # `~/.ssh/authorized_keys` otherwise, so group membership decides which file the key must be in.
+  # Get it wrong and sshd reads no key, falls back to offering password auth, and the blank-password
+  # account cannot use it — a permission denial that looks exactly like a bad key.
+  become: true
+  ansible.windows.win_group_membership:
+    name: Administrators
+    members: ["{{ ansible_user }}"]
+    state: present
+
+- name: Auto-logon, with no stored credential
+  become: true
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: string
+  loop:
+    - { name: AutoAdminLogon, data: "1" }
+    - { name: DefaultUserName, data: "{{ ansible_user }}" }
+    - { name: DefaultDomainName, data: "{{ ansible_hostname | default(inventory_hostname) }}" }
+  loop_control:
+    label: "{{ item.name }}={{ item.data }}"
+
+- name: Remove the two values that would undo it
+  become: true
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
+    name: "{{ item }}"
+    state: absent
+  loop:
+    # A plaintext password in the registry is the thing this design exists to avoid. If anything ever
+    # wrote one, remove it.
+    - DefaultPassword
+    # The trap. AutoLogonCount makes auto-logon ONE-SHOT: it decrements to zero and the box silently
+    # stops coming back after a reboot — which presents as a worker that worked for a week and then
+    # died for no reason.
+    - AutoLogonCount
+
+- name: Check the guard that makes a blank password safe
+  # Read, not written. LimitBlankPasswordUse=1 is the Windows DEFAULT, and this asserts it still holds
+  # rather than setting it — if something in the environment has turned it off, that is a decision
+  # somebody made and it needs to be seen, not silently reverted underneath them.
+  become: true
+  ansible.windows.win_reg_stat:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
+    name: LimitBlankPasswordUse
+  register: blank_password_guard
+  changed_when: false
+
+- name: Refuse to call this provisioned if the guard is off
+  # Absent counts as enabled: the default is 1, and the value is frequently not written at all.
+  ansible.builtin.assert:
+    that: blank_password_guard.value is not defined or blank_password_guard.value | int == 1
+    fail_msg: >-
+      LimitBlankPasswordUse is {{ blank_password_guard.value }} on {{ inventory_hostname }}, not 1.
+      That policy is the ONLY thing confining this box's blank-password account to console logon —
+      with it off, `{{ ansible_user }}` is reachable over SMB and RDP with no password at all. Either
+      restore it, or give the account a real password and stop using credential-free auto-logon.
+    success_msg: "blank-password auto-logon is safe here (LimitBlankPasswordUse holds)"

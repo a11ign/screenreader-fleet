@@ -1,0 +1,64 @@
+---
+# Provision a worker with the ROLE rather than the PowerShell script.
+#
+#     ansible-playbook provision-role.yml -l a11y-worker-1 --check --diff   # look first
+#     ansible-playbook provision-role.yml -l a11y-worker-1
+#     ansible-playbook provision-role.yml -l a11y-worker-1 --tags policy    # one concern
+#
+# ## Why this exists ALONGSIDE provision.yml rather than replacing it
+#
+# `provision.yml` drives `provision-nvda-worker.ps1` — 816 lines, 39% of them comments recording things
+# that have already cost this project days, and untestable in CI because it needs real NVDA on real
+# Windows. Replacing it is the point of this role, but replacing it BEFORE the role is proven equivalent
+# would mean discovering the gaps one silent capture at a time.
+#
+# So both exist until parity is demonstrated:
+#
+#   1. provision one box with the script and one with this role
+#   2. compare `/health.environment` — same browser, NVDA, guidepup, OS, protocol
+#   3. compare `provisionRevision`
+#   4. `npm run capture:check -- --worker=<role-provisioned>` and `npm run evidence:check <worker>`
+#
+# Only then does the script go, along with `normalise-fleet.mjs`, `guest-run.mjs` and
+# `guest/normalise-fleet.cmd` — the last of which this role's `policy.yml` already replaces, and for
+# bare-metal workers it replaces something that never worked there at all.
+#
+# ## provisionRevision will move, and that costs a recapture
+#
+# It is currently a hash of provision-nvda-worker.ps1 + run-server.cmd +
+# apply-foreground-lock-timeout.ps1, and it is a CAPTURE CACHE KEY. Deleting the first file necessarily
+# changes it and invalidates all 2,122 cached captures. Bundle that with any pending
+# CAPTURE_PROTOCOL_VERSION bump so the corpus is recaptured once rather than twice; a full recapture
+# measured 3 h 46 m across three workers.
+- name: Provision the capture workers (role)
+  hosts: a11y_workers
+  gather_facts: false
+  # One at a time. This installs NVDA and can restart the worker, and a fleet-wide simultaneous restart
+  # means every machine is unavailable at once rather than one at a time — which matters if a run is in
+  # flight against the others.
+  serial: 1
+
+  pre_tasks:
+    - name: Fast-forward the guest checkout so the role acts on THIS version
+      # The role installs from the repo on the box: npm, guidepup and the scheduled-task command lines
+      # all point into it. Provisioning from a stale checkout would configure a worker to run code
+      # nobody deployed, and only /health.code would notice.
+      ansible.windows.win_shell: |
+        git fetch --quiet origin
+        git merge --ff-only --quiet origin/{{ a11y_git_ref | default('main') }}
+        git rev-parse --short HEAD
+      args:
+        chdir: "{{ a11y_repo_path }}"
+      register: role_head
+      changed_when: true
+
+    - name: Say which version
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} provisioning from {{ role_head.stdout | trim }}"
+
+  roles:
+    - role: worker
+      vars:
+        worker_repo_path: "{{ a11y_repo_path }}"
+        worker_task_name: "{{ a11y_task_name }}"
+        worker_port: "{{ a11y_port }}"

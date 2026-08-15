@@ -4,14 +4,17 @@ Provision, update, restart and diagnose N bare-metal capture workers from the co
 
 ```bash
 pipx install ansible-core                       # 2.18+ — Debian's apt version is too old for Windows SSH
-ansible-galaxy collection install ansible.windows
+ansible-galaxy collection install -r requirements.yml   # BOTH collections; see requirements.yml
 
 cd packages/worker-fleet/ansible
 ansible-playbook deploy.yml                     # git pull + npm install + restart + PROVE it took
 ansible-playbook deploy.yml -l a11y-worker-3    # one box
 ansible-playbook restart.yml                    # the remedy for a wedged worker
-ansible-playbook provision.yml                  # the repair for a degraded one (reinstalls NVDA)
+ansible-playbook provision.yml                  # drives the PowerShell (today's path)
+ansible-playbook provision-role.yml             # the ported role (see "The role" below)
 ansible-playbook collect-logs.yml               # every worker's logs, into runs/worker-logs/
+
+python3 check-modules.py                        # do the module ARGUMENTS exist? syntax-check cannot tell
 ```
 
 The fleet is defined once, in `inventory.yml`. Everything else derives from it:
@@ -34,6 +37,52 @@ merely stopped hitting, which reads as ordinary churn rather than as a split fle
 UTM image mostly agreed. Twelve independently-purchased, independently-updating mini PCs will not.
 
 The UTM VMs keep their own lifecycle through `worker-ctl.sh` and are **not** managed from here.
+
+## The role
+
+`roles/worker/` is `provision-nvda-worker.ps1` ported to modules, split by concern:
+
+| tasks file | what it owns |
+|---|---|
+| `packages.yml` | Node (LTS resolved ONCE on the control plane, so a fleet cannot straddle a release), MinGit, the repo |
+| `account.yml` | the worker account, and credential-free auto-logon — including the `LimitBlankPasswordUse` assertion |
+| `policy.yml` | Edge, Windows Update, notifications, OneDrive, screensaver |
+| `firewall.yml` | the worker port, and the allow-app alert that would block the whole desktop |
+| `nvda.yml` | npm, guidepup, NVDA, and the Speech Viewer |
+| `tasks.yml` | `a11ysrv`, `a11ycheck`, and removing `a11ybootstrap` |
+| `bespoke.yml` | sleep/NIC power and browser profiles — the steps with no module |
+| `verify.yml` | start it and prove it serves |
+
+**The HKLM/HKCU split is load-bearing.** Elevated tasks are `become: true` (SYSTEM); the HKCU ones
+deliberately are not, because an SSH session is already `witness`. Becoming SYSTEM for those writes
+*SYSTEM's* hive — the screensaver stays on for the account that actually runs captures, and nothing
+reports a thing.
+
+**`provision.yml` and `provision-role.yml` both exist on purpose.** The script is 816 lines, 39% of them
+comments recording things that have already cost days, and it cannot be tested in CI. Deleting it before
+the role is proven equivalent means finding the gaps one silent capture at a time. Prove parity first:
+
+```bash
+ansible-playbook provision-role.yml -l a11y-worker-1 --check --diff   # look before you leap
+ansible-playbook provision-role.yml -l a11y-worker-1
+# then compare against a script-provisioned box:
+#   /health.environment  — browser, NVDA, guidepup, OS, protocol
+#   provisionRevision    — the machine-checkable equivalence test
+npm run capture:check -- --worker=http://<box>:8765
+npm run evidence:check http://<box>:8765
+```
+
+`provisionRevision` is a **capture cache key**, and it currently hashes the script files. Retiring the
+script necessarily moves it and invalidates all 2,122 cached captures — so bundle that with any pending
+`CAPTURE_PROTOCOL_VERSION` bump and recapture once. A full recapture measured 3 h 46 m across three
+workers.
+
+**Three things are deliberately NOT ported.** `apply-foreground-lock-timeout.ps1`, because
+`SystemParametersInfo` needs a thread that can change the foreground window and everything Ansible runs
+is a network logon — `run-server.cmd` re-applies it per session, which is the only mechanism that works.
+`diagnose-nvda-worker.ps1`, because its product is ordered verdicts with fixes and `assert` fails fast,
+which is the opposite behaviour. `build-lean-worker-image.ps1`, because offline DISM servicing has no
+module and it builds an ISO rather than configuring a host.
 
 ## Why SSH and not WinRM
 
@@ -66,9 +115,10 @@ Ansible needs sshd **and** the operator key on a box before it can do anything �
 
 - **Set `A11Y_OPERATOR_KEY` before running `bootstrap-windows-worker.ps1`** and the key is installed at
   bootstrap. Every later operation is unattended.
-- **`autounattend.xml` at Windows install time** plants the account, sshd and the key at first boot, so
-  there is no console visit at all. This is the right answer for a fleet being installed from scratch and
-  is where the PXE/iVentoy work was heading.
+- **`autounattend.xml` at Windows install time**, which now EXISTS for x64 —
+  `../src/provisioning/bare-metal/`. PXE-boot a box and it installs Windows, creates the account, brings
+  sshd up and plants your key, with no console visit at all. That is the right answer for a fleet being
+  installed from scratch, and it is what the PXE/iVentoy work was heading towards.
 
 Without either, the first touch on each machine is manual (`irm … | iex` at the console) and only runs
 2..n are unattended — 6–12 console visits.
