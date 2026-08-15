@@ -1,0 +1,25 @@
+---
+# Collections these playbooks need, pinned.
+#
+#     ansible-galaxy collection install -r requirements.yml
+#
+# `ansible.windows` is not enough on its own, and the way that failure presents is worth stating:
+# `ansible-doc -t module community.windows.win_scheduled_task` RESOLVES even when the collection is not
+# installed, because ansible-core carries redirect metadata for modules that moved between collections.
+# So the obvious check reports the module exists and the play then fails at runtime with "couldn't
+# resolve module". Verified here: `ansible-galaxy collection list` showed only ansible.windows while
+# ansible-doc happily documented three community.windows modules.
+#
+# A check that shares a failure mode with the thing it checks verifies nothing — the same rule this
+# repo applies to `utmctl exec` and to `/health.code`.
+collections:
+  # win_powershell, win_regedit, win_user, win_group_membership, win_service, win_package,
+  # win_get_url, win_path, win_acl, win_wait_for, win_reboot, win_uri.
+  - name: ansible.windows
+    version: ">=3.7.0"
+
+  # win_scheduled_task, win_firewall_rule and win_unzip live HERE, not in ansible.windows.
+  # All three are load-bearing: the worker is a scheduled task, the worker port needs a firewall rule,
+  # and node/MinGit arrive as zips.
+  - name: community.windows
+    version: ">=3.0.0"

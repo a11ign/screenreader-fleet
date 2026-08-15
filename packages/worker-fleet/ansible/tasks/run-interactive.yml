@@ -1,0 +1,122 @@
+---
+# Run a command ELEVATED, in the worker's own interactive desktop session, and wait for it.
+#
+#   - ansible.builtin.include_tasks: tasks/run-interactive.yml
+#     vars:
+#       interactive_name: a11y-provision
+#       interactive_command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\...\script.ps1"
+#       interactive_timeout: 2400
+#
+# ## Why this exists, and why `become` cannot replace it
+#
+# SSH lands in **session 0**. Three things break there, and only the first is obvious:
+#
+#   - `SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT)` fails, because the calling thread must be able
+#     to change the foreground window. Its failure mode is a capture that returns 0 phrases with no error
+#     anywhere — the worst shape of fault this project has.
+#   - guidepup reports the absence of a desktop as `nvda.start failed: NVDA is not supported`, which reads
+#     like a broken install and is not one.
+#   - `become_user: SYSTEM` writes SYSTEM's `HKCU` and reads SYSTEM's `%LOCALAPPDATA%`. So the screensaver
+#     stays on for the account that actually runs captures, the notification suppression applies to nobody,
+#     and NVDA's guidepup cache lands in the wrong profile. Nothing errors. Everything looks applied.
+#
+# Running unbecomed does not fix it either: `witness` is an Administrator, but an SSH logon gets the
+# UAC-filtered token, so every HKLM write fails with access denied.
+#
+# A scheduled task with `logon_type: interactive_token` and `run_level: highest` is the one mechanism that
+# is elevated AND interactive AND in the right profile at once. `a11ysrv` and `a11ycheck` are registered
+# the same way for the same reason; this is that pattern, made reusable.
+#
+# It needs no password because it does not authenticate — it attaches to the session the auto-logon
+# already established, which is why the credential-free design survives.
+- name: "Settle the defaults for: {{ interactive_name }}"
+  ansible.builtin.set_fact:
+    interactive_log: "C:\\ProgramData\\a11y-witness\\{{ interactive_name }}.log"
+    # Exit codes other than 0 that mean success. Provisioning uses 75 for "planned handoff, rebooting as
+    # another user", which is deliberately neither 0 nor a failure.
+    interactive_ok: "{{ [0] + (interactive_success_codes | default([])) }}"
+
+- name: "Somewhere for the transcript to go: {{ interactive_name }}"
+  become: true
+  ansible.windows.win_file:
+    path: C:\ProgramData\a11y-witness
+    state: directory
+
+- name: "Register the one-shot task: {{ interactive_name }}"
+  become: true
+  community.windows.win_scheduled_task:
+    name: "{{ interactive_name }}"
+    description: "a11y-witness: one-shot interactive step, removed when it finishes"
+    username: "{{ ansible_user }}"
+    logon_type: interactive_token
+    # NOT `limited`. This is provisioning, which writes machine policy and registers services; the WORKER
+    # task is deliberately `limited`, because nvda_noUIAccess.exe cannot read elevated windows.
+    run_level: highest
+    # Transcript, because Write-Host goes to the host and not to stdout — a hidden task redirected to a
+    # file captures nothing at all. This is the only way to see why an interactive step failed.
+    actions:
+      - path: powershell.exe
+        arguments: >-
+          -NoProfile -ExecutionPolicy Bypass -Command
+          "Start-Transcript -Path '{{ interactive_log }}' -Force | Out-Null;
+           try { {{ interactive_command }}; exit $LASTEXITCODE }
+           finally { Stop-Transcript | Out-Null }"
+    # No trigger: started on demand below, never at logon.
+    state: present
+    enabled: true
+
+- name: "Start it: {{ interactive_name }}"
+  become: true
+  ansible.windows.win_shell: Start-ScheduledTask -TaskName '{{ interactive_name }}'
+  changed_when: true
+
+- name: "Wait for it to finish: {{ interactive_name }}"
+  become: true
+  ansible.windows.win_shell: |
+    $t = Get-ScheduledTask -TaskName '{{ interactive_name }}' -ErrorAction SilentlyContinue
+    if (-not $t) { 'MISSING'; exit 0 }
+    $t.State
+  register: interactive_state
+  changed_when: false
+  # Polled rather than slept, and the budget is generous on purpose: provisioning installs NVDA and warms
+  # it up. A deadline that expires early turns "still working" into "failed", which is the same class of
+  # mistake as a capture probe giving up before the page has spoken.
+  retries: "{{ ((interactive_timeout | int) / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  until: interactive_state.stdout is defined and 'Running' not in interactive_state.stdout
+
+- name: "Collect its result and transcript: {{ interactive_name }}"
+  become: true
+  ansible.windows.win_shell: |
+    $info = Get-ScheduledTaskInfo -TaskName '{{ interactive_name }}' -ErrorAction SilentlyContinue
+    "EXITCODE=$($info.LastTaskResult)"
+    if (Test-Path '{{ interactive_log }}') { Get-Content -Path '{{ interactive_log }}' }
+  register: interactive_result
+  changed_when: false
+
+- name: "What it said: {{ interactive_name }}"
+  ansible.builtin.debug:
+    var: interactive_result.stdout_lines
+
+# Removed whether it passed or failed. A one-shot task left registered would fire again at the next
+# logon — and this repo already has the scar from a bootstrap task that was meant to run once.
+- name: "Remove the one-shot task: {{ interactive_name }}"
+  become: true
+  community.windows.win_scheduled_task:
+    name: "{{ interactive_name }}"
+    state: absent
+
+- name: "Read the exit code it recorded: {{ interactive_name }}"
+  # `LastTaskResult` is the task's own record, read back rather than inferred from Start-ScheduledTask
+  # returning cleanly — that call only means "the request was accepted", which is exactly the trap
+  # `utmctl exec` set for this project for an hour.
+  ansible.builtin.set_fact:
+    interactive_exit: "{{ (interactive_result.stdout | regex_search('EXITCODE=(-?[0-9]+)', '\\1') | first | default(-1)) | int }}"
+
+- name: "Fail if it did not succeed: {{ interactive_name }}"
+  ansible.builtin.assert:
+    that: (interactive_exit | int) in (interactive_ok | map('int') | list)
+    fail_msg: >-
+      {{ interactive_name }} exited {{ interactive_exit }} on {{ inventory_hostname }}
+      (expected one of {{ interactive_ok }}). Its transcript is above and at {{ interactive_log }} on the box.
+    success_msg: "{{ interactive_name }} completed (exit {{ interactive_exit }})"

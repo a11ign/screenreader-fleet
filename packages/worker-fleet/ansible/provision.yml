@@ -32,22 +32,29 @@
       register: provision_head
       changed_when: true
 
-    - name: Run provision-nvda-worker.ps1
-      # Elevated: it installs NVDA, writes a scheduled task and touches machine policy.
-      become: true
-      ansible.windows.win_shell: >-
-        powershell.exe -NoProfile -ExecutionPolicy Bypass
-        -File "{{ a11y_repo_path }}\packages\worker-fleet\src\provisioning\provision-nvda-worker.ps1"
-      register: provision_run
-      changed_when: true
-      # It is long: NVDA install plus warm-up. Failing at a default timeout would leave a half-provisioned
-      # box, which is the one state this script cannot make idempotent for you.
-      async: 2400
-      poll: 15
-
-    - name: Show what provisioning said
-      ansible.builtin.debug:
-        var: provision_run.stdout_lines
+    # In the INTERACTIVE session, not over `become`. This was `become: true` (SYSTEM) and that is wrong in
+    # a way nothing reports: the script writes ~8 HKCU values (screensaver, notification suppression,
+    # OneDrive's Run entries) which would land in SYSTEM's hive rather than the worker's, installs NVDA
+    # into `%LOCALAPPDATA%\guidepup` which would be SYSTEM's profile, and calls
+    # apply-foreground-lock-timeout.ps1, whose SystemParametersInfo call cannot succeed outside a desktop
+    # session at all. Every one of those fails silently and the play still reports ok.
+    #
+    # Running unbecomed is not the fix either — an SSH logon gets the UAC-filtered token and the HKLM
+    # writes fail. See tasks/run-interactive.yml for why a scheduled task is the only mechanism that is
+    # elevated, interactive and in the right profile at once.
+    - name: Run provision-nvda-worker.ps1 in the worker's own session
+      ansible.builtin.include_tasks: tasks/run-interactive.yml
+      vars:
+        interactive_name: a11y-provision
+        interactive_command: >-
+          & "{{ a11y_repo_path }}\packages\worker-fleet\src\provisioning\provision-nvda-worker.ps1"
+        # NVDA install plus warm-up. A deadline that expires early leaves a half-provisioned box, which is
+        # the one state this script cannot make idempotent for you.
+        interactive_timeout: 2400
+        # 75 is a planned handoff — "the account was created, the machine is rebooting as someone else" —
+        # and is deliberately neither 0 nor a failure. With zero-touch install the account already exists,
+        # so this path should not fire; accepting it means a hand-built box still provisions cleanly.
+        interactive_success_codes: [75]
 
     - name: Confirm the worker is serving
       # Over HTTP, from the control plane -- see deploy.yml for why verification must not share a failure
