@@ -85,13 +85,37 @@ export function fleetConsistency(guests) {
 /** One line per mismatch, naming the guests, so the report is actionable rather than just alarming. */
 export function describeMismatches(mismatches) {
   return (mismatches ?? []).map(({ field, values, why }) => {
-    const detail = Object.entries(values).map(([worker, value]) => `${shortWorker(worker)}=${value}`).join(" ");
+    const label = labelWorkers(Object.keys(values));
+    const detail = Object.entries(values).map(([worker, value]) => `${label.get(worker)}=${value}`).join(" ");
     return `${field}: ${detail} — ${why}`;
   });
+}
+
+/**
+ * A short, UNAMBIGUOUS name per worker.
+ *
+ * `.4` is the right label for `http://REDACTED-INTERNAL-ADDRESS:8765` in a table, and it is the wrong one the moment
+ * two workers share a last octet — two boxes on one host with different ports, or two subnets that
+ * happen to meet. The report then says which FIELD drifted and gives two identically-named values, which
+ * is drift detected and not located: `browserVersion: .1=151.0.1 .1=150.0.9`.
+ *
+ * So the short form is used only while it distinguishes, and the full host:port otherwise. Shortening is
+ * a readability optimisation, and it must never cost the thing the line exists to convey.
+ */
+function labelWorkers(workers) {
+  const short = new Map(workers.map((w) => [w, shortWorker(w)]));
+  const counts = new Map();
+  for (const name of short.values()) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return new Map(workers.map((w) =>
+    [w, counts.get(short.get(w)) > 1 ? hostAndPort(w) : short.get(w)]));
 }
 
 /** `http://REDACTED-INTERNAL-ADDRESS:8765` is noise in a table; `.4` is not. */
 function shortWorker(worker) {
   const host = /\/\/([^:/]+)/.exec(worker)?.[1] ?? worker;
   return host.includes(".") ? `.${host.split(".").pop()}` : host;
+}
+
+function hostAndPort(worker) {
+  return /\/\/(.+?)\/?$/.exec(worker)?.[1] ?? worker;
 }

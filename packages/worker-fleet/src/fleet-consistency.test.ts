@@ -123,3 +123,25 @@ test("a uniformly unstamped fleet is consistent", () => {
   ]);
   assert.equal(consistent, true);
 });
+
+test("a shortened worker label must still distinguish the workers", () => {
+  // `.4` is the right label in a table until two workers share a last octet — two boxes on one host, or
+  // two subnets that meet. The line then reports drift without locating it, which is the whole point of
+  // naming the guests: `browserVersion: .1=151.0.1 .1=150.0.9` says something is wrong and not where.
+  const collide = describeMismatches([{
+    field: "browserVersion",
+    why: "Edge announces differently across releases",
+    values: { "http://127.0.0.1:9201": "151.0.1", "http://127.0.0.1:9202": "150.0.9" },
+  }])[0];
+  assert.match(collide, /127\.0\.0\.1:9201=151\.0\.1/);
+  assert.match(collide, /127\.0\.0\.1:9202=150\.0\.9/);
+
+  // And the short form survives where it is unambiguous — this is a readability optimisation that must
+  // not cost the thing the line exists to convey, not a reason to print full URLs always.
+  const distinct = describeMismatches([{
+    field: "browserVersion",
+    why: "Edge announces differently across releases",
+    values: { "http://REDACTED-INTERNAL-ADDRESS:8765": "151.0.1", "http://REDACTED-INTERNAL-ADDRESS:8765": "150.0.9" },
+  }])[0];
+  assert.match(distinct, /\.83=151\.0\.1 \.84=150\.0\.9/);
+});
