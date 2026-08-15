@@ -87,22 +87,10 @@
     - OneDriveSetup
 
 - name: Evict OneDrive itself
-  # No module uninstalls OneDrive, so this stays PowerShell. SysWOW64 first, System32 second — which one
-  # exists depends on the image.
-  ansible.windows.win_powershell:
-    script: |
-      $ErrorActionPreference = 'SilentlyContinue'
-      Get-Process OneDrive | Stop-Process -Force
-      $setup = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe"
-      if (-not (Test-Path $setup)) { $setup = "$env:SystemRoot\System32\OneDriveSetup.exe" }
-      if (Test-Path $setup) {
-        Start-Process $setup -ArgumentList '/uninstall' -Wait
-        $Ansible.Changed = $true
-        'uninstalled'
-      } else {
-        $Ansible.Changed = $false
-        'not present'
-      }
+  # Policy stops it STARTING again; it does not remove the Run entry above, and it does not dismiss a
+  # toast already on screen — observed, with the policy applied cleanly and "Turn On Windows Backup"
+  # still sitting over the desktop.
+  a11y.worker.a11y_onedrive:
   register: onedrive_evicted
 
 - name: Report the UAC posture, and do not change it
@@ -122,4 +110,4 @@
     msg: >-
       PromptOnSecureDesktop={{ uac_posture.value | default('unset') }} —
       fine either way, because nothing in the capture path elevates.
-      OneDrive: {{ onedrive_evicted.output | default(['?']) | first }}
+      OneDrive: {{ onedrive_evicted.actions | default(['nothing to do']) | join(', ') }}

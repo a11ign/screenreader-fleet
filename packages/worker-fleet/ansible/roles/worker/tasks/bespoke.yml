@@ -1,61 +1,47 @@
 ---
-# The steps with no module, kept as PowerShell because inventing one would be worse.
+# Power, NIC and browser-profile state.
 #
-# Every task here was checked for a first-class equivalent and does not have one: `win_power_plan`
-# selects a plan rather than individual AC timeouts, nothing exposes NIC selective-suspend, and there is
-# no Defender module. Wrapping them in `win_powershell` at least gives them Ansible's changed/failed
-# reporting, which the hand-rolled Step/OK/Warn ledger was doing by hand.
+# Every task here was checked for a first-class module and has none: `win_power_plan` selects a PLAN
+# rather than individual AC timeouts, nothing exposes NIC selective-suspend, and there is no Defender
+# module in either collection (the only one anywhere is a lone third-party repo).
+#
+# "No module exists" is NOT the same as "this must be inline script", which is where this file started.
+# They are `a11y.worker` modules now — our own, built on Ansible.Basic — so each one reads current state,
+# changes only the difference, honours `--check`, and reports a diff. Inline `win_powershell` could do
+# none of that: it receives `$Ansible.CheckMode` and it was on us to read it, which we did not.
 
 - name: Never sleep, on AC
-  # A worker that sleeps is a worker that has vanished, and this is BARE-METAL ONLY: VMs do not sleep,
-  # so the fleet ran for months without needing it. On the first physical box it presented as
-  # `EHOSTUNREACH REDACTED-INTERNAL-ADDRESS:8765` for every request in an evidence-check run — 48 instant failures —
-  # and then answered a curl thirty seconds later. Intermittent unreachability reads as a flaky network
-  # or a wedged worker; it was Windows power management doing exactly its job.
+  # A worker that sleeps is a worker that has vanished. On the first physical box it presented as
+  # EHOSTUNREACH for 48 consecutive requests in one evidence-check run, then answered a curl thirty
+  # seconds later — which reads as a flaky network rather than as power management.
   #
-  # AC only, deliberately: these boxes have no battery, and a laptop-based worker sleeping on battery is
-  # correct behaviour rather than a fault.
+  # AC only, deliberately: a laptop-class worker sleeping on battery is correct behaviour.
+  #
+  # The module reads the active scheme's current values before acting, because `powercfg /change` exits 0
+  # whether or not anything moved — so `changed` used to be a guess.
   become: true
-  ansible.windows.win_powershell:
-    script: |
-      foreach ($setting in @('standby-timeout-ac', 'hibernate-timeout-ac', 'disk-timeout-ac')) {
-        & powercfg.exe /change $setting 0 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "powercfg /change $setting failed (exit $LASTEXITCODE)" }
-      }
-      # Hibernation off entirely: it also reclaims hiberfil.sys, which is RAM-sized on a disk that holds
-      # a browser profile and an NVDA install.
-      & powercfg.exe /hibernate off 2>&1 | Out-Null
-      $Ansible.Changed = $true
-      'sleep, hibernate and disk timeouts disabled on AC'
+  a11y.worker.a11y_power_timeouts:
 
 - name: Keep the NIC awake
   # The SECOND mechanism, and fixing only one leaves the fault intermittent: the sleep timers put the
-  # whole machine away, while the NIC's own selective suspend powers the adapter down with the OS still
-  # running. That second one is what produced the 48 EHOSTUNREACH failures above.
+  # whole machine away, while selective suspend powers the adapter down with the OS still running.
   #
-  # `Set-NetAdapterPowerManagement` is not present on every SKU, hence the registry fallback to the value
-  # it would have written: PnPCapabilities 24 disables both power-down and wake-armed.
+  # The module fails when no physical adapter is Up rather than reporting ok having adjusted nothing.
   become: true
-  ansible.windows.win_powershell:
-    script: |
-      $adapters = Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' }
-      if (-not $adapters) {
-        $Ansible.Changed = $false
-        'no physical adapter reported Up -- NIC power saving NOT checked'
-        return
-      }
-      foreach ($a in $adapters) {
-        try {
-          Set-NetAdapterPowerManagement -Name $a.Name -AllowComputerToTurnOffDevice Disabled -ErrorAction Stop
-        } catch {
-          $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
-          Get-ChildItem $key -ErrorAction SilentlyContinue | Where-Object {
-            (Get-ItemProperty $_.PSPath -Name DriverDesc -ErrorAction SilentlyContinue).DriverDesc -eq $a.InterfaceDescription
-          } | ForEach-Object { Set-ItemProperty $_.PSPath -Name PnPCapabilities -Value 24 -Type DWord -Force }
-        }
-        "NIC '$($a.Name)' will not be powered down"
-      }
-      $Ansible.Changed = $true
+  a11y.worker.a11y_nic_power:
+
+- name: Reclaim Defender's memory, if Tamper Protection allows it
+  # Reported, not fought. Tamper Protection SILENTLY REVERTS Set-MpPreference — the call succeeds, the
+  # setting appears to change, and Defender puts it back — so a task that claimed `changed` there would
+  # be lying on every run. The module checks first and says so, and deliberately does not fail: the box
+  # is still a usable worker, it just costs the ~242 MB.
+  become: true
+  a11y.worker.a11y_defender:
+  register: defender
+
+- name: Say what Defender did
+  ansible.builtin.debug:
+    msg: "{{ defender.msg | default('real-time monitoring off') }}"
 
 - name: Durable browser capture profiles
   # `browsers.mjs` defaults these under %LOCALAPPDATA%, one directory PER BROWSER. Provisioning

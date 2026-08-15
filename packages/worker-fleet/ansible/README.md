@@ -50,7 +50,7 @@ The UTM VMs keep their own lifecycle through `worker-ctl.sh` and are **not** man
 | `firewall.yml` | the worker port, and the allow-app alert that would block the whole desktop |
 | `nvda.yml` | npm, guidepup, NVDA, and the Speech Viewer |
 | `tasks.yml` | `a11ysrv`, `a11ycheck`, and removing `a11ybootstrap` |
-| `bespoke.yml` | sleep/NIC power and browser profiles — the steps with no module |
+| `bespoke.yml` | sleep/NIC power, Defender and browser profiles — via the `a11y.worker` modules |
 | `verify.yml` | start it and prove it serves |
 
 **The HKLM/HKCU split is load-bearing.** Elevated tasks are `become: true` (SYSTEM); the HKCU ones
@@ -77,11 +77,19 @@ script necessarily moves it and invalidates all 2,122 cached captures — so bun
 `CAPTURE_PROTOCOL_VERSION` bump and recapture once. A full recapture measured 3 h 46 m across three
 workers.
 
-**Three things are deliberately NOT ported.** `apply-foreground-lock-timeout.ps1`, because
-`SystemParametersInfo` needs a thread that can change the foreground window and everything Ansible runs
-is a network logon — `run-server.cmd` re-applies it per session, which is the only mechanism that works.
+**The steps with no first-class module became OUR modules**, in `collections/ansible_collections/a11y/worker/`
+— `a11y_nvda`, `a11y_speech_viewer`, `a11y_power_timeouts`, `a11y_nic_power`, `a11y_defender`,
+`a11y_onedrive`. "No module exists" is not the same as "this must be inline script": a module on
+`Ansible.Basic` honours `--check`, validates its arguments, reports a real diff, and computes `changed`
+from state rather than asserting it. See that collection's README.
+
+**Three things are deliberately NOT ported, and one of them never can be.**
+`apply-foreground-lock-timeout.ps1` is the permanent one: `SystemParametersInfo` needs a thread that can
+change the foreground window, and Ansible's own FAQ says the scheduled-task route "can only be used to
+run commands, **not modules**" — SSH lands in session 0 exactly as WinRM does, so no module however well
+written can do it. `run-server.cmd` re-applies it per session, which works. The other two are judgement:
 `diagnose-nvda-worker.ps1`, because its product is ordered verdicts with fixes and `assert` fails fast,
-which is the opposite behaviour. `build-lean-worker-image.ps1`, because offline DISM servicing has no
+which is the opposite behaviour; and `build-lean-worker-image.ps1`, because offline DISM servicing has no
 module and it builds an ISO rather than configuring a host.
 
 ## Check mode is not honest here yet
@@ -92,12 +100,21 @@ nor informative:
 | tasks | in `--check` |
 |---|---|
 | `win_regedit`, `win_user`, `win_group_membership`, `win_scheduled_task`, `win_firewall_rule`, `win_file` | correct — they honour it |
-| 15 × `win_shell` | **skipped** (`supports_check_mode = $false`), so they verify nothing |
-| 12 × `win_powershell` | **they run** — the module honours check mode by handing `$Ansible.CheckMode` to the script, and none of these scripts reads it |
+| the six `a11y.worker` modules | correct — they were written for it |
+| `win_shell` | **skipped** (`supports_check_mode = $false`), so those tasks verify nothing |
+| the remaining `win_powershell` | **they run** — the module honours check mode by handing `$Ansible.CheckMode` to the script, and those scripts do not read it |
 
-So `--check` would skip the harmless half and really uninstall OneDrive, really change `powercfg`, really
-run `npm install`. Do not use it on this role until the remaining PowerShell is either check-mode aware
-or turned into real modules — which is the strongest single argument for doing the latter.
+The dangerous half is gone: OneDrive, `powercfg`, the NIC and Defender are modules now. Seven inline
+`win_powershell` blocks remain, and they are not equal:
+
+- **four are read-only** (`changed_when: false`) — architecture detection, the node-path lookup, the
+  guidepup version read, the scheduled-task read-back. They run under `--check` and that is harmless.
+- **three still MUTATE** — moving node into Program Files (`packages.yml`), `NotifyOnListen`
+  (`firewall.yml`), and the operator key install (`ssh-key.yml`). Those three are why `--check` is not
+  yet trustworthy end to end. They need a `$Ansible.CheckMode` guard or their own modules.
+
+The `win_shell` tasks — `npm install`, `git`, `guidepup setup` — are genuinely commands rather than
+state, so being skipped under `--check` is honest rather than a gap.
 
 ## Why SSH and not WinRM
 

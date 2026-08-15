@@ -20,12 +20,18 @@ Run it after editing any playbook. Exit 0 clean, 1 if anything is wrong.
 """
 import glob
 import json
+import re
 import subprocess
 import sys
 
 import yaml
 
-MODULE_PREFIXES = ("ansible.windows.", "community.windows.", "ansible.builtin.")
+# Any fully-qualified collection name, rather than a list of namespaces we happen to use today.
+#
+# This WAS a three-namespace tuple, and when the a11y.worker collection arrived it silently skipped all
+# eight of its tasks while still reporting "0 problems" — the exact shape this script exists to catch,
+# in the script itself. A hardcoded list is a list that goes stale; a shape does not.
+FQCN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+\.[a-z0-9_]+$")
 
 # `set_fact` takes arbitrary user-chosen names as its options, so there is nothing to check it against.
 FREEFORM_OPTIONS = {"ansible.builtin.set_fact"}
@@ -54,7 +60,7 @@ def walk(tasks, path, report):
         if not isinstance(task, dict):
             continue
         for key, value in task.items():
-            if key.startswith(MODULE_PREFIXES) and isinstance(value, dict):
+            if FQCN.match(key) and isinstance(value, dict):
                 report(path, key, set(value))
         for nested in ("block", "rescue", "always"):
             if isinstance(task.get(nested), list):

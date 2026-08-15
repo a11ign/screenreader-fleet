@@ -1,0 +1,14 @@
+namespace: a11y
+name: worker
+version: 1.0.0
+readme: README.md
+authors:
+  - a11y-witness
+description: >-
+  Modules for an NVDA capture worker. These exist because no first-class module covers them and the
+  alternative was inline PowerShell, which cannot honour check mode, cannot report a diff, and validates
+  no arguments. Each one reads current state, compares it to the declared state, and changes only the
+  difference - which is what makes `changed` mean something.
+license_file: ../../../../../../../LICENSE
+tags: [windows, accessibility]
+repository: https://github.com/DanBeckDev/a11y-witness
