@@ -31,6 +31,32 @@ import { fileURLToPath } from "node:url";
 
 export const DEFAULT_WORKER_PORT = 8765;
 
+/**
+ * The fleet named by the environment — ONE parser, because there were three that did not agree.
+ *
+ * `doctor.mjs` preferred `A11Y_WORKERS`, `check-worker-code.mjs` preferred `A11Y_WORKER`, and the
+ * dataset runner read only `A11Y_WORKERS`. With both variables set, `doctor` and `worker:code` reported
+ * on **different machines** — so "doctor says the fleet is fine" and "worker:code says a worker is
+ * stale" could be statements about two disjoint sets, with nothing to say so.
+ *
+ * `A11Y_WORKERS` wins, matching the dataset runner: the plural names the pool a run dispatches across,
+ * and a diagnostic that describes a different set from the one that will do the work is worse than no
+ * diagnostic. Each entry is trimmed and de-slashed, because `A11Y_WORKERS=a, b` otherwise yields a URL
+ * with a leading space — a configuration typo wearing a dead-machine costume.
+ *
+ * Returns `[]` rather than null when neither is set: "no worker was named" is a normal state that means
+ * "find the local VMs", and every caller already branches on emptiness.
+ *
+ * @returns {Array<{ name: string, url: string }>}
+ */
+export function configuredWorkers() {
+  const raw = process.env.A11Y_WORKERS ?? process.env.A11Y_WORKER ?? "";
+  return raw.split(",")
+    .map((w) => w.trim().replace(/\/$/, ""))
+    .filter(Boolean)
+    .map((url) => ({ name: url.replace(/^https?:\/\//, ""), url }));
+}
+
 const INVENTORY = fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url));
 const GROUP_VARS = fileURLToPath(new URL("../ansible/group_vars/a11y_workers.yml", import.meta.url));
 

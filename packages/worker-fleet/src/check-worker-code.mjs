@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { codeVersion, workerSourceDir } from "@a11y-witness/nvda-worker";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
+import { configuredWorkers } from "./fleet-env.mjs";
 
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.
@@ -56,12 +57,11 @@ function protocolBumpNote() {
 const localVersion = () => codeVersion(NVDA_DIR);
 
 function workerUrls() {
-  // Trimmed and de-slashed, the same way capture-screenreader-dataset.mjs and doctor.mjs do it.
-  // `A11Y_WORKERS=a, b` otherwise yields a URL with a leading space, which fails to parse as a URL and
-  // reports as an unreachable worker -- a configuration typo wearing a dead-machine costume.
-  const clean = (raw) => raw.split(",").map((w) => w.trim().replace(/\/$/, "")).filter(Boolean);
-  if (process.env.A11Y_WORKER) return clean(process.env.A11Y_WORKER);
-  if (process.env.A11Y_WORKERS) return clean(process.env.A11Y_WORKERS);
+  // This preferred A11Y_WORKER while doctor preferred A11Y_WORKERS, so with both set the two commands
+  // described different machines -- and "doctor is happy" / "a worker is stale" could be about disjoint
+  // sets. One parser now, in fleet-env.mjs, which also owns the inventory.
+  const named = configuredWorkers();
+  if (named.length) return named.map((w) => w.url);
   const pool = JSON.parse(execFileSync(CTL, ["pool"], { encoding: "utf8" }));
   return pool.filter((vm) => vm.ip).map((vm) => `http://${vm.ip}:${vm.port}`);
 }

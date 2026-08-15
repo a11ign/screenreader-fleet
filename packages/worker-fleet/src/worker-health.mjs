@@ -21,6 +21,27 @@
  * you end up with nothing left to serve (Distributed Systems with Node.js, ch. 4).
  */
 
+/**
+ * Can this worker take a capture right now? ONE definition, because there were four that disagreed.
+ *
+ * `ready` is about the ENVIRONMENT — Edge resolvable, ForegroundLockTimeout 0, the worker free — and a
+ * worker reports `ready: false` while NVDA warms up after a boot, which is normal and self-correcting.
+ *
+ * The subtlety, and the reason this is `!== false` rather than `=== true`: **a worker predating the
+ * field reports neither.** Treating absent as ready keeps an un-redeployed guest working instead of
+ * stalling a run against it forever; staleness has its own detector in `npm run worker:code`. The
+ * dataset runner got this right and said so. `repeat-capture.mjs` tested `health.ready` for truthiness
+ * and `capture-real-pages.mjs` tested `=== true`, so both would have waited out their whole readiness
+ * budget against a perfectly good older worker and then blamed the page.
+ *
+ * @param {{ busy?: boolean, ready?: boolean } | null | undefined} health
+ * @returns {boolean}
+ */
+export function workerIsUsable(health) {
+  if (!health) return false;
+  return !health.busy && health.ready !== false;
+}
+
 /** Below this many captures the rate is noise: one recovery out of one capture is not a pattern. */
 const MIN_CAPTURES_TO_JUDGE = 4;
 

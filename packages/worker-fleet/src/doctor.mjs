@@ -18,6 +18,7 @@ import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
+import { configuredWorkers } from "./fleet-env.mjs";
 
 const run = promisify(execFile);
 const JSON_OUT = process.argv.includes("--json");
@@ -26,15 +27,9 @@ const JSON_OUT = process.argv.includes("--json");
 // local VM tooling here" against a healthy fleet of ten machines, and doctor is the FIRST command
 // CLAUDE.md tells an agent to run. The environment was fine and the entry point said it was broken.
 //
-// Trimmed and de-slashed on the way in, the same way capture-screenreader-dataset.mjs does it:
-// `A11Y_WORKERS=a, b` otherwise yields a URL with a leading space that fails to parse.
-function configuredWorkers() {
-  const raw = process.env.A11Y_WORKERS ?? process.env.A11Y_WORKER ?? "";
-  return raw.split(",")
-    .map((w) => w.trim().replace(/\/$/, ""))
-    .filter(Boolean)
-    .map((url) => ({ name: url.replace(/^https?:\/\//, ""), url }));
-}
+// Parsed by fleet-env.mjs, which is the ONE place that answers "what is the fleet" -- see there for why
+// the precedence had to be settled: doctor and worker:code disagreed, so they could report on two
+// different sets of machines with nothing to say so.
 const WORKERS_ENV = configuredWorkers();
 const PAGES_PORT = Number(process.env.DATASET_PAGES_PORT || 5050);
 // The lifecycle script ships beside this one in the fleet package. It was `../scripts/local-worker/...`,
