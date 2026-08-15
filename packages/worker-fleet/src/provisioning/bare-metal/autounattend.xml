@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Unattended install for a BARE-METAL x64 capture worker, served from the PXE box.
+
+  The sibling at ../../local-worker/autounattend.xml is the proven recipe, and this is that recipe
+  adapted for real hardware on a real LAN. Four differences, each of which matters:
+
+  1. NO PLAINTEXT PASSWORD. The arm64 file embeds `witness`/`witness` and justifies it as "a disposable
+     local VM behind QEMU user-mode networking, reachable solely through forwarded ports". None of that
+     is true of a mini PC on your LAN, so the justification does not travel with the file. The account
+     is created with a BLANK password instead, which is the same design the rest of the fleet already
+     depends on: `LimitBlankPasswordUse=1` (a Windows default) confines a blank-password account to
+     CONSOLE logon, so it cannot be reached over SMB, RDP or password SSH at all. That makes the account
+     strictly narrower than a password would, not wider — and nothing secret is ever committed here.
+     Provisioning re-asserts and VERIFIES that invariant afterwards; see provision-nvda-worker.ps1.
+
+  2. NO VIRTIO DRIVERS. Those paths point at UTM's support ISO (`E:\Drivers\...`) and exist because a
+     QEMU guest has no inbox driver for its own disk or NIC. Real hardware does. Leaving them in would
+     fail the windowsPE pass looking for a drive that is not there.
+
+  3. ComputerName is `*`, not `A11Y-WORKER`. Twelve machines answering to one NetBIOS name is a name
+     conflict on a real network; the arm64 file could hardcode it because there is one VM behind NAT.
+     Workers are identified by address in ansible/inventory.yml, so a generated name costs nothing.
+
+  4. The TPM/SecureBoot/CPU bypasses are KEPT, and here they are load-bearing rather than a VM
+     workaround: the 6th and 7th generation boxes in this fleet (EliteDesk 800 G2/G3) are not on
+     Windows 11's supported-CPU list at all, and would refuse to install. They are harmless on the
+     8th-gen machines that would pass anyway.
+
+  ============================ THIS WIPES DISK 0, WITHOUT ASKING ============================
+  `WillWipeDisk` on DiskID 0 is what makes the install hands-off, and it is why this file must only
+  ever be served to a machine you intend to become a worker. Point your PXE server's boot entry at
+  the machines you have set aside, not at a default-for-everything entry.
+  ==========================================================================================
+
+  UAC stays at its DEFAULT, deliberately, exactly as the arm64 file explains: with UAC off every
+  process runs at high integrity, and the capture pipeline depends on NVDA (nvda_noUIAccess.exe) and
+  the browser sitting at the SAME integrity level. Provisioning gets elevation from a RunLevel Highest
+  scheduled task, which elevates with no prompt — and a prompt would be fatal, since UAC dialogs render
+  on the secure desktop where no automation can reach them.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage>
+        <UILanguage>en-US</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <Diagnostics>
+        <OptIn>false</OptIn>
+      </Diagnostics>
+
+      <!-- UEFI/GPT layout: ESP, MSR, then Windows across the remainder. -->
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>300</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Format>FAT32</Format>
+              <Label>System</Label>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>3</Order>
+              <PartitionID>3</PartitionID>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+
+      <!-- Match /IMAGE/NAME to the WIM's NAME, which is "Windows 11 Professional".
+           "Windows 11 Pro" is its DESCRIPTION, and matching that leaves Setup sitting on
+           the edition picker. Keep this block byte-for-byte simple: substituting
+           /IMAGE/INDEX here, or adding a comment inside <InstallFrom>, made Setup reject
+           the whole answer file and revert to a fully interactive install. -->
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/NAME</Key>
+              <Value>Windows 11 Professional</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <WillShowUI>OnError</WillShowUI>
+        </OSImage>
+      </ImageInstall>
+
+      <!-- Not a VM workaround here: the 6th/7th-gen boxes in this fleet are not on Windows 11's
+           supported-CPU list and Setup refuses them outright without these. Harmless on 8th-gen. -->
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassDiskCheck /t REG_DWORD /d 0x00000001 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <FullName>a11y-witness</FullName>
+        <Organization>a11y-witness</Organization>
+        <!-- Generic Windows 11 Pro KMS client key: selects the edition during an unattended install.
+             It does NOT activate, which is what we want — an unactivated Windows is fully functional
+             for capture. -->
+        <ProductKey>
+          <Key>W269N-WFGWX-YVC9B-4J6C9-T83GX</Key>
+          <WillShowUI>Never</WillShowUI>
+        </ProductKey>
+      </UserData>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <!-- `*` generates a unique name. Twelve machines called A11Y-WORKER is a NetBIOS conflict on a
+           real network; the workers are addressed by IP from ansible/inventory.yml regardless. -->
+      <ComputerName>*</ComputerName>
+      <TimeZone>GMT Standard Time</TimeZone>
+    </component>
+    <component name="Microsoft-Windows-Security-SPP-UX" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SkipAutoActivation>true</SkipAutoActivation>
+    </component>
+    <component name="Microsoft-Windows-SQMApi" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <CEIPEnabled>0</CEIPEnabled>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>witness</Name>
+            <DisplayName>witness</DisplayName>
+            <Group>Administrators</Group>
+            <!-- BLANK, and empty rather than absent: Setup wants the element. See the header — a
+                 blank-password account is confined to console logon by LimitBlankPasswordUse, which
+                 is what makes credential-free auto-logon safe on a networked box. -->
+            <Password>
+              <Value></Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+
+      <!-- The whole reason this file exists. NVDA is a GUI application: it needs a real logged-on
+           desktop session. No auto-logon means no session after a reboot, which means captures
+           silently return nothing at all — and on a headless fleet nobody is there to log in. -->
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>witness</Username>
+        <Password>
+          <Value></Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <LogonCount>2147483647</LogonCount>
+      </AutoLogon>
+
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Disable hibernation</Description>
+          <CommandLine>cmd /c POWERCFG -H OFF</CommandLine>
+        </SynchronousCommand>
+        <!-- Never leave the console locked: a locked desktop makes NVDA silent. Belt and braces
+             alongside provisioning, which also turns the screensaver off. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Disable screensaver (it steals foreground mid-capture)</Description>
+          <CommandLine>reg add "HKCU\Control Panel\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f</CommandLine>
+        </SynchronousCommand>
+        <!-- Hands off to first-boot.cmd, which waits for DHCP, plants the operator SSH key if one was
+             staged beside it, and runs the bootstrap elevated via a RunLevel Highest scheduled task.
+             After that the box is reachable by Ansible and no console visit is needed at all. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Run the worker bootstrap elevated, without a UAC prompt</Description>
+          <CommandLine>cmd /c for %i in (D E F G H) do if exist %i:\first-boot.cmd start /wait %i:\first-boot.cmd</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>

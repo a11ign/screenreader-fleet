@@ -296,11 +296,19 @@ try {
   # blank-password account cannot use it -- so the symptom is a permission denial that looks like a bad key.
   # Its own try, for the same reason as above: a key problem must not be reported as an sshd problem.
   try {
-    if ($env:A11Y_OPERATOR_KEY) {
+    # Two ways in, one code path. A11Y_OPERATOR_KEY is what a human sets before running this by hand;
+    # the file is what first-boot.cmd stages off the install media, because the unattended path may run
+    # this through a scheduled task -- a fresh session that inherits no environment at all.
+    $stagedKey = Join-Path $env:ProgramData 'a11y-witness\operator-key.pub'
+    $operatorKey = if ($env:A11Y_OPERATOR_KEY) { $env:A11Y_OPERATOR_KEY }
+                   elseif (Test-Path $stagedKey) { Get-Content -Path $stagedKey -Raw }
+                   else { $null }
+    if ($operatorKey) {
       $adminKeys = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
-      $key = $env:A11Y_OPERATOR_KEY.Trim()
+      $key = $operatorKey.Trim()
       if ($key -notmatch '^(ssh-|ecdsa-)') {
-        Warn 'A11Y_OPERATOR_KEY does not look like a public key (expected ssh-... or ecdsa-...); ignoring it.'
+        Warn "The operator key does not look like a public key (expected ssh-... or ecdsa-...); ignoring it."
+        Warn "  read from: $(if ($env:A11Y_OPERATOR_KEY) { 'A11Y_OPERATOR_KEY' } else { $stagedKey })"
         Record 'operator key' 'REFUSED - not a public key'
       } else {
         if (-not (Test-Path $adminKeys)) { New-Item -ItemType File -Path $adminKeys -Force | Out-Null }
@@ -316,7 +324,7 @@ try {
         icacls.exe $adminKeys /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null
       }
     } else {
-      Record 'operator key' 'not supplied (set A11Y_OPERATOR_KEY to manage this box with Ansible)'
+      Record 'operator key' "not supplied (set A11Y_OPERATOR_KEY, or stage $stagedKey, to manage this box with Ansible)"
     }
   } catch {
     Record 'operator key' "FAILED - $($_.Exception.Message)"
