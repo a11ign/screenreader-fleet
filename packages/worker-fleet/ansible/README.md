@@ -63,7 +63,7 @@ comments recording things that have already cost days, and it cannot be tested i
 the role is proven equivalent means finding the gaps one silent capture at a time. Prove parity first:
 
 ```bash
-ansible-playbook provision-role.yml -l a11y-worker-1 --check --diff   # look before you leap
+# NOT --check: see "check mode is not honest here yet" below.
 ansible-playbook provision-role.yml -l a11y-worker-1
 # then compare against a script-provisioned box:
 #   /health.environment  — browser, NVDA, guidepup, OS, protocol
@@ -83,6 +83,21 @@ is a network logon — `run-server.cmd` re-applies it per session, which is the 
 `diagnose-nvda-worker.ps1`, because its product is ordered verdicts with fixes and `assert` fails fast,
 which is the opposite behaviour. `build-lean-worker-image.ps1`, because offline DISM servicing has no
 module and it builds an ISO rather than configuring a host.
+
+## Check mode is not honest here yet
+
+Ansible's `--check` is only as truthful as its least truthful task, and on this role it is neither safe
+nor informative:
+
+| tasks | in `--check` |
+|---|---|
+| `win_regedit`, `win_user`, `win_group_membership`, `win_scheduled_task`, `win_firewall_rule`, `win_file` | correct — they honour it |
+| 15 × `win_shell` | **skipped** (`supports_check_mode = $false`), so they verify nothing |
+| 12 × `win_powershell` | **they run** — the module honours check mode by handing `$Ansible.CheckMode` to the script, and none of these scripts reads it |
+
+So `--check` would skip the harmless half and really uninstall OneDrive, really change `powercfg`, really
+run `npm install`. Do not use it on this role until the remaining PowerShell is either check-mode aware
+or turned into real modules — which is the strongest single argument for doing the latter.
 
 ## Why SSH and not WinRM
 
