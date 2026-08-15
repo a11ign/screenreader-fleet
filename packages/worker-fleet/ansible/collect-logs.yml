@@ -1,0 +1,66 @@
+---
+# Pull the logs off every worker into one place on the control plane.
+#
+#     ansible-playbook collect-logs.yml
+#     ansible-playbook collect-logs.yml -l a11y-worker-3
+#
+# Diagnosing a fleet by SSHing into boxes one at a time does not scale past about two, and the interesting
+# question is almost always comparative: which box is different? So this collects rather than tails.
+#
+# ## What it takes, and why each one
+#
+# - `server.log` — the worker's own account, and it PERSISTS across a restart. The record of a worker's
+#   death is still there after it comes back, which is the only way to read a fault that killed it.
+# - `server.log.1` — one rotation back, because a worker that has restarted since the incident has already
+#   moved the evidence.
+# - NVDA's log AND its previous one — NVDA rotates on every start, so a session that went mute exists only
+#   in the previous file. Taking just the current one collects the log of the healthy session that
+#   replaced the interesting one.
+#
+# `/diagnostics` is deliberately not fetched here: it walks the Edge profile and shells out, so it is
+# expensive exactly when the guest is struggling. Ask for it directly when you want it.
+- name: Collect worker logs
+  hosts: a11y_workers
+  gather_facts: false
+  vars:
+    a11y_log_dir: "{{ playbook_dir }}/../../../runs/worker-logs/{{ inventory_hostname }}"
+
+  tasks:
+    - name: Make somewhere to put them
+      ansible.builtin.file:
+        path: "{{ a11y_log_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+
+    - name: Find NVDA's logs
+      # Resolved on the box rather than assumed: the path depends on which account is logged on, and
+      # guessing a username is how this broke before (`provisionRevision` had the same bug).
+      ansible.windows.win_shell: |
+        $dir = Join-Path $env:TEMP ''
+        Get-ChildItem -Path $dir -Filter 'nvda*.log' -ErrorAction SilentlyContinue |
+          Sort-Object LastWriteTime -Descending | Select-Object -First 2 -ExpandProperty FullName
+      register: nvda_logs
+      changed_when: false
+
+    - name: Fetch the worker log and its previous generation
+      ansible.builtin.fetch:
+        src: "{{ a11y_repo_path }}\\{{ item }}"
+        dest: "{{ a11y_log_dir }}/{{ item }}"
+        flat: true
+        fail_on_missing: false
+      loop:
+        - server.log
+        - server.log.1
+
+    - name: Fetch NVDA's logs
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "{{ a11y_log_dir }}/{{ item | basename }}"
+        flat: true
+        fail_on_missing: false
+      loop: "{{ nvda_logs.stdout_lines | default([]) }}"
+
+    - name: Say where they went
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} logs in {{ a11y_log_dir }}"

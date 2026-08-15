@@ -1,0 +1,51 @@
+---
+# Restart `a11ysrv` and wait until it is actually serving again.
+#
+# ## Why the task and not the process
+#
+# The worker must run in an INTERACTIVE desktop session: SSH lands in session 0, and guidepup reports that
+# as "nvda.start failed: NVDA is not supported", which reads like a broken install and is not one. The
+# `a11ysrv` task is registered with `LogonType Interactive`, so triggering it is the one way to start a
+# worker from a remote shell that can actually drive a screen reader.
+#
+# ## Restarting is not believing
+#
+# `Stop-ScheduledTask` + `Start-ScheduledTask` silently did nothing on two cloned guests: they served the
+# previous node process, and therefore the previous code, for another hour. That was through
+# `utmctl exec`, which returns success and no output whether or not it ran — so the mechanism here is not
+# the same one. But the lesson survives the change of transport: nothing below treats "the restart command
+# returned 0" as evidence. The proof is that the worker answers `/health` again, over HTTP, and for a
+# deploy that `/health.code` moved.
+- name: Stop the worker task
+  ansible.windows.win_shell: |
+    Stop-ScheduledTask -TaskName '{{ a11y_task_name }}' -ErrorAction SilentlyContinue
+    # The task can report Ready while its node process is still exiting, and starting it again then gives
+    # two workers racing for port 8765 -- one of which wins and serves, so the symptom is not an error but
+    # a worker running code nobody deployed.
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Process node -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 500
+    }
+    if (Get-Process node -ErrorAction SilentlyContinue) { 'node still running after 30s' } else { 'stopped' }
+  register: worker_stop
+  changed_when: true
+
+- name: Start the worker task
+  ansible.windows.win_shell: Start-ScheduledTask -TaskName '{{ a11y_task_name }}'
+  changed_when: true
+
+- name: Wait for the worker to serve /health again
+  # From the CONTROL PLANE, not from the guest. A guest asking itself whether it is reachable answers a
+  # different question from the one the fleet needs answered.
+  ansible.builtin.uri:
+    url: "{{ a11y_health_url }}"
+    method: GET
+    status_code: 200
+    timeout: 10
+  delegate_to: localhost
+  register: worker_health
+  # NVDA warms up after a cold start, so `ready: false` immediately after a restart is normal and
+  # self-correcting. Waiting for the HTTP answer is the right gate here; readiness is the run's business.
+  retries: 30
+  delay: 5
+  until: worker_health.status is defined and worker_health.status == 200

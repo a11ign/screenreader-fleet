@@ -1,0 +1,32 @@
+# The fleet, as data — and the ONE place a machine is added.
+#
+# `A11Y_WORKERS` is a comma-separated string in an environment variable, which was fine for two VMs and
+# is the wrong shape for twelve boxes: it cannot hold a hostname, a note about which machine is which, or
+# the fact that one of them is off this week. This file is canonical and the env var is DERIVED from it:
+#
+#     eval "$(npm run --silent fleet:env)"      # exports A11Y_WORKERS from this inventory
+#
+# Deriving in that direction and not the other is deliberate. Two sources of truth for "what is the fleet"
+# is how a box comes to be provisioned but never dispatched to, or dispatched to but never updated — and
+# both of those failures are silent.
+#
+# ## Adding a machine
+#
+# Give it the next `a11y-worker-N` name and its address. Everything else is inherited. Then:
+#
+#     ansible-playbook ssh-key.yml -l a11y-worker-4     # only if it was not installed at first boot
+#     ansible-playbook provision.yml -l a11y-worker-4
+#
+# ## A machine that is switched off
+#
+# Leave it here and let it be unreachable. `any_errors_fatal = false` means the rest of the fleet still
+# gets the play, and the recap names the box that did not answer — which is the report you want. Deleting
+# it from the inventory to make a run go green is how a machine stops being maintained.
+all:
+  children:
+    a11y_workers:
+      hosts:
+        a11y-worker-1:
+          ansible_host: REDACTED-INTERNAL-ADDRESS
+          # The first bare-metal box. x64, Edge; the ARM64 guests it replaced are UTM VMs and are NOT
+          # managed from here — they have their own lifecycle through worker-ctl.sh.

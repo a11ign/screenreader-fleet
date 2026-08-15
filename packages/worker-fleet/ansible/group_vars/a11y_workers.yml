@@ -1,0 +1,39 @@
+# How to reach a capture worker, and where its parts live on the guest.
+#
+# ## SSH, not WinRM — and this is not a preference
+#
+# WinRM against the `witness` account would need `LimitBlankPasswordUse=0`. That setting is precisely what
+# makes the credential-free design safe: it confines a blank-password account to CONSOLE logon, so the
+# account that auto-logs-in to the capture desktop cannot be reached over SMB, RDP or password SSH. Turning
+# it off to gain a management channel would trade the guard for the convenience it was protecting.
+#
+# Public-key SSH is unaffected by that policy, and `bootstrap-windows-worker.ps1` already installs sshd.
+#
+# ## Elevation without a stored credential
+#
+# `runas` as SYSTEM needs no password — SYSTEM is a service account, and it works because `witness` is
+# already an Administrator. So the fleet is managed end to end without this project ever holding a
+# password, which was a constraint before it was a feature.
+#
+# Note what elevation CANNOT do: a session-0 process (which is what SSH gives you) cannot drive NVDA.
+# guidepup reports that as "NVDA is not supported", which reads like a broken install. Anything that must
+# touch the screen reader goes through the `a11ysrv` scheduled task, whose principal is Interactive.
+ansible_connection: ssh
+ansible_user: witness
+ansible_port: 22
+
+# Windows OpenSSH's stock DefaultShell is cmd.exe. Provisioning sets it to PowerShell, because Ansible's
+# Windows modules ARE PowerShell and running them through cmd adds a quoting layer with nothing to gain.
+# A box provisioned before that change answers every task with a parse error; the README has the one-liner.
+ansible_shell_type: powershell
+
+ansible_become_method: runas
+ansible_become_user: SYSTEM
+
+# Where provisioning puts things. These mirror `provision-nvda-worker.ps1`'s own defaults
+# (A11Y_REPO_PATH, A11Y_TASK_NAME) rather than re-deciding them here — if they diverge, a deploy updates a
+# checkout the worker does not run, and `/health.code` is the only thing that would notice.
+a11y_repo_path: 'C:\Users\witness\a11y-witness'
+a11y_task_name: a11ysrv
+a11y_port: 8765
+a11y_health_url: "http://{{ ansible_host }}:{{ a11y_port }}/health"

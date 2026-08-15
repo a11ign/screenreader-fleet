@@ -1,0 +1,90 @@
+---
+# Update every worker to this checkout, and PROVE it took.
+#
+#     ansible-playbook deploy.yml
+#     ansible-playbook deploy.yml -l a11y-worker-3
+#
+# ## The hole this closes
+#
+# `worker:deploy` is `utmctl file push` plus a `utmctl` reboot, keyed on a VM UUID. It has no host
+# parameter and fails immediately off macOS, so a bare-metal worker had no code-delivery mechanism except a
+# human opening an elevated PowerShell on the box. At one machine that is tedious; at twelve it means the
+# fleet drifts, and drift here is not cosmetic — `environmentKey()` puts browser and OS versions in the
+# capture cache key, so a split fleet fragments the corpus and, per fleet-consistency.mjs, "the cache merely
+# stopped hitting, which reads as ordinary churn rather than as a split fleet."
+#
+# ## Pull, not push
+#
+# The guests are git-cloned (see code-version.mjs), so a deploy is a `git pull` on the box rather than
+# eighteen file copies from the control plane. That is fewer moving parts and it makes rollback the same
+# operation as deployment: check out the ref you want and run this again.
+#
+# ## Verification does not share a failure mode with the action
+#
+# Ansible acts over SSH; this verifies over HTTP. That is deliberate and this repo learned it expensively:
+# the old advice was to hash-check both sides, but reading the guest's hash went through `utmctl exec` too,
+# so when `exec` was broken the check returned EMPTY rather than MISMATCHED — and empty reads as a flaky
+# tool rather than a failed deploy. `/health.code` is served on the channel the worker is actually used on,
+# which is reachable exactly when it is useful.
+- name: Deploy the worker code to the fleet
+  hosts: a11y_workers
+  gather_facts: false
+  vars:
+    a11y_repo_root: "{{ playbook_dir }}/../../.."
+
+  pre_tasks:
+    - name: Work out the code version this checkout expects
+      # Computed by the SAME function the worker runs (`codeVersion`, which normalises CRLF), because a
+      # second implementation is a second chance for the two sides to disagree. A git-cloned Windows guest
+      # checks the files out with CRLF, and a byte-for-byte hasher therefore never matched it: measured
+      # 31979b551b7a2cfa against this checkout's 22822b7a3a08969c, which read as "permanently stale".
+      ansible.builtin.command:
+        cmd: >-
+          node -e 'import("@a11y-witness/nvda-worker").then(m =>
+          process.stdout.write(m.codeVersion(m.workerSourceDir())))'
+        chdir: "{{ a11y_repo_root }}"
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+      register: expected_code
+
+    - name: Say which version is being deployed
+      ansible.builtin.debug:
+        msg: "deploying code version {{ expected_code.stdout }}"
+      run_once: true
+
+  tasks:
+    - name: Fetch and fast-forward the guest checkout
+      # --ff-only, so a guest that somebody committed on fails loudly here instead of silently diverging
+      # from the fleet and producing evidence under a code version nothing else has.
+      ansible.windows.win_shell: |
+        git fetch --quiet origin
+        git -c advice.detachedHead=false checkout --quiet {{ a11y_git_ref | default('main') }}
+        git merge --ff-only --quiet origin/{{ a11y_git_ref | default('main') }}
+        git rev-parse --short HEAD
+      args:
+        chdir: "{{ a11y_repo_path }}"
+      register: guest_head
+      changed_when: true
+
+    - name: Install dependencies
+      # Unconditional and idempotent. Skipping it when package-lock.json looks unchanged is the
+      # optimisation that leaves one box on last week's guidepup — and guidepup's version is EVIDENCE,
+      # in the capture cache key, because it parses NVDA's speech before this project sees it.
+      ansible.windows.win_shell: npm install --omit=dev --no-audit --no-fund
+      args:
+        chdir: "{{ a11y_repo_path }}"
+      changed_when: true
+
+    - name: Restart the worker task
+      ansible.builtin.import_tasks: tasks/restart-worker.yml
+
+    - name: Confirm the worker is serving THIS checkout
+      ansible.builtin.import_tasks: tasks/verify-code.yml
+
+  post_tasks:
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} at {{ guest_head.stdout | trim }} serving
+          {{ served_code }} (expected {{ expected_code.stdout }})

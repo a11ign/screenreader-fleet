@@ -1,0 +1,75 @@
+---
+# Bring every worker to the provisioned baseline, and prove it is serving afterwards.
+#
+#     ansible-playbook provision.yml
+#     ansible-playbook provision.yml -l a11y-worker-2
+#
+# This DRIVES `provision-nvda-worker.ps1`; it does not reimplement it. That script is idempotent, tested,
+# and holds a great deal of hard-won Windows knowledge (ForegroundLockTimeout applied to the right session,
+# the interactive scheduled task, the blank-password auto-logon guarded by LimitBlankPasswordUse, node's
+# ACL after a Move-Item). Reproducing any of that in YAML would create a second source of truth for how a
+# worker is built, and the two would drift in exactly the way this fleet cannot afford.
+#
+# It is also the repair for a guest whose NVDA has gone bad — the state where every capture succeeds, the
+# worker looks perfectly healthy, and the only symptom is `/health.vitals.recoveries` climbing.
+- name: Provision the capture workers
+  hosts: a11y_workers
+  gather_facts: false
+  # One at a time. Provisioning reinstalls NVDA and can reboot, and a fleet-wide simultaneous reboot means
+  # every worker is unavailable at once rather than one at a time -- which matters if a run is in flight.
+  serial: 1
+
+  tasks:
+    - name: Fast-forward the guest checkout so provisioning runs THIS version
+      # Provisioning stamps `provisionRevision` from the checkout, and that value is a capture cache key.
+      # Running an old script would stamp an old revision and quietly split the fleet's cache.
+      ansible.windows.win_shell: |
+        git fetch --quiet origin
+        git merge --ff-only --quiet origin/{{ a11y_git_ref | default('main') }}
+        git rev-parse --short HEAD
+      args:
+        chdir: "{{ a11y_repo_path }}"
+      register: provision_head
+      changed_when: true
+
+    - name: Run provision-nvda-worker.ps1
+      # Elevated: it installs NVDA, writes a scheduled task and touches machine policy.
+      become: true
+      ansible.windows.win_shell: >-
+        powershell.exe -NoProfile -ExecutionPolicy Bypass
+        -File "{{ a11y_repo_path }}\packages\worker-fleet\src\provisioning\provision-nvda-worker.ps1"
+      register: provision_run
+      changed_when: true
+      # It is long: NVDA install plus warm-up. Failing at a default timeout would leave a half-provisioned
+      # box, which is the one state this script cannot make idempotent for you.
+      async: 2400
+      poll: 15
+
+    - name: Show what provisioning said
+      ansible.builtin.debug:
+        var: provision_run.stdout_lines
+
+    - name: Confirm the worker is serving
+      # Over HTTP, from the control plane -- see deploy.yml for why verification must not share a failure
+      # mode with the action that produced it.
+      ansible.builtin.uri:
+        url: "{{ a11y_health_url }}"
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 10
+      delegate_to: localhost
+      register: provisioned_health
+      retries: 40
+      delay: 15
+      until: provisioned_health.status is defined and provisioned_health.status == 200
+
+    - name: Report what it is
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} at {{ provision_head.stdout | trim }} —
+          code {{ provisioned_health.json.code | default('?') }},
+          browser {{ provisioned_health.json.environment.browser | default('?') }}
+          {{ provisioned_health.json.environment.browserVersion | default('') }},
+          NVDA {{ provisioned_health.json.environment.screenReaderVersion | default('?') }},
+          provisionRevision {{ provisioned_health.json.environment.provisionRevision | default('?') }}

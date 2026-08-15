@@ -1,0 +1,30 @@
+---
+# Restart the worker on one box or all of them.
+#
+#     ansible-playbook restart.yml -l a11y-worker-2
+#     ansible-playbook restart.yml
+#
+# The remedy for the wedge: `/health` answers but every capture returns 429 "a capture is already in
+# progress", because a previous capture hung and `busy` was never released. From outside that is
+# indistinguishable from a dead machine, and it cost two days of misdiagnosis once — bad clones, a stub
+# NVDA install, guest-agent failures — before the cause was understood.
+#
+# Note what this does NOT do: it never restarts NVDA on an idle worker. NVDA responds to repeated restarts
+# with a modal dialog on the guest desktop (`nvdaHelperRemote (injection_terminate)`), a modal blocks
+# input, and the next capture hangs — so the expensive remedy feeds the fault it treats. Restarting the
+# whole worker process is a different thing: `startScreenReader` cold-starts a clean NVDA on the next
+# capture, which is the supported path.
+- name: Restart the capture workers
+  hosts: a11y_workers
+  gather_facts: false
+  tasks:
+    - name: Restart and wait for it to serve
+      ansible.builtin.import_tasks: tasks/restart-worker.yml
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} serving again —
+          code {{ worker_health.json.code | default('?') }},
+          ready {{ worker_health.json.ready | default('?') }},
+          recoveries {{ worker_health.json.vitals.recoveries | default('?') }}

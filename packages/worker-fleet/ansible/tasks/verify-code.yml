@@ -1,0 +1,67 @@
+---
+# Did the deploy actually land? Asked over HTTP, and escalated rather than believed.
+#
+# `/health.code` is a sha256 over the worker's source files, computed by the same function on both sides.
+# It is the only thing that distinguishes "the files were copied" from "the worker is RUNNING them" —
+# which is exactly the gap a restart that silently did nothing left open for an hour on two guests.
+- name: Read the code version the worker is serving
+  ansible.builtin.uri:
+    url: "{{ a11y_health_url }}"
+    method: GET
+    return_content: true
+    timeout: 10
+  delegate_to: localhost
+  register: health_after_restart
+
+- name: Remember it
+  ansible.builtin.set_fact:
+    served_code: "{{ health_after_restart.json.code | default('missing') }}"
+
+# A reboot always picks up pushed files, and it is the documented remedy for a restart that did not take.
+# It is the ESCALATION and not the default because it costs a minute per box and, at twelve boxes, a
+# deploy that always reboots is a deploy nobody runs.
+- name: Reboot when the restart did not take
+  when: served_code != expected_code.stdout
+  block:
+    - name: Say why
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} still serving {{ served_code }}, expected {{ expected_code.stdout }}
+          — the task restart did not pick up the new files. Rebooting, which always does.
+
+    - name: Reboot
+      # Auto-logon plus the at-logon task bring the worker back without anyone touching the console; that
+      # is what makes a reboot an acceptable remedy on a headless fleet rather than a site visit.
+      ansible.windows.win_reboot:
+        reboot_timeout: 600
+        post_reboot_delay: 15
+
+    - name: Wait for the worker to serve /health after the reboot
+      ansible.builtin.uri:
+        url: "{{ a11y_health_url }}"
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 10
+      delegate_to: localhost
+      register: health_after_reboot
+      retries: 40
+      delay: 10
+      until: health_after_reboot.status is defined and health_after_reboot.status == 200
+
+    - name: Remember what it serves now
+      ansible.builtin.set_fact:
+        served_code: "{{ health_after_reboot.json.code | default('missing') }}"
+
+- name: Fail if the worker is still not serving this checkout
+  # Loudly, and naming both hashes. A deploy that reports success while a box runs different code is worse
+  # than a failed deploy, because the fleet then produces evidence from two code versions and nothing says
+  # so — `workerCode` is deliberately outside the cache key, so the corpus will not notice for you.
+  ansible.builtin.assert:
+    that: served_code == expected_code.stdout
+    fail_msg: >-
+      {{ inventory_hostname }} is serving {{ served_code }} but this checkout is
+      {{ expected_code.stdout }}. It survived a restart AND a reboot, so the files on the box are not the
+      ones you think: check `git -C {{ a11y_repo_path }} status` there, and that nothing has committed
+      locally on the guest.
+    success_msg: "{{ inventory_hostname }} is serving {{ expected_code.stdout }}"

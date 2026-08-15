@@ -264,6 +264,66 @@ try {
     New-NetFirewallRule -Name 'sshd-a11y' -DisplayName 'OpenSSH Server (a11y-witness)' `
       -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
   }
+  # PowerShell as the SSH shell, not cmd.
+  #
+  # Windows OpenSSH ships with cmd.exe as DefaultShell. Ansible's Windows modules ARE PowerShell, so with
+  # cmd every task pays an extra quoting layer for nothing, and `ansible_shell_type: powershell` -- which
+  # the fleet playbooks set -- answers every task with a parse error that points at the YAML rather than at
+  # the shell. Setting it here means a box is manageable the moment it finishes bootstrapping, rather than
+  # after somebody remembers this.
+  #
+  # In its OWN try, because the enclosing catch records the failure as 'sshd'. A key that could not be
+  # written reported as "OpenSSH setup failed" would send the next person to look at a service that is
+  # running perfectly -- the two-states-reported-as-one shape this project keeps paying for.
+  try {
+    $sshReg = 'HKLM:\SOFTWARE\OpenSSH'
+    if (-not (Test-Path $sshReg)) { New-Item -Path $sshReg -Force | Out-Null }
+    $pwsh = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    New-ItemProperty -Path $sshReg -Name DefaultShell -Value $pwsh -PropertyType String -Force | Out-Null
+    OK 'ssh DefaultShell set to PowerShell (the fleet playbooks require it)'
+    Record 'ssh shell' 'PowerShell'
+  } catch {
+    Record 'ssh shell' "FAILED - $($_.Exception.Message)"
+    Warn "Could not set ssh DefaultShell ($($_.Exception.Message)). Ansible plays will fail against this"
+    Warn 'box until it is set; see packages/worker-fleet/ansible/README.md for the one-liner.'
+  }
+
+  # The operator's public key, if one was supplied. This is what turns "6-12 console visits" into one.
+  #
+  # `witness` is an Administrator, and Windows OpenSSH IGNORES a per-user authorized_keys for admin
+  # accounts in favour of one shared file with strict ACLs. Getting that wrong is the most common reason
+  # key auth "silently fails" here: sshd reads nothing, falls back to offering password auth, and the
+  # blank-password account cannot use it -- so the symptom is a permission denial that looks like a bad key.
+  # Its own try, for the same reason as above: a key problem must not be reported as an sshd problem.
+  try {
+    if ($env:A11Y_OPERATOR_KEY) {
+      $adminKeys = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
+      $key = $env:A11Y_OPERATOR_KEY.Trim()
+      if ($key -notmatch '^(ssh-|ecdsa-)') {
+        Warn 'A11Y_OPERATOR_KEY does not look like a public key (expected ssh-... or ecdsa-...); ignoring it.'
+        Record 'operator key' 'REFUSED - not a public key'
+      } else {
+        if (-not (Test-Path $adminKeys)) { New-Item -ItemType File -Path $adminKeys -Force | Out-Null }
+        if (@(Get-Content -Path $adminKeys -ErrorAction SilentlyContinue) -contains $key) {
+          OK 'operator key already installed'
+          Record 'operator key' 'already present'
+        } else {
+          Add-Content -Path $adminKeys -Value $key
+          OK "operator key added to $adminKeys"
+          Record 'operator key' 'installed'
+        }
+        # sshd refuses a key file that any non-admin can write, and refuses it without telling the client.
+        icacls.exe $adminKeys /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null
+      }
+    } else {
+      Record 'operator key' 'not supplied (set A11Y_OPERATOR_KEY to manage this box with Ansible)'
+    }
+  } catch {
+    Record 'operator key' "FAILED - $($_.Exception.Message)"
+    Warn "Could not install the operator key ($($_.Exception.Message)). sshd is unaffected; install it"
+    Warn 'from the control plane with: ansible-playbook ssh-key.yml -l <host> -e a11y_operator_key=...'
+  }
+
   OK "sshd $((Get-Service sshd).Status), port 22 allowed"
   Record 'sshd' "running on port 22"
 } catch {
@@ -395,13 +455,21 @@ if (-not $handedOff) {
 
   Reach it from your Mac:
 
-    ssh-copy-id is not on Windows; append your public key to:
-        C:\Users\$env:USERNAME\.ssh\authorized_keys
-    (for an ADMIN account Windows uses C:\ProgramData\ssh\administrators_authorized_keys
-     instead -- a very common reason key auth silently fails on Windows)
-
-    Then, from the Mac:
         A11Y_WORKER=http://<vm-ip>:8765 npm run witness -- https://example.com --task "..."
+
+  Manage it with the fleet playbooks:
+
+    Set A11Y_OPERATOR_KEY before running this script and the key is installed for you, which
+    is what makes every later operation unattended:
+
+        `$env:A11Y_OPERATOR_KEY = 'ssh-ed25519 AAAA... you@host'
+
+    If it was not set, install it once from the control plane:
+
+        ansible-playbook ssh-key.yml -l <host> -e a11y_operator_key="`$(cat ~/.ssh/id_ed25519.pub)"
+
+    Then add this box to packages/worker-fleet/ansible/inventory.yml -- the ONE place the fleet
+    is defined. "npm run fleet:env" derives A11Y_WORKERS from it.
 
   Auto-logon, so the interactive session survives a reboot:
   Auto-logon is configured automatically and needs NO password: provisioning gives the
