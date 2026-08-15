@@ -21,11 +21,10 @@
 // ref you want and running this again — git is the source of truth for "the previous version", so there
 // is no bespoke backup to go stale.
 import { execFile, execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
-import { WORKER_FILES, workerSourceDir } from "@a11y-witness/nvda-worker";
+import { WORKER_FILES, workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 
 const run = promisify(execFile);
@@ -61,11 +60,20 @@ function hashedFiles() {
   return WORKER_FILES;
 }
 
-/** Must match server.mjs codeVersion(): same files, same order. */
-function localVersion(files) {
-  const hash = createHash("sha256");
-  for (const file of files) hash.update(readFileSync(resolve(NVDA_DIR, file)));
-  return hash.digest("hex").slice(0, 16);
+/**
+ * The SHARED hasher, not a local copy of it.
+ *
+ * This used to hash raw bytes while `codeVersion()` normalises CRLF to LF -- and that difference is not
+ * cosmetic: a worker whose repo was git-cloned on Windows checks out CRLF, so the two sides hashed
+ * different bytes for identical code and the deploy verification reported STALE for ever. Measured on the
+ * first bare-metal worker: 31979b551b7a2cfa against a checkout's 22822b7a3a08969c.
+ *
+ * `code-version.test.ts` claims to enforce "one hasher" but only greps for the file list, so this file
+ * satisfied it while keeping its own implementation. Two implementations of a comparison are two chances
+ * to disagree, and the whole point of this check is that both sides agree.
+ */
+function localVersion() {
+  return codeVersion(NVDA_DIR);
 }
 
 async function pool() {
@@ -250,7 +258,7 @@ async function main() {
   guardProtocolChange();
 
   const files = hashedFiles();
-  const expected = localVersion(files);
+  const expected = localVersion();
   const vms = await pool();
   if (!vms.length) {
     process.stderr.write(only ? `no local worker VM named ${only}\n` : "no local worker VMs registered\n");

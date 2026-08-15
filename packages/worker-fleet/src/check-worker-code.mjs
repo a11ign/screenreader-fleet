@@ -56,8 +56,12 @@ function protocolBumpNote() {
 const localVersion = () => codeVersion(NVDA_DIR);
 
 function workerUrls() {
-  if (process.env.A11Y_WORKER) return [process.env.A11Y_WORKER];
-  if (process.env.A11Y_WORKERS) return process.env.A11Y_WORKERS.split(",");
+  // Trimmed and de-slashed, the same way capture-screenreader-dataset.mjs and doctor.mjs do it.
+  // `A11Y_WORKERS=a, b` otherwise yields a URL with a leading space, which fails to parse as a URL and
+  // reports as an unreachable worker -- a configuration typo wearing a dead-machine costume.
+  const clean = (raw) => raw.split(",").map((w) => w.trim().replace(/\/$/, "")).filter(Boolean);
+  if (process.env.A11Y_WORKER) return clean(process.env.A11Y_WORKER);
+  if (process.env.A11Y_WORKERS) return clean(process.env.A11Y_WORKERS);
   const pool = JSON.parse(execFileSync(CTL, ["pool"], { encoding: "utf8" }));
   return pool.filter((vm) => vm.ip).map((vm) => `http://${vm.ip}:${vm.port}`);
 }

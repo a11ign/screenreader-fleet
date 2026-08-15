@@ -21,7 +21,21 @@ import { fleetScriptPaths } from "./fleet-scripts.mjs";
 
 const run = promisify(execFile);
 const JSON_OUT = process.argv.includes("--json");
-const WORKER_ENV = process.env.A11Y_WORKER ?? null;
+// A11Y_WORKERS (plural) is how a bare-metal fleet is configured -- bootstrap-control-plane.sh tells you
+// to set exactly that -- and this read only A11Y_WORKER. So doctor reported "no A11Y_WORKER set and no
+// local VM tooling here" against a healthy fleet of ten machines, and doctor is the FIRST command
+// CLAUDE.md tells an agent to run. The environment was fine and the entry point said it was broken.
+//
+// Trimmed and de-slashed on the way in, the same way capture-screenreader-dataset.mjs does it:
+// `A11Y_WORKERS=a, b` otherwise yields a URL with a leading space that fails to parse.
+function configuredWorkers() {
+  const raw = process.env.A11Y_WORKERS ?? process.env.A11Y_WORKER ?? "";
+  return raw.split(",")
+    .map((w) => w.trim().replace(/\/$/, ""))
+    .filter(Boolean)
+    .map((url) => ({ name: url.replace(/^https?:\/\//, ""), url }));
+}
+const WORKERS_ENV = configuredWorkers();
 const PAGES_PORT = Number(process.env.DATASET_PAGES_PORT || 5050);
 // The lifecycle script ships beside this one in the fleet package. It was `../scripts/local-worker/...`,
 // resolved from this module — correct while doctor lived in `scripts/`, and silently wrong the moment it
@@ -105,18 +119,10 @@ async function checkJudge() {
 //
 // Ready means "a run can proceed", not "everything is already running".
 async function checkWorker() {
-  if (WORKER_ENV) {
-    try {
-      const health = await httpJson(`${WORKER_ENV.replace(/\/$/, "")}/health`);
-      return add("worker", health.screenReader === "NVDA", `A11Y_WORKER ${WORKER_ENV} — ${JSON.stringify(health)}`);
-    } catch (e) {
-      return add("worker", false, `A11Y_WORKER ${WORKER_ENV} unreachable (${e.message})`,
-        "check that machine is up and its a11ysrv task is running; or unset A11Y_WORKER to use the local pool");
-    }
-  }
+  if (WORKERS_ENV.length) return checkConfiguredFleet(WORKERS_ENV);
   if (process.platform !== "darwin" || !existsSync(CTL)) {
-    return add("worker", false, "no A11Y_WORKER set and no local VM tooling here",
-      "set A11Y_WORKER=http://host:8765, or see docs/getting-started.md");
+    return add("worker", false, "no A11Y_WORKERS set and no local VM tooling here",
+      "set A11Y_WORKERS=http://host:8765[,http://host2:8765], or see docs/getting-started.md");
   }
 
   let pool;
@@ -145,12 +151,71 @@ async function checkWorker() {
   } else {
     add("worker", true, `${pool.length} worker(s), all stopped — a run starts them automatically (${summary})`);
   }
-  await checkDegradedWorkers(pool);
-  await checkFleetConsistency(pool);
+  // Same shape as a configured fleet, so the two diagnostics below have ONE implementation. They were
+  // pure functions over /health JSON that only the UTM branch could reach, which meant a bare-metal
+  // fleet -- the direction this project is going -- got neither.
+  const reachable = pool.filter((v) => v.healthy && v.ip)
+    .map((v) => ({ name: v.name, url: `http://${v.ip}:${v.port}` }));
+  await checkDegradedWorkers(reachable);
+  await checkFleetConsistency(reachable);
   checkHostCapacity(pool);
   const busy = pool.filter((vm) => vm.busy);
   if (busy.length) {
     add("contention", false, `${busy.map((v) => v.name).join(", ")} busy with a capture — another shell or agent is using the pool`,
+      "wait for it, or you will both see the other's restarts as breakage");
+  }
+}
+
+/**
+ * The fleet named by A11Y_WORKERS: probe every one, report per worker, never fail on a single loss.
+ *
+ * "Ready means a run can proceed" is this file's own rule, and for a fleet that means AT LEAST ONE
+ * worker answering -- not all of them. The dispatcher already evicts a worker after three consecutive
+ * failures and requeues its cases (capture-decisions.mjs), so one dead machine costs throughput, not
+ * the run. Failing the whole check for it would tell an agent the environment is broken when nine
+ * workers are sitting idle and ready, which is the exact mistake the comment above checkWorker
+ * describes for a stopped VM.
+ */
+async function checkConfiguredFleet(workers) {
+  const probed = [];
+  for (const w of workers) {
+    try {
+      probed.push({ ...w, health: await httpJson(`${w.url}/health`) });
+    } catch (e) {
+      probed.push({ ...w, health: null, error: e.message });
+    }
+  }
+  const reachable = probed.filter((p) => p.health);
+  const ready = reachable.filter((p) => p.health.ready);
+  const state = (p) => {
+    if (!p.health) return "unreachable";
+    if (p.health.busy) return "busy";
+    return p.health.ready ? "ready" : "not-ready";
+  };
+  const summary = probed.map((p) => `${p.name}=${state(p)}`).join(" ");
+
+  if (!reachable.length) {
+    return add("worker", false, `${workers.length} configured, none answering — ${summary}`,
+      "check those machines are up and their a11ysrv task is running; "
+      + `curl ${workers[0].url}/health from this host`);
+  }
+  // A worker that answers but is not ready is normal right after a boot and clears on its own --
+  // /health's own note says so -- which is why this reports the count rather than failing on it.
+  add("worker", true, `${ready.length}/${workers.length} ready — ${summary}`);
+
+  const unreachable = probed.filter((p) => !p.health);
+  if (unreachable.length) {
+    add("fleet reach", true, `${unreachable.length} not answering: ${unreachable.map((p) => p.name).join(", ")}`
+      + " — the run will dispatch to the rest");
+  }
+
+  await checkDegradedWorkers(workers);
+  await checkFleetConsistency(workers);
+
+  // Contention only matters when there is nowhere left to dispatch. One busy worker in a fleet of ten
+  // is a run in progress, not a conflict -- flagging it would make doctor fail during normal use.
+  if (reachable.length && reachable.every((p) => p.health.busy)) {
+    add("contention", false, `all ${reachable.length} reachable worker(s) busy — another run or agent has the fleet`,
       "wait for it, or you will both see the other's restarts as breakage");
   }
 }
@@ -161,18 +226,19 @@ async function checkWorker() {
 // none, so this never surfaced anywhere. Measured on this pool: one worker needed a recovery on 4 of 4
 // captures (nvdaStart 19.1s each, WALL 122.9s) beside one that needed none (WALL 40.6s). Reported, not
 // failed: a degraded worker is slow, not broken, and pulling it costs more throughput than it saves.
-async function checkDegradedWorkers(pool) {
-  for (const vm of pool.filter((v) => v.healthy && v.ip)) {
+async function checkDegradedWorkers(workers) {
+  for (const w of workers) {
     let health;
     try {
-      health = await httpJson(`http://${vm.ip}:${vm.port}/health`);
+      health = await httpJson(`${w.url}/health`);
     } catch {
       continue; // unreachable is already the worker check's business
     }
     const { degraded, reason } = assessWorker(health.vitals);
     if (degraded) {
-      add(`worker ${vm.name}`, true, `DEGRADED — ${reason}`,
-        `powershell -File scripts/provision-nvda-worker.ps1   # on ${vm.name}, in the interactive session`);
+      add(`worker ${w.name}`, true, `DEGRADED — ${reason}`,
+        `re-provision ${w.name}: packages/worker-fleet/src/provisioning/provision-nvda-worker.ps1, elevated,`
+        + " in the interactive session");
     }
   }
 }
@@ -189,12 +255,12 @@ async function checkDegradedWorkers(pool) {
  * Never a FAIL. A run on slightly mismatched guests is worse than one on matched guests and far better
  * than no run, and a diagnostic must not be the thing that takes the pool offline.
  */
-async function checkFleetConsistency(pool) {
+async function checkFleetConsistency(workers) {
   const guests = [];
-  for (const vm of pool.filter((v) => v.healthy && v.ip)) {
+  for (const w of workers) {
     try {
-      const health = await httpJson(`http://${vm.ip}:${vm.port}/health`);
-      guests.push({ worker: `http://${vm.ip}:${vm.port}`, environment: health.environment, policy: null });
+      const health = await httpJson(`${w.url}/health`);
+      guests.push({ worker: w.url, environment: health.environment, policy: null });
     } catch {
       continue; // unreachable is the worker check's business, not this one
     }
@@ -206,7 +272,7 @@ async function checkFleetConsistency(pool) {
     return;
   }
   add("fleet", true, `INCONSISTENT — ${describeMismatches(mismatches).join("; ")}`,
-    "npm run fleet:normalise   # applies the baseline to every guest, elevated");
+    "re-provision the odd one out so every worker reports the same browser, screen reader, OS and protocol");
 }
 
 // Can this host actually hold the pool it has registered?

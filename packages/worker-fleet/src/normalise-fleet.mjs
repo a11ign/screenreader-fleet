@@ -13,7 +13,6 @@
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
 
 // A SIBLING in this package, resolved from this module. It was the cwd-relative path `scripts/guest-run.mjs`,
 // which stopped existing when M8 moved the fleet tooling — and was only ever right when the cwd happened to be
@@ -34,7 +33,11 @@ if (!vms.length) {
   process.exit(2);
 }
 
-const script = resolve("scripts/guest/normalise-fleet.cmd");
+// Resolved from THIS module, never the cwd. It read `scripts/guest/normalise-fleet.cmd` -- a path the
+// packages/ restructure moved and nothing noticed, so `npm run fleet:normalise` has been broken, and
+// doctor printed it as the FIX for a failed consistency check. A path spelled relative to the working
+// directory is a path that breaks the moment anyone runs the command from somewhere else.
+const script = fileURLToPath(new URL("./guest/normalise-fleet.cmd", import.meta.url));
 const failures = [];
 for (const vm of vms) {
   // One at a time. Three guests doing DISM and service work simultaneously is exactly the disk
