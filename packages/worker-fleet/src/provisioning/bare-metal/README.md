@@ -35,12 +35,24 @@ It refuses a private key, and it is not a service — Ctrl-C when the box is up.
 
 ### 3. In iVentoy
 
+The PXE server is **Proxmox CT 110 `iventoy-pxe`, `REDACTED-INTERNAL-ADDRESS`**, web UI on `:26000`.
+
 Point the Windows 11 x64 ISO's **Auto Install Script** at this directory's `autounattend.xml`, and set a
 non-zero boot timeout so the install starts without a keypress.
 
-**Edit the address in `autounattend.xml` first.** It has `http://REDACTED-INTERNAL-ADDRESS:8099` baked in; that must
-be the machine running `serve-bootstrap.sh`. The box PXE-booted from the iVentoy host moments earlier, so
-serving from there is the safe choice.
+**Start the PXE service in the web UI.** The container running is not the same as the service running:
+with it stopped, port 69/TFTP is closed and a machine set to network-boot finds nothing at all, which
+looks exactly like a firmware boot-order mistake and is not one.
+
+**Check the address in `autounattend.xml`.** It has `http://REDACTED-INTERNAL-ADDRESS:8099` baked in, and that must be
+the machine running `serve-bootstrap.sh`.
+
+That address is the **fleet-control container**, not the iVentoy host, and the reason is that
+`serve-bootstrap.sh` needs two things that live there and nowhere else: the repo (it copies
+`first-boot.cmd` and `bootstrap-windows-worker.ps1` out of the checkout) and the fleet public key. Serving
+from the PXE host instead would mean cloning the repo onto it and copying a key across, which puts fleet
+material on a second box to save nothing. Both are on the same bridge, so a machine that can PXE-boot from
+one can certainly fetch three files over HTTP from the other.
 
 ### Why the files are fetched rather than injected
 
@@ -65,7 +77,7 @@ That last line is the point of the firmware step: WoL is only really verified by
 getting it back, and it is far better to find a wrong firmware setting while you are still next to the
 machine.
 
-## Four things this file does differently## Four things this file does differently from the UTM one, and why
+## Four things this file does differently from the UTM one, and why
 
 The sibling at `../../local-worker/autounattend.xml` is the proven recipe. This is that recipe on real
 hardware and a real network, and the differences are not cosmetic:
