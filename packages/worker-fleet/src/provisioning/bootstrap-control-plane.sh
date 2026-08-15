@@ -67,9 +67,16 @@ if . /etc/os-release 2>/dev/null && [ -n "${PRETTY_NAME:-}" ]; then ok "$PRETTY_
 # Root or sudo, but do not assume either: an LXC console is usually already root, and demanding
 # sudo there fails on a box that does not have it installed.
 SUDO=""
+# A SEPARATE variable for the environment-preserving form, not `$SUDO -E`. When SUDO is empty --
+# which is the normal case, because an LXC console is root -- `$SUDO -E cmd` leaves `-E` as the
+# command word, and the shell reports `-E: command not found`. That killed this script at the
+# NodeSource step on both containers: `set -euo pipefail` aborted correctly, so it failed loudly
+# rather than half-installing, but the cause reads as a missing binary rather than a quoting bug.
+SUDO_E=""
 if [ "$(id -u)" -ne 0 ]; then
   command -v sudo >/dev/null || { echo "Not root and no sudo. Run as root." >&2; exit 1; }
   SUDO="sudo"
+  SUDO_E="sudo -E"
 fi
 if [ -n "$SUDO" ]; then ok 'using sudo'; else ok 'running as root'; fi
 ok "role: $ROLE"
@@ -84,7 +91,7 @@ else
   # complaint.
   $SUDO apt-get update -qq
   $SUDO apt-get install -y -qq curl ca-certificates gnupg >/dev/null
-  curl -fsSL https://deb.nodesource.com/setup_lts.x | $SUDO -E bash - >/dev/null
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | $SUDO_E bash - >/dev/null
   $SUDO apt-get install -y -qq nodejs >/dev/null
   ok "node installed ($(node --version))"
 fi
@@ -103,6 +110,27 @@ cd "$REPO_PATH"
 if is_lab; then
   npm install --silent --no-audit --no-fund
   ok 'dependencies installed'
+
+  # The LOCAL scorer is the default judge and the only one that ships (JUDGE_BACKEND defaults to
+  # `local`), so a lab without Python is a lab that cannot score. This step was missing entirely, and
+  # nothing here failed: `witness`, `eval` and `training:score` all name `.venv/bin/python` explicitly,
+  # so the absence surfaces as a missing interpreter partway through a run rather than at setup.
+  $SUDO apt-get install -y -qq python3-venv >/dev/null
+  [ -d "$REPO_PATH/.venv" ] || python3 -m venv "$REPO_PATH/.venv"
+  "$REPO_PATH/.venv/bin/pip" install -q --upgrade pip
+  "$REPO_PATH/.venv/bin/pip" install -q -r "$REPO_PATH/packages/scorer/requirements.txt"
+  ok "python venv ready ($("$REPO_PATH/.venv/bin/python" --version 2>&1))"
+
+  # The trained heads ARE tracked (796 KB); the MiniLM encoder is 87 MB and deliberately is not. It is a
+  # public model pinned by BOTH revision and sha256 in fetch-encoder.py, so fetching rather than
+  # vendoring it is still reproducible -- which is why .gitignore excludes `models/encoders/`.
+  if [ -f "$REPO_PATH/packages/scorer/models/encoders/all-MiniLM-L6-v2/model.safetensors" ]; then
+    ok 'encoder already present'
+  else
+    (cd "$REPO_PATH" && .venv/bin/python packages/scorer/python/fetch-encoder.py >/dev/null 2>&1) \
+      && ok 'encoder fetched (pinned revision, sha256-verified)' \
+      || warn 'could not fetch the encoder -- the local judge cannot score until it is present'
+  fi
 else
   # The control container deliberately has NO node_modules. deploy.yml computes codeVersion by importing
   # code-version.mjs BY PATH -- it needs nothing but node stdlib, and verified identical to the workspace
