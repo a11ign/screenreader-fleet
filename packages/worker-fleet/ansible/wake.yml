@@ -54,6 +54,17 @@
   # is why that playbook works and this one did not.
   vars:
     ansible_connection: local
+    # BOTH, and that is the point. `group_vars/a11y_workers.yml` sets `ansible_connection: ssh` AND
+    # `ansible_shell_type: powershell`, because every other play talks to Windows. A play that runs
+    # LOCALLY has to override the pair: overriding only the connection produced
+    #
+    #   /bin/sh: 1: PowerShell: not found
+    #
+    # — Ansible correctly running on the Linux control plane and correctly trying to use PowerShell to do
+    # it. Fixing one of two settings that must change together is the same shape as the wake-property task
+    # that hung: a remedy applied where the behaviour was noticed rather than everywhere it reaches.
+    ansible_shell_type: sh
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
 
   tasks:
     - name: Is it already up
