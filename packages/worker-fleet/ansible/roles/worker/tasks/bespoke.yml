@@ -37,13 +37,26 @@
 # The driver is committed under `files/intel-e1d` (~1 MB, from Intel's Wired_driver_31.2.2_x64 pack)
 # rather than downloaded: intel.com serves 403 to anything that is not a browser, so a provisioning run
 # that fetched it would work by hand and fail unattended.
-- name: Is Intel's own NIC driver already installed
+- name: What NIC is this, and whose driver is on it
+  # The hardware ID as well as the provider, because gating on the provider alone would try to install an
+  # Intel driver onto the fleet's Realtek box: "not Intel" is true of a Realtek adapter too. That would
+  # stage a non-matching driver and then fail the assert below on a machine with nothing wrong with it.
   become: true
   ansible.windows.win_shell: |
     $a = Get-NetAdapter -Physical | Select-Object -First 1
-    "$($a.DriverProvider)|$($a.DriverFileName)"
+    $ids = (Get-PnpDeviceProperty -InstanceId $a.PnPDeviceID -KeyName DEVPKEY_Device_HardwareIds -EA SilentlyContinue).Data
+    "$($a.DriverProvider)|$($a.DriverFileName)|$($ids -join ',')"
   changed_when: false
   register: nic_driver
+
+- name: Note a NIC this role has no driver for
+  # Said out loud rather than skipped silently. A box whose wake support is unknown is a box that will
+  # look fine until the day nothing wakes it.
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} has a non-Intel NIC ({{ nic_driver.stdout | trim }}). The Intel driver step
+      does not apply; whether this adapter can wake is UNVERIFIED and wake.yml may not work on it.
+  when: "'VEN_8086' not in nic_driver.stdout"
 
 - name: Stage Intel's driver
   become: true
@@ -51,7 +64,7 @@
     src: "intel-e1d/{{ item }}"
     dest: 'C:\a11y\intel-e1d\{{ item }}'
   loop: [e1d.inf, e1d.sys, e1d.cat, e1dmsg.dll]
-  when: "'Intel' not in nic_driver.stdout"
+  when: "'VEN_8086' in nic_driver.stdout and 'Intel' not in nic_driver.stdout"
 
 - name: Install it
   # Fire-and-forget, because installing a NIC driver re-initialises the adapter and therefore drops the
@@ -61,13 +74,13 @@
   ansible.windows.win_command: pnputil.exe /add-driver C:\a11y\intel-e1d\e1d.inf /install
   async: 180
   poll: 0
-  when: "'Intel' not in nic_driver.stdout"
+  when: "'VEN_8086' in nic_driver.stdout and 'Intel' not in nic_driver.stdout"
 
 - name: Wait for the box to come back after the adapter re-initialises
   ansible.builtin.wait_for_connection:
     delay: 20
     timeout: 300
-  when: "'Intel' not in nic_driver.stdout"
+  when: "'VEN_8086' in nic_driver.stdout and 'Intel' not in nic_driver.stdout"
 
 - name: Prove the driver actually changed
   # Asserted, not assumed. `pnputil` exits 0 for "staged in the driver store" as well as "installed on the
@@ -87,6 +100,7 @@
       inbox driver has NO wake support, so wake.yml cannot work on this box however the BIOS and
       PnPCapabilities are set.
     success_msg: "NIC driver is {{ nic_driver_after.stdout | trim }}"
+  when: "'VEN_8086' in nic_driver.stdout"
 
 - name: Turn the wake properties on
   # Only exist once Intel's driver is in place. Energy Efficient Ethernet takes Off/On rather than
@@ -108,6 +122,9 @@
   register: wake_prop
   changed_when: false
   failed_when: "'Enabled' not in wake_prop.stdout"
+  # Intel hardware only. These property NAMES are Intel's; a Realtek adapter has its own, and failing a
+  # box for not answering to them would be the check inventing a fault rather than finding one.
+  when: "'VEN_8086' in nic_driver.stdout"
 
 - name: Keep the NIC awake
   # The SECOND mechanism, and fixing only one leaves the fault intermittent: the sleep timers put the
