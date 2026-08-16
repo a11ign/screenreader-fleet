@@ -59,3 +59,8 @@ all:
           # Enrolled by `fleet:discover --enroll` on 2026-08-16: NVDA 2026.1.1, Microsoft Windows 11 Pro 10.0.22631/x64
           ansible_host: REDACTED-INTERNAL-ADDRESS
           mac: "e8:6a:64:e2:3c:8d"
+
+        a11y-worker-3:
+          # Enrolled by `fleet:discover --enroll` on 2026-08-16: NVDA 2026.1.1, Microsoft Windows 11 Pro 10.0.22631/x64
+          ansible_host: REDACTED-INTERNAL-ADDRESS
+          mac: "8c:16:45:9d:0f:1b"
