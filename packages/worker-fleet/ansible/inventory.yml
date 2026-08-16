@@ -54,3 +54,8 @@ all:
           mac: "00:80:64:da:18:e9"
           # The first bare-metal box. x64, Edge; the ARM64 guests it replaced are UTM VMs and are NOT
           # managed from here — they have their own lifecycle through worker-ctl.sh.
+
+        a11y-worker-2:
+          # Enrolled by `fleet:discover --enroll` on 2026-08-16: NVDA 2026.1.1, Microsoft Windows 11 Pro 10.0.22631/x64
+          ansible_host: REDACTED-INTERNAL-ADDRESS
+          mac: "e8:6a:64:e2:3c:8d"

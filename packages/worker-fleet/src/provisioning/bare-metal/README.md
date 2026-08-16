@@ -81,7 +81,7 @@ is not worth it for three small files.
 ### 4. Then, entirely remotely
 
 ```bash
-$EDITOR ../../../ansible/inventory.yml          # add the box: ansible_host + mac
+npm run fleet:discover -- --enroll              # finds the box, reads its MAC from ARP, adds it
 cd ../../../ansible
 ansible a11y_workers -m ansible.windows.win_ping -l a11y-worker-N
 ansible-playbook provision-role.yml -l a11y-worker-N --check --diff

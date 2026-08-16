@@ -1,0 +1,58 @@
+# The bootstrap payload server, as a service on the control plane.
+#
+# Install (on fleet-control, as root):
+#
+#     cp a11y-bootstrap.service /etc/systemd/system/
+#     systemctl daemon-reload && systemctl enable --now a11y-bootstrap
+#     systemctl status a11y-bootstrap
+#
+# ## Why this exists
+#
+# `serve-bootstrap.sh` used to be started by hand and stopped with Ctrl-C, which is fine for one install
+# you are watching and wrong for a fleet meant to install itself. It was found running with PPID 1 and no
+# unit: a reboot of this container would have removed it silently, and the NEXT box to install would have
+# come up perfectly, logged on, retried three fetches sixty times each, given up after ~15 minutes, and sat
+# at a working desktop with no node, no sshd, no key and no worker. From outside that reads as a bad image,
+# and the only evidence is C:\a11y-first-boot.log on a machine you cannot SSH to. Hence Restart=always.
+#
+# ## The paths are this box's, deliberately
+#
+# `inventory.yml` hardcodes addresses for the same reason: there is one control plane, and a layer of
+# indirection to make a single-instance path configurable buys nothing but a second place to be wrong.
+# If the checkout or the key moves, edit them here.
+#
+# ## RESTART AFTER CHANGING THE PAYLOAD
+#
+# `serve-bootstrap.sh` copies first-boot.cmd and bootstrap-windows-worker.ps1 into a `mktemp -d` at START
+# and serves that snapshot -- so a long-running service serves whatever the checkout held when it last
+# started, not what it holds now. That is the one way this unit can be quietly wrong. After a `git pull`
+# that touches either script:
+#
+#     systemctl restart a11y-bootstrap
+#
+# ## It serves a PUBLIC key continuously
+#
+# The script's own header called it "a small exposure and a real one" and told you to Ctrl-C when the box
+# was up. Running always widens that from minutes to permanently. It is a public key, and the two scripts
+# are in this repo -- but this was a deliberate choice to trade that for installs that do not depend on
+# somebody having remembered to start a server.
+
+[Unit]
+Description=a11y-witness worker bootstrap payload (first-boot.cmd, bootstrap script, operator public key)
+Documentation=file:///root/a11y-witness/packages/worker-fleet/src/provisioning/bare-metal/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/root/a11y-witness/packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh /root/.ssh/a11y-witness_ed25519.pub 8099
+Restart=always
+RestartSec=5
+
+# The script refuses a private key and refuses a file that is not a public key, so a misconfigured
+# ExecStart fails fast rather than serving the wrong thing. These stop it becoming anything more.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -23,10 +23,23 @@
  *
  * ## What it deliberately does not do
  *
- * It does not edit the inventory. A tool that rewrites the file describing your fleet, based on what
- * happened to answer a broadcast, is a tool that quietly drops the machine that was asleep.
+ * By default it does not touch the inventory. A tool that REWRITES the file describing your fleet, based
+ * on what happened to answer a broadcast, is a tool that quietly drops the machine that was asleep.
+ *
+ * ## `--enroll`, and why it does not contradict the paragraph above
+ *
+ * The danger named there is DELETION, not addition, and the two separate cleanly. Enrolment only ever
+ * APPENDS a worker whose MAC this file has never seen; it never edits or removes an existing entry, and
+ * it only ever looks at `unknown` findings. A sleeping box is `absent`, which enrolment does not read —
+ * so the machine that was asleep cannot be dropped, because nothing here can drop anything.
+ *
+ * That is the whole safety argument, and it is why the tempting-but-wrong design and the useful one can
+ * live in the same file: only one of them removes.
+ *
+ * It appends TEXT rather than round-tripping through a YAML library. Half the value of `inventory.yml` is
+ * its comments — every one of them paid for by an incident — and a parse-and-dump deletes all of them.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
@@ -163,6 +176,89 @@ export function reconcile(declared, discovered) {
   return findings;
 }
 
+/**
+ * The next free `a11y-worker-N`.
+ *
+ * Numbers are never reused, even when a lower one has been retired: `wake.yml`, run summaries and this
+ * project's own notes refer to boxes by that name for a long time, and handing a new machine a dead
+ * machine's name makes every one of those references silently wrong.
+ *
+ * @param {string[]} existingNames
+ */
+export function nextWorkerName(existingNames) {
+  const used = existingNames
+    .map((name) => name.match(/^a11y-worker-(\d+)$/))
+    .filter(Boolean)
+    .map((match) => Number(match[1]));
+  return `a11y-worker-${(used.length ? Math.max(...used) : 0) + 1}`;
+}
+
+/**
+ * One inventory entry, as text.
+ *
+ * `today` is a parameter rather than read from the clock so this is pure and can be asserted on.
+ *
+ * A worker with no MAC is still enrolled. That looks wrong until you read `inventory.yml`'s own comment:
+ * "A worker with no `mac` is skipped by wake.yml and NAMED, rather than silently not woken." The missing
+ * fact is therefore already a LOUD state, so recording the box is strictly better than refusing to — the
+ * alternative leaves a real machine in no file at all, which is the quiet failure.
+ *
+ * @param {{name: string, ip: string, mac: string|null, health: object, today: string}} entry
+ */
+export function enrolmentBlock({ name, ip, mac, health, today }) {
+  const env = health?.environment ?? {};
+  const identity = `${env.screenReaderVersion ? `NVDA ${env.screenReaderVersion}` : "no NVDA reported"}, `
+    + `${env.windowsVersion ?? "unknown OS"}/${env.architecture ?? "?"}`;
+  const lines = [
+    "",
+    `        ${name}:`,
+    `          # Enrolled by \`fleet:discover --enroll\` on ${today}: ${identity}`,
+    `          ansible_host: ${ip}`,
+  ];
+  if (mac) {
+    lines.push(`          mac: "${mac}"`);
+    return lines.join("\n");
+  }
+  lines.push("          # NO mac -- ARP had none for this address, so wake.yml will SKIP and NAME this box");
+  lines.push("          # rather than silently not wake it. Read it off the machine and add it here:");
+  lines.push(`          #   ansible ${name} -m win_shell -a "(Get-NetAdapter -Physical | ? Status -eq Up).MacAddress"`);
+  return lines.join("\n");
+}
+
+/**
+ * Append an entry for every unknown worker. ADDITIVE ONLY -- see this module's header for why that is
+ * what makes writing to the inventory safe at all.
+ *
+ * A discovered MAC the inventory already declares is skipped rather than added. `reconcile` calls that a
+ * MOVE and it needs a human: the box changed address, and appending it would put the SAME machine in the
+ * file twice under two names, which is worse than the drift it was trying to fix.
+ *
+ * @param {string} text
+ * @param {Array<{ip: string, mac: string|null, health: object}>} unknowns
+ * @param {string} today
+ * @returns {{text: string, added: Array<{name: string, ip: string, mac: string|null}>, skipped: Array<{ip: string, mac: string}>}}
+ */
+export function enrol(text, unknowns, today) {
+  const declared = inventoryHosts(text);
+  const knownMacs = new Set(declared.map((host) => host.mac).filter(Boolean));
+  const names = declared.map((host) => host.name);
+  const added = [];
+  const skipped = [];
+  let out = text.endsWith("\n") ? text : `${text}\n`;
+
+  for (const worker of unknowns) {
+    if (worker.mac && knownMacs.has(worker.mac)) {
+      skipped.push({ ip: worker.ip, mac: worker.mac });
+      continue;
+    }
+    const name = nextWorkerName([...names, ...added.map((entry) => entry.name)]);
+    out += `${enrolmentBlock({ name, ip: worker.ip, mac: worker.mac, health: worker.health, today })}\n`;
+    added.push({ name, ip: worker.ip, mac: worker.mac });
+    if (worker.mac) knownMacs.add(worker.mac);
+  }
+  return { text: out, added, skipped };
+}
+
 /** A worker's identity in one line, so two boxes can be told apart at a glance. */
 function describe(health) {
   const e = health?.environment ?? {};
@@ -200,6 +296,32 @@ function render(findings) {
   return lines;
 }
 
+/**
+ * Write the enrolments and say what happened, including when nothing did.
+ *
+ * Reports rather than returns quietly: `--enroll` that adds nothing must be distinguishable from
+ * `--enroll` that was never reached, which is this project's most expensive recurring shape.
+ *
+ * @param {string} inventoryPath
+ * @param {Array<{ip: string, mac: string|null, health: object}>} unknowns
+ */
+function writeEnrolments(inventoryPath, unknowns) {
+  const today = new Date().toISOString().slice(0, 10);
+  const before = readFileSync(inventoryPath, "utf8");
+  const { text, added, skipped } = enrol(before, unknowns, today);
+
+  if (added.length) writeFileSync(inventoryPath, text, "utf8");
+
+  const lines = added.map((e) => `  ENROLLED ${e.name.padEnd(16)} ${e.ip.padEnd(15)} mac ${e.mac ?? "MISSING — see the comment written beside it"}`);
+  for (const s of skipped) {
+    lines.push(`  SKIPPED  ${" ".repeat(16)} ${s.ip.padEnd(15)} its mac is already declared — this is a MOVE, fix the address by hand`);
+  }
+  if (!added.length && !skipped.length) lines.push("  nothing to enrol — every worker that answered is already declared");
+  if (added.length) lines.push(`  wrote ${inventoryPath} — review and commit it, then: ansible-playbook provision-role.yml -l ${added.map((e) => e.name).join(",")}`);
+  process.stdout.write(`\n${lines.join("\n")}\n`);
+  return { added, skipped };
+}
+
 async function main() {
   const arg = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) ?? "").split("=")[1];
   const subnet = arg("cidr") || localSubnet();
@@ -224,9 +346,15 @@ async function main() {
     process.stdout.write(`  ${declared.length} declared, ${discovered.length} answering — `
       + `${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")}\n`);
   }
+  const enrolled = process.argv.includes("--enroll")
+    ? writeEnrolments(inventoryPath, findings.filter((f) => f.state === "unknown"))
+    : { added: [], skipped: [] };
+
   // Exit 1 only on a MISMATCH — a moved or unknown worker is something to act on. An absent one is not:
   // this fleet is meant to be off between runs, which doctor already refuses to treat as a fault.
-  const mismatched = findings.some((f) => f.state === "moved" || f.state === "unknown");
+  // An unknown worker that has just been ENROLLED is no longer something to act on, so it stops counting.
+  const outstanding = findings.filter((f) => f.state === "unknown").length - enrolled.added.length;
+  const mismatched = findings.some((f) => f.state === "moved") || outstanding > 0;
   process.exit(mismatched ? 1 : 0);
 }
 

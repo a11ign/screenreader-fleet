@@ -21,10 +21,18 @@
 # grants access to anyone with the repo. It is passed in here and served for the few minutes an install
 # takes.
 #
-# ## Stop it afterwards
+# ## Run it by hand, or as a service
 #
-# This serves an SSH public key and two scripts to anyone on the LAN who asks. That is a small exposure
-# and a real one — Ctrl-C when the box is up. It is deliberately NOT a service.
+# This serves an SSH public key and two scripts to anyone on the LAN who asks. That is a small exposure and
+# a real one, so run by hand it should be Ctrl-C'd once the box is up.
+#
+# It used to say it was "deliberately NOT a service", and the fleet outgrew that. Started by hand it is a
+# step somebody has to remember, and forgetting produces the worst failure this path has: Windows installs
+# fine, the fetches retry for ~15 minutes, and the box sits at a desktop with no worker on it — which reads
+# as a bad image. `a11y-bootstrap.service` beside this file runs it with Restart=always instead.
+#
+# If you do run it as a service, note the staging below: the payload is snapshotted at START, so a restart
+# is what picks up a changed first-boot.cmd or bootstrap-windows-worker.ps1.
 set -euo pipefail
 
 KEY="${1:-}"
