@@ -17,38 +17,94 @@
 # actually runs captures, and nothing would report a thing. That is precisely the defect the previous
 # `become: true` on the whole script introduced.
 
+# These three used `win_regedit` with `loop:`, which is ONE SSH ROUND TRIP PER VALUE. Measured with
+# profile_tasks on a11y-worker-4: 42.95s, 12.23s and 24.44s — about 79s of a run whose top twenty tasks
+# totalled 245s, to write a dozen DWORDs. The work is trivial; the transport is the cost.
+#
+# Batched into one call each. `win_regedit`'s idempotency, check-mode and diff are the reason CLAUDE.md
+# argues against replacing modules with inline script, so those properties are kept by hand rather than
+# dropped: the script reads current state, writes only differences, honours `$Ansible.CheckMode`, and
+# sets `$Ansible.Changed` from what it actually did. The values it changed are returned so the run still
+# says which ones moved.
+#
+# And it is ASSERTED afterwards, because this is the one place where a silent miss would be expensive:
+# the header above notes drift here reaches `environmentKey()` and therefore the CAPTURE CACHE KEY. A
+# batched write that quietly skipped a value would be evidence corruption, not a slow run.
 - name: Edge policy — first run, background work, and autofill
   become: true
-  ansible.windows.win_regedit:
-    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge
-    name: "{{ item.name }}"
-    data: "{{ item.value }}"
-    type: dword
-  loop: "{{ worker_edge_policy }}"
-  loop_control:
-    label: "{{ item.name }}={{ item.value }}"
+  ansible.windows.win_powershell:
+    parameters:
+      Path: 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+      Values: "{{ worker_edge_policy }}"
+    script: &apply_dwords |
+      param($Path, $Values)
+      $changed = @()
+      foreach ($v in $Values) {
+        # Per-item path wins, so a list whose entries carry their own key works through the same script.
+        $p = if ($v.path) { $v.path } else { $Path }
+        if (-not (Test-Path -LiteralPath $p)) {
+          if (-not $Ansible.CheckMode) { New-Item -Path $p -Force | Out-Null }
+          $changed += "$p (key created)"
+        }
+        $cur = $null
+        try { $cur = (Get-ItemProperty -LiteralPath $p -Name $v.name -ErrorAction Stop).($v.name) } catch { $cur = $null }
+        if ($null -eq $cur -or [int]$cur -ne [int]$v.value) {
+          if (-not $Ansible.CheckMode) {
+            New-ItemProperty -LiteralPath $p -Name $v.name -Value ([int]$v.value) -PropertyType DWord -Force | Out-Null
+          }
+          $changed += "$($v.name)=$($v.value)"
+        }
+      }
+      $Ansible.Changed = $changed.Count -gt 0
+      $changed
 
 - name: Edge auto-update off
   become: true
-  ansible.windows.win_regedit:
-    path: HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate
-    name: "{{ item.name }}"
-    data: "{{ item.value }}"
-    type: dword
-  loop: "{{ worker_edge_update_policy }}"
-  loop_control:
-    label: "{{ item.name }}={{ item.value }}"
+  ansible.windows.win_powershell:
+    parameters:
+      Path: 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate'
+      Values: "{{ worker_edge_update_policy }}"
+    script: *apply_dwords
 
 - name: Nothing pops to the foreground uninvited
   become: true
-  ansible.windows.win_regedit:
-    path: "{{ item.path }}"
-    name: "{{ item.name }}"
-    data: "{{ item.value }}"
-    type: dword
-  loop: "{{ worker_quiet_policy }}"
-  loop_control:
-    label: "{{ item.path | basename }}\\{{ item.name }}"
+  ansible.windows.win_powershell:
+    parameters:
+      Path: ''
+      Values: "{{ worker_quiet_policy }}"
+    script: *apply_dwords
+
+- name: Refuse to call this provisioned if a policy value did not land
+  # Read back, in one call. The batched writes above are only safe BECAUSE this exists: a loop of
+  # `win_regedit` fails loudly on the value it could not write, and a batched script could not without
+  # being asked. This is the "prove it" half that every other guard in this role has.
+  become: true
+  ansible.windows.win_powershell:
+    parameters:
+      EdgePath: 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+      UpdatePath: 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate'
+      Edge: "{{ worker_edge_policy }}"
+      Update: "{{ worker_edge_update_policy }}"
+      Quiet: "{{ worker_quiet_policy }}"
+    script: |
+      param($EdgePath, $UpdatePath, $Edge, $Update, $Quiet)
+      $Ansible.Changed = $false
+      $wrong = @()
+      function Check($p, $name, $want) {
+        $cur = $null
+        try { $cur = (Get-ItemProperty -LiteralPath $p -Name $name -ErrorAction Stop).($name) } catch { $cur = $null }
+        if ($null -eq $cur -or [int]$cur -ne [int]$want) { return "$p\$name is '$cur', wanted '$want'" }
+        return $null
+      }
+      foreach ($v in $Edge)   { $r = Check $EdgePath   $v.name $v.value; if ($r) { $wrong += $r } }
+      foreach ($v in $Update) { $r = Check $UpdatePath $v.name $v.value; if ($r) { $wrong += $r } }
+      foreach ($v in $Quiet)  { $r = Check $v.path     $v.name $v.value; if ($r) { $wrong += $r } }
+      if ($wrong.Count -gt 0) {
+        $Ansible.Failed = $true
+        "policy values did not land: " + ($wrong -join '; ')
+      } else {
+        "all $($Edge.Count + $Update.Count + $Quiet.Count) policy values verified"
+      }
 
 # --- HKCU from here down. NO `become` — see the header. ---
 
