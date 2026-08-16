@@ -39,10 +39,23 @@
   # ValidateLength-capped at 48 characters and FAILS BINDING rather than truncating, and
   # `-PasswordNeverExpires` sits in a different parameter set from `-NoPassword` so the two cannot be
   # combined. Neither exists here.
+  #
+  # `password` is ABSENT rather than `""`, and the difference is not cosmetic. An empty string reaches
+  # the module's PowerShell as `-Password ""`, which cannot bind:
+  #
+  #   Cannot bind argument to parameter 'Password' because it is an empty string
+  #
+  # That aborts the play at task 2 of 8 -- so `Power, NIC and browser profiles`, which is what sets
+  # PnPCapabilities and turns Fast Startup off, never ran on any box. Wake-on-LAN was therefore
+  # impossible on a fleet whose whole lifecycle depends on it, and the symptom was a failure message
+  # about a password.
+  #
+  # Omitting the key means "do not manage the password", which is the end state this role wants:
+  # autounattend.xml already creates the account blank, so there is nothing to set. The blankness is
+  # asserted below by the LimitBlankPasswordUse check, which is the property that actually matters.
   become: true
   ansible.windows.win_user:
     name: "{{ ansible_user }}"
-    password: ""
     password_never_expires: true
     account_disabled: false
     state: present
