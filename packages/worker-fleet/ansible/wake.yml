@@ -20,14 +20,40 @@
 #
 # ## Prerequisites live in inventory.yml
 #
-# Firmware WoL is a per-box console visit and cannot be automated. The two software halves are:
-# `a11y_nic_power` leaves the adapter armed to wake (PnPCapabilities 8, not 24), and
-# `a11y_power_timeouts` turns hibernation off, which also disables Fast Startup — without which many
-# boards never truly reach S5 and never wake.
+# There are THREE, and the one that actually blocked this fleet is the one that used to be missing here:
+#
+#   1. The NIC DRIVER must support wake at all. Windows ships an inbox Intel driver (`e1i68x64.sys`,
+#      provider Microsoft) that gives an I219 full connectivity and NO wake: it exposes exactly one
+#      advanced property, `Speed & Duplex`, and `Get-NetAdapterPowerManagement` answers
+#      `WakeOnMagicPacket: Unsupported`. Intel's own `e1d.sys` exposes 37, including
+#      `Wake on Magic Packet`. Every box installed from Microsoft media has the inbox one until
+#      provisioning replaces it -- so on a fresh fleet, nothing below matters.
+#   2. `a11y_nic_power` leaves the adapter armed (PnPCapabilities 8, not 24 -- 24 disables wake).
+#   3. `a11y_power_timeouts` turns hibernation off, which also disables Fast Startup -- without which
+#      many boards never truly reach S5 and never wake.
+#
+# Firmware WoL was described here as "a per-box console visit that cannot be automated". On the
+# ThinkCentre fleet that is wrong: Lenovo exposes its BIOS over `root\wmi` (`Lenovo_BiosSetting`,
+# `Lenovo_SetBiosSetting`), so the setting is readable and writable from the installed OS.
+#
+# Note `Wake on LAN: Automatic` vs `Primary` selects WHICH boot sequence a woken box uses, and the
+# Automatic sequence puts Network FIRST. With a PXE server running, a wake can therefore re-image the
+# machine. Prefer `Primary`.
 - name: Wake the capture workers
   hosts: a11y_workers
   gather_facts: false
-  connection: local
+  # `connection: local` is a play KEYWORD, and `group_vars/a11y_workers.yml` sets the VARIABLE
+  # `ansible_connection: ssh`. The variable wins -- so this play, whose entire purpose is reaching a
+  # machine that is switched off, was trying to SSH to it first and failing UNREACHABLE on its very first
+  # task. It could never have woken anything.
+  #
+  # Play vars outrank inventory group vars, so setting it here is what actually takes effect. Keeping the
+  # keyword too would be misleading: it reads as though it works.
+  #
+  # `sleep.yml` avoids the same trap by a different route -- `delegate_to: localhost` on each task -- which
+  # is why that playbook works and this one did not.
+  vars:
+    ansible_connection: local
 
   tasks:
     - name: Is it already up

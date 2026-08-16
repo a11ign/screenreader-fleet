@@ -22,6 +22,93 @@
   become: true
   a11y.worker.a11y_power_timeouts:
 
+# Intel's own NIC driver, and it must come BEFORE the two tasks below, because both of them configure a
+# capability the inbox driver does not have.
+#
+# Windows ships `e1i68x64.sys` (provider: Microsoft, 2021) for the I219. It gives full connectivity — a box
+# installs, bootstraps and serves captures on it perfectly — and it cannot wake. It exposes exactly ONE
+# advanced property, `Speed & Duplex`, and `Get-NetAdapterPowerManagement` answers
+# `WakeOnMagicPacket: Unsupported`. Intel's `e1d.sys` exposes 37 of them, including `Wake on Magic Packet`.
+#
+# That is why this was so expensive to find: every check said the box was healthy, because it WAS healthy.
+# `PnPCapabilities` had the right value, the BIOS had Wake on LAN enabled, the NIC appeared in
+# `powercfg -devicequery wake_armed` — and the packet still landed on an adapter with no wake support.
+#
+# The driver is committed under `files/intel-e1d` (~1 MB, from Intel's Wired_driver_31.2.2_x64 pack)
+# rather than downloaded: intel.com serves 403 to anything that is not a browser, so a provisioning run
+# that fetched it would work by hand and fail unattended.
+- name: Is Intel's own NIC driver already installed
+  become: true
+  ansible.windows.win_shell: |
+    $a = Get-NetAdapter -Physical | Select-Object -First 1
+    "$($a.DriverProvider)|$($a.DriverFileName)"
+  changed_when: false
+  register: nic_driver
+
+- name: Stage Intel's driver
+  become: true
+  ansible.windows.win_copy:
+    src: "intel-e1d/{{ item }}"
+    dest: 'C:\a11y\intel-e1d\{{ item }}'
+  loop: [e1d.inf, e1d.sys, e1d.cat, e1dmsg.dll]
+  when: "'Intel' not in nic_driver.stdout"
+
+- name: Install it
+  # Fire-and-forget, because installing a NIC driver re-initialises the adapter and therefore drops the
+  # very SSH connection Ansible is issuing this over. Waiting for it synchronously reports UNREACHABLE on
+  # a task that actually succeeded.
+  become: true
+  ansible.windows.win_command: pnputil.exe /add-driver C:\a11y\intel-e1d\e1d.inf /install
+  async: 180
+  poll: 0
+  when: "'Intel' not in nic_driver.stdout"
+
+- name: Wait for the box to come back after the adapter re-initialises
+  ansible.builtin.wait_for_connection:
+    delay: 20
+    timeout: 300
+  when: "'Intel' not in nic_driver.stdout"
+
+- name: Prove the driver actually changed
+  # Asserted, not assumed. `pnputil` exits 0 for "staged in the driver store" as well as "installed on the
+  # device", and the difference is invisible until something needs to wake.
+  become: true
+  ansible.windows.win_shell: |
+    $a = Get-NetAdapter -Physical | Select-Object -First 1
+    "$($a.DriverProvider)|$($a.DriverVersion)|$($a.DriverFileName)"
+  changed_when: false
+  register: nic_driver_after
+
+- name: Refuse to call this provisioned if the adapter still cannot wake
+  ansible.builtin.assert:
+    that: "'Intel' in nic_driver_after.stdout"
+    fail_msg: >-
+      {{ inventory_hostname }} still reports NIC driver {{ nic_driver_after.stdout | trim }}. Microsoft's
+      inbox driver has NO wake support, so wake.yml cannot work on this box however the BIOS and
+      PnPCapabilities are set.
+    success_msg: "NIC driver is {{ nic_driver_after.stdout | trim }}"
+
+- name: Turn the wake properties on
+  # Only exist once Intel's driver is in place. Energy Efficient Ethernet takes Off/On rather than
+  # Disabled/Enabled, which is why it is listed separately — setting it wrongly fails the task rather than
+  # silently leaving a documented WoL blocker enabled.
+  become: true
+  ansible.windows.win_shell: |
+    $a = (Get-NetAdapter -Physical | Select-Object -First 1).Name
+    foreach ($p in @(@('Wake on Magic Packet','Enabled'), @('Wake on Pattern Match','Enabled'),
+                     @('Reduce Speed On Power Down','Disabled'), @('Energy Efficient Ethernet','Off'))) {
+      try { Set-NetAdapterAdvancedProperty -Name $a -DisplayName $p[0] -DisplayValue $p[1] -EA Stop }
+      catch {
+        # Not every property exists on every adapter model, and a missing one is not a failure here --
+        # what matters is the single value read below, which `failed_when` gates on. Swallowing these
+        # individually is only safe BECAUSE the outcome is asserted rather than assumed.
+      }
+    }
+    (Get-NetAdapterPowerManagement -Name $a).WakeOnMagicPacket
+  register: wake_prop
+  changed_when: false
+  failed_when: "'Enabled' not in wake_prop.stdout"
+
 - name: Keep the NIC awake
   # The SECOND mechanism, and fixing only one leaves the fault intermittent: the sleep timers put the
   # whole machine away, while selective suspend powers the adapter down with the OS still running.
