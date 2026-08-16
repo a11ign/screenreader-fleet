@@ -39,22 +39,22 @@
 all:
   children:
     a11y_workers:
+      # Two facts that apply to every box below, learned from the first one and worth keeping after it:
+      #
+      #   - Give each box a DHCP RESERVATION. The first bare-metal worker moved from .83 to .102 by DHCP
+      #     and a probe of the old address returned nothing — which is indistinguishable from a dead
+      #     machine. `fleet:discover` exists to catch that drift, but a reservation prevents it.
+      #   - The `mac` is what `wake.yml` sends the magic packet to, and it is the ONE fact about a box that
+      #     cannot be discovered while the box is off. `fleet:discover --enroll` reads it from ARP while the
+      #     box is up; a worker with no `mac` is SKIPPED AND NAMED by wake.yml rather than silently
+      #     not woken.
+      #
+      # `a11y-worker-1` (Dell Wyse thin client, REDACTED-INTERNAL-ADDRESS, OUI 00:80:64) was RETIRED on 2026-08-16 —
+      # too slow to be worth a slot. Removed deliberately, which is not the same as the deletion this
+      # file warns about: that one is about dropping a box to make a run go green, and leaves a real
+      # machine unmaintained. Note the number is NOT reused — `nextWorkerName` skips it, because run
+      # summaries and notes refer to boxes by name long after they are gone.
       hosts:
-        a11y-worker-1:
-          # DHCP moved this box from .83 to .102 and a probe of the old address found nothing, which
-          # reads exactly like a dead machine. Give it a DHCP RESERVATION on the router, or this file
-          # will keep going stale in the one way that is indistinguishable from a fault.
-          ansible_host: REDACTED-INTERNAL-ADDRESS
-          # The MAC is what `wake.yml` sends the magic packet to, and it is the ONE fact about a box that
-          # cannot be discovered while the box is off. Get it once, from the box or the DHCP lease:
-          #     ansible a11y-worker-1 -m win_shell -a "(Get-NetAdapter -Physical | ? Status -eq Up).MacAddress"
-          # A worker with no `mac` is skipped by wake.yml and NAMED, rather than silently not woken.
-          # Read off the PXE server's DHCP log during the first network boot: the one moment a machine
-          # announces its MAC before it has an OS to ask. Dell Wyse thin client (OUI 00:80:64).
-          mac: "00:80:64:da:18:e9"
-          # The first bare-metal box. x64, Edge; the ARM64 guests it replaced are UTM VMs and are NOT
-          # managed from here — they have their own lifecycle through worker-ctl.sh.
-
         a11y-worker-2:
           # Enrolled by `fleet:discover --enroll` on 2026-08-16: NVDA 2026.1.1, Microsoft Windows 11 Pro 10.0.22631/x64
           ansible_host: REDACTED-INTERNAL-ADDRESS
