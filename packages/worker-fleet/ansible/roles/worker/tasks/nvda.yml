@@ -12,7 +12,16 @@
   # skipping it when package-lock.json looks unchanged is the optimisation that leaves one box on last
   # week's guidepup — and guidepup's version is EVIDENCE, in the capture cache key, because it parses
   # NVDA's speech before this project ever sees it.
-  ansible.windows.win_shell: npm install
+  #
+  # The FLAGS are the safe half of that optimisation, and the distinction matters: they cut waste rather
+  # than skipping work. Same resolution, same lockfile, same installed versions — npm just stops asking
+  # the registry for metadata it already has (`--prefer-offline`) and skips two network round trips that
+  # change nothing about what lands on disk (`--no-audit`, `--no-fund`). Nothing here can leave a box on
+  # a stale guidepup, which is the property the paragraph above is protecting.
+  #
+  # Worth knowing what this does NOT fix: on an already-provisioned box this step is the bulk of the run,
+  # because npm still re-resolves the tree even when the answer is "nothing to do".
+  ansible.windows.win_shell: npm install --prefer-offline --no-audit --no-fund
   args:
     chdir: "{{ worker_repo_path }}"
   changed_when: true

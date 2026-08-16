@@ -32,3 +32,14 @@ collections:
   # control plane is Linux. The two are easy to confuse and only one of them can work here.
   - name: community.general
     version: ">=8.0.0"
+
+  # `profile_tasks`, for the per-task timings that turn "provisioning feels slow" into a number. A run
+  # against an already-provisioned box reports ok=43 changed=7 — so Ansible is re-CHECKING rather than
+  # re-DOING, and the cost is ~50 PowerShell round trips over SSH. Which of them actually cost the
+  # minutes is worth measuring before anyone adds a cache, because a stale "already done" marker is
+  # invisible in exactly the way this project keeps paying for.
+  #
+  # It is a CALLBACK, and `ansible.cfg` must not name it until this is installed: an absent callback
+  # aborts every playbook before its first task, which is what `stdout_callback = yaml` did here.
+  - name: ansible.posix
+    version: ">=1.5.0"
