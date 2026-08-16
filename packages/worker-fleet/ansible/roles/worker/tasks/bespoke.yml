@@ -58,6 +58,16 @@
       does not apply; whether this adapter can wake is UNVERIFIED and wake.yml may not work on it.
   when: "'VEN_8086' not in nic_driver.stdout"
 
+- name: Somewhere to put the driver
+  # `win_copy` does NOT create the destination's parent and fails with "Destination directory ... does not
+  # exist". `C:\a11y` itself exists (first-boot.cmd makes it), so only the subdirectory is missing, which
+  # is exactly the kind of gap that only appears on a box nobody has run this against before.
+  become: true
+  ansible.windows.win_file:
+    path: 'C:\a11y\intel-e1d'
+    state: directory
+  when: "'VEN_8086' in nic_driver.stdout and 'Intel' not in nic_driver.stdout"
+
 - name: Stage Intel's driver
   become: true
   ansible.windows.win_copy:
