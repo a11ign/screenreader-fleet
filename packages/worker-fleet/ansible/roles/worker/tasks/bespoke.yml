@@ -112,26 +112,76 @@
     success_msg: "NIC driver is {{ nic_driver_after.stdout | trim }}"
   when: "'VEN_8086' in nic_driver.stdout"
 
-- name: Turn the wake properties on
-  # Only exist once Intel's driver is in place. Energy Efficient Ethernet takes Off/On rather than
-  # Disabled/Enabled, which is why it is listed separately — setting it wrongly fails the task rather than
-  # silently leaving a documented WoL blocker enabled.
+# Setting an adapter property RE-INITIALISES the NIC — exactly like installing the driver does — so it
+# drops the SSH connection Ansible is issuing the task over. The driver install above got async/poll:0
+# plus wait_for_connection for that reason; this did not, and the result was a play that hung for twenty
+# minutes on a task whose work had ALREADY SUCCEEDED. That is "a fix applied at one call site when the
+# behaviour reaches several", which this repo's own notes call its most expensive recurring shape.
+#
+# So it is the same four-step shape as the driver: read, change only what differs, reconnect, prove.
+# Reading first is what makes it idempotent — on a box already configured nothing is set, so nothing
+# bounces, so a re-run cannot hang. Setting values that are already correct would re-initialise the
+# adapter on EVERY run for no gain.
+- name: What the wake properties are now
   become: true
   ansible.windows.win_shell: |
     $a = (Get-NetAdapter -Physical | Select-Object -First 1).Name
-    foreach ($p in @(@('Wake on Magic Packet','Enabled'), @('Wake on Pattern Match','Enabled'),
-                     @('Reduce Speed On Power Down','Disabled'), @('Energy Efficient Ethernet','Off'))) {
-      try { Set-NetAdapterAdvancedProperty -Name $a -DisplayName $p[0] -DisplayValue $p[1] -EA Stop }
+    # Energy Efficient Ethernet takes Off/On, not Disabled/Enabled. Measured: passing 'Disabled' fails
+    # with "No matching display value found", which would leave a documented WoL blocker on.
+    $want = [ordered]@{
+      'Wake on Magic Packet'       = 'Enabled'
+      'Wake on Pattern Match'      = 'Enabled'
+      'Reduce Speed On Power Down' = 'Disabled'
+      'Energy Efficient Ethernet'  = 'Off'
+    }
+    $differs = @()
+    foreach ($k in $want.Keys) {
+      $cur = (Get-NetAdapterAdvancedProperty -Name $a -DisplayName $k -EA SilentlyContinue).DisplayValue
+      # A property this adapter does not expose is skipped, not failed: the assert at the end is what
+      # decides whether the box can wake, and it reads the one value that actually settles it.
+      if ($cur -and $cur -ne $want[$k]) { $differs += $k }
+    }
+    ($differs -join ',')
+  changed_when: false
+  register: wake_diff
+  when: "'VEN_8086' in nic_driver.stdout"
+
+- name: Turn the wake properties on
+  become: true
+  ansible.windows.win_shell: |
+    $a = (Get-NetAdapter -Physical | Select-Object -First 1).Name
+    $want = [ordered]@{
+      'Wake on Magic Packet'       = 'Enabled'
+      'Wake on Pattern Match'      = 'Enabled'
+      'Reduce Speed On Power Down' = 'Disabled'
+      'Energy Efficient Ethernet'  = 'Off'
+    }
+    foreach ($k in $want.Keys) {
+      try { Set-NetAdapterAdvancedProperty -Name $a -DisplayName $k -DisplayValue $want[$k] -EA Stop }
       catch {
-        # Not every property exists on every adapter model, and a missing one is not a failure here --
-        # what matters is the single value read below, which `failed_when` gates on. Swallowing these
-        # individually is only safe BECAUSE the outcome is asserted rather than assumed.
+        # See above: absent properties are not failures. The assert below is the gate.
       }
     }
+  async: 120
+  poll: 0
+  when: "'VEN_8086' in nic_driver.stdout and (wake_diff.stdout | default('') | trim | length) > 0"
+
+- name: Wait for the adapter to come back
+  ansible.builtin.wait_for_connection:
+    delay: 15
+    timeout: 300
+  when: "'VEN_8086' in nic_driver.stdout and (wake_diff.stdout | default('') | trim | length) > 0"
+
+- name: Refuse to call this provisioned if the adapter cannot wake
+  # The one value that settles it, read AFTER the change rather than returned by the task that made it —
+  # a fire-and-forget task cannot report its own result, and asserting on the value is stronger anyway.
+  become: true
+  ansible.windows.win_shell: |
+    $a = (Get-NetAdapter -Physical | Select-Object -First 1).Name
     (Get-NetAdapterPowerManagement -Name $a).WakeOnMagicPacket
-  register: wake_prop
   changed_when: false
-  failed_when: "'Enabled' not in wake_prop.stdout"
+  register: wake_final
+  failed_when: "'Enabled' not in wake_final.stdout"
   # Intel hardware only. These property NAMES are Intel's; a Realtek adapter has its own, and failing a
   # box for not answering to them would be the check inventing a fault rather than finding one.
   when: "'VEN_8086' in nic_driver.stdout"
