@@ -81,7 +81,22 @@
       # Unconditional and idempotent. Skipping it when package-lock.json looks unchanged is the
       # optimisation that leaves one box on last week's guidepup — and guidepup's version is EVIDENCE,
       # in the capture cache key, because it parses NVDA's speech before this project sees it.
-      ansible.windows.win_shell: npm install --omit=dev --no-audit --no-fund
+      #
+      # `--omit=dev` is GONE, and it is what stopped this playbook working at all. `packages/worker-fleet`
+      # declares `"prepare": "tsc --build"`, and `typescript` is a devDependency — so omitting dev
+      # dependencies removes the compiler that the install itself then tries to run:
+      #
+      #   npm error command cmd.exe /d /s /c tsc --build
+      #   npm error 'tsc' is not recognized as an internal or external command
+      #
+      # It failed on all four workers on its first real use. Nobody had seen it because deploying worker
+      # code needs a fleet to deploy to, and until this week there was one box that had never been
+      # successfully provisioned.
+      #
+      # The flags now MATCH `roles/worker/tasks/nvda.yml` exactly, deliberately. Two paths running the
+      # same operation with different arguments is how one of them quietly stops working while the other
+      # keeps proving nothing is wrong.
+      ansible.windows.win_shell: npm install --prefer-offline --no-audit --no-fund
       args:
         chdir: "{{ a11y_repo_path }}"
       changed_when: true
