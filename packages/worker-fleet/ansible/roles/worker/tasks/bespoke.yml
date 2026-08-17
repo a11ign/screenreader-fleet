@@ -194,6 +194,30 @@
   become: true
   a11y.worker.a11y_nic_power:
 
+# The stamp keys the CAPTURE CACHE on what provisioning actually did, and until now only
+# `provision-nvda-worker.ps1` wrote it -- so a box provisioned by this role kept whatever revision its
+# first boot happened to produce. Four functionally identical machines therefore reported four different
+# revisions, `fleet:status` called the fleet INCONSISTENT, and no re-provision could fix it because
+# nothing on this path stamped anything.
+#
+# Both paths now call the same script, so a run through either produces the same value.
+- name: Stamp what this provisioning run actually applied
+  become: false
+  ansible.windows.win_shell: >-
+    powershell -NoProfile -ExecutionPolicy Bypass
+    -File "{{ worker_repo_path }}\packages\worker-fleet\src\provisioning\stamp-provision-revision.ps1"
+    -RepoPath "{{ worker_repo_path }}"
+  args:
+    chdir: "{{ worker_repo_path }}"
+  register: provision_stamp
+  changed_when: true
+
+- name: Say what it was stamped as
+  # Printed rather than swallowed: this value is a cache key, and a run that silently changed it is a run
+  # whose cache misses have no explanation afterwards.
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} provisionRevision = {{ provision_stamp.stdout | trim }}"
+
 - name: Reclaim Defender's memory, if Tamper Protection allows it
   # Reported, not fought. Tamper Protection SILENTLY REVERTS Set-MpPreference — the call succeeds, the
   # setting appears to change, and Defender puts it back — so a task that claimed `changed` there would

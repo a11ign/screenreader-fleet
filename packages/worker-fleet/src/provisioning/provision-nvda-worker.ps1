@@ -645,23 +645,17 @@ if (Test-Path $checkCmd) {
 # Written by the guest rather than hashed on the host on purpose -- this records what the guest
 # ACTUALLY has, which is the only thing worth keying on. A host-side hash would describe the
 # script we intended to run.
-$stampPath = Join-Path $RepoPath 'provision-revision.txt'
-# These paths moved when the repo was restructured into packages/, and because the filter
-# below DROPS anything missing, all three vanished silently and $combined fell back to
-# 'unknown' -- so the stamp stopped describing what provisioning actually did and varied
-# only by git SHA. A Where-Object that discards its own inputs cannot report that it found
-# nothing, which is this repo's most-repeated shape.
-$scriptHashes = @('provision-nvda-worker.ps1', 'run-server.cmd', 'apply-foreground-lock-timeout.ps1') |
-  ForEach-Object { Resolve-RepoFile $_ } |
-  Where-Object { $_ } |
-  ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }
-$combined = if ($scriptHashes) {
-  $bytes = [Text.Encoding]::UTF8.GetBytes(($scriptHashes -join ''))
-  ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes)) -replace '-','').Substring(0,16).ToLower()
-} else { 'unknown' }
-$gitSha = try { (git -C $RepoPath rev-parse --short HEAD 2>$null) } catch { $null }
-"$(if ($gitSha) { $gitSha } else { 'nogit' })-$combined" | Out-File $stampPath -Encoding ascii -NoNewline
-OK "provision revision stamped: $(Get-Content $stampPath)"
+# Delegated to stamp-provision-revision.ps1 so there is ONE definition of what the stamp covers. It was
+# inline here, which meant the Ansible role could not stamp at all -- a box re-provisioned through
+# `provision-role.yml` kept whatever revision its first boot happened to write, and four functionally
+# identical machines reported four different revisions that no re-provision could converge.
+#
+# Same shape as `worker-files.mjs`: that list was duplicated in server.mjs and check-worker-code.mjs with
+# a third derived by regex, and every copy had to agree or the comparison meant nothing.
+$stampScript = Resolve-RepoFile 'stamp-provision-revision.ps1' -Required
+$stamp = & powershell -NoProfile -ExecutionPolicy Bypass -File $stampScript -RepoPath $RepoPath
+if ($LASTEXITCODE -ne 0) { throw "provision stamp failed: $stamp" }
+OK "provision revision stamped: $stamp"
 
 # ---------------------------------------------------------------------------
 Step 8a 'Auto-logon with NO stored credential'
