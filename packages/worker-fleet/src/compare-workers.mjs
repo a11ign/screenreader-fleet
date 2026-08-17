@@ -216,7 +216,18 @@ mkdirSync(OUT, { recursive: true });
 const hostAfter = sampleHost();
 const foundations = diffHost(hostBefore, hostAfter);
 
-process.stdout.write("\nFOUNDATIONS (the host, during this run)\n");
+// These describe THE MACHINE THIS COMMAND RAN ON, which is the workers' machine only while the workers
+// are local UTM guests. A bare-metal fleet is four separate computers, and this host's swap state then
+// says nothing whatever about their capture times.
+//
+// It printed `352 pageouts <-- THE HOST WAS SWAPPING; these timings describe a constrained machine`
+// during a four-box bare-metal run, next to `guest resident 0 MB across 0 process(es)` — the second line
+// already saying there were no guests here to constrain. Attributing worker timings to the wrong
+// computer is the exact failure this tool was written to stop; it should not commit it itself.
+const localGuests = hostAfter.processes.length;
+process.stdout.write(localGuests
+  ? "\nFOUNDATIONS (the host, during this run)\n"
+  : "\nFOUNDATIONS (this CONTROL host only — no local guests, so none of this describes the workers)\n");
 process.stdout.write(`  load             ${hostAfter.load?.one ?? "?"} (1m), ` +
   `${hostAfter.load?.five ?? "?"} (5m)\n`);
 const busiest = [...(hostAfter.disk ?? [])].sort((a, b) => b.mbPerSecond - a.mbPerSecond)[0];
@@ -226,8 +237,20 @@ process.stdout.write(`  guest resident   ${foundations.residentMbTotal} MB acros
   `${hostAfter.processes.length} process(es)   <- RSS, not phys_footprint\n`);
 process.stdout.write(`  free / compressed ${foundations.freeMb} MB free, ` +
   `${foundations.compressorMb} MB compressed\n`);
+// The pageout DELTA is still worth printing either way — it is true about this machine. What is gated is
+// the INFERENCE, because "these timings describe a constrained machine" is only true when the timings
+// were produced here.
 process.stdout.write(`  paging           ${foundations.pageoutsDelta} pageouts during the run` +
-  `${foundations.swappingDuringRun ? "  <-- THE HOST WAS SWAPPING; these timings describe a constrained machine" : " (none)"}\n`);
+  `${foundations.swappingDuringRun
+    ? (localGuests
+      ? "  <-- THE HOST WAS SWAPPING; these timings describe a constrained machine"
+      : "  (on this control host; the workers are elsewhere, so this did not affect them)")
+    : " (none)"}\n`);
+if (!localGuests) {
+  process.stdout.write("\n  No local guest processes were found, so these workers are REMOTE machines and nothing\n");
+  process.stdout.write("  above describes them. For a bare-metal fleet, each worker's own /diagnostics is the\n");
+  process.stdout.write("  equivalent: curl http://<worker>:8765/diagnostics | jq .\n");
+}
 
 writeFileSync(resolve(OUT, "compare.json"),
   JSON.stringify({ page, rounds: runs, results, verdict, recoveryDeltas: deltas,
