@@ -40,6 +40,20 @@ worker_edge_policy:
   - { name: AutofillCreditCardEnabled, value: 0 }
   - { name: PasswordManagerEnabled, value: 0 }
 
+  # Edge's COMPONENT updates, which are separate from the browser updates turned off below and were not
+  # covered by anything above. Measured on this fleet, from `/diagnostics`:
+  #
+  #   worker-2/3/4   component_crx_cache 184 MB + ProvenanceData 169 MB   = 353 MB of 445 MB
+  #   worker-5       component_crx_cache  28 MB + ProvenanceData absent   (newest box, had not yet)
+  #
+  # The point is not the disk. `Default` — the profile holding everything a CAPTURE touches — is 13-14 MB
+  # on every box including the one that has run the most, so captures accumulate nothing. That 353 MB is
+  # Edge fetching its own components in the background, which is exactly the class of thing this appliance
+  # already refuses elsewhere: `BackgroundModeEnabled` is off because background work "racing that leaks
+  # processes and adds guest noise", and EdgeUpdate is off because "an installer runs unannounced while we
+  # are driving the browser". Component downloads do both and were simply not on the list.
+  - { name: ComponentUpdatesEnabled, value: 0 }
+
 # On a workstation Edge auto-update is right; on a capture appliance it means an installer runs
 # unannounced while we are driving the browser.
 worker_edge_update_policy:
