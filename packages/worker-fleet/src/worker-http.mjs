@@ -47,6 +47,26 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
 /**
+ * How long a CLIENT should wait for a capture. One definition, because five had drifted.
+ *
+ * It must exceed the worker's own hard timeout (`CAPTURE_HARD_TIMEOUT_DEFAULT_MS`, 520 s) or the client
+ * gives up first, and a capture the worker would have completed is reported as a client failure. Five
+ * clients sat at 300 s -- `compare-workers`, `bench-capture`, `evidence-check`, `repeat-capture` and
+ * `capture-real-pages` -- against that 520 s. On the generated corpus nothing noticed, because a 1,338-byte
+ * page finishes in seconds. On REAL pages it silently dropped whatever used its budget, biasing the
+ * real-page corpus toward small simple pages: precisely the axis that corpus exists to add.
+ *
+ * Deliberately NOT imported from `@a11y-witness/nvda-worker`: this package runs on macOS and Linux and must
+ * not depend on a win32-only one. `budget-ladder.test.ts` enforces the relationship instead, over every
+ * client it DISCOVERS rather than a list -- which is how the 300 s clients stayed invisible while a guard
+ * for exactly this existed and read one hardcoded path.
+ *
+ * `DATASET_CAPTURE_TIMEOUT_MS` still overrides it in the dataset runner, which is the only client that
+ * wants a per-run ceiling.
+ */
+export const CAPTURE_CLIENT_TIMEOUT_MS = 560_000;
+
+/**
  * One request, with a single deadline covering connect, headers and body.
  *
  * @param {string} url

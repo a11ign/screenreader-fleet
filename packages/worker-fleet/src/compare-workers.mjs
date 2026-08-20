@@ -26,13 +26,12 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";
 import { sampleHost, diffHost } from "./host-metrics.mjs";
-import { requestJson } from "./worker-http.mjs";
+import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.mjs";
 import { resolve } from "node:path";
 
 // `requestJson`, not `fetch`: undici stops waiting for response HEADERS at 300 s whatever the
 // AbortSignal says, and the worker writes its status and body together at the END of a capture.
 // See worker-http.mjs -- this budget sits at or above that cap, so it never applied.
-const CAPTURE_TIMEOUT_MS = 300_000;
 const OUT = resolve(process.cwd(), "runs/worker-compare");
 const MS_PER_S = 1000;
 
@@ -51,7 +50,7 @@ async function capture(worker) {
   const response = await requestJson(`${worker.replace(/\/$/, "")}/capture`, {
     method: "POST",
     body: { url: page, probeForms: true },
-    timeoutMs: CAPTURE_TIMEOUT_MS,
+    timeoutMs: CAPTURE_CLIENT_TIMEOUT_MS,
   });
   const body = response.json ?? {};
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${JSON.stringify(body).slice(0, 160)}`);
