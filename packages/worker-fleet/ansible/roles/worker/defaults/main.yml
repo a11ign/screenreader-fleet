@@ -78,6 +78,7 @@ worker_edge_msi_sha256: "46dcccee1669f746dd527561cbd25e5b049333117a6996ba0ed9c14
 # The binary is the source of truth for "which Edge is installed", not the registry's recorded version.
 # Same rule the worker itself now follows: it reported a version it was not running for five days because
 # the value was read once and cached, and the file on disk had moved underneath it.
+worker_edge_dir: 'C:\Program Files (x86)\Microsoft\Edge\Application'
 worker_edge_exe: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 worker_edge_msi_path: 'C:\Windows\Temp\MicrosoftEdgeEnterpriseX64-{{ worker_edge_version }}.msi'
 
