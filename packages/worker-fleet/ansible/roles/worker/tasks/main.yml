@@ -6,6 +6,8 @@
 #   packages  node, git and the repo — literally everything else needs them
 #   account   the worker identity must exist before a task can name it as a principal
 #   policy    machine and user policy; independent of the rest, cheap, and the thing that drifts
+#   edge      the browser BUILD, after policy because policy is not the mechanism that holds it: the
+#             EdgeUpdate policies are documented as domain-join only, and these boxes are standalone
 #   firewall  the port must be open before anything can verify /health across the network
 #   nvda      needs the repo and npm; caches per-USER, so it must not be becomed
 #   tasks     names the account and the node it will launch, so it comes after both exist
@@ -37,6 +39,10 @@
 - name: Machine and user policy
   ansible.builtin.import_tasks: policy.yml
   tags: [policy]
+
+- name: Edge, pinned to one build across the fleet
+  ansible.builtin.import_tasks: edge-version.yml
+  tags: [edge]
 
 - name: Firewall
   ansible.builtin.import_tasks: firewall.yml

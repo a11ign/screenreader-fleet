@@ -54,8 +54,49 @@ worker_edge_policy:
   # are driving the browser". Component downloads do both and were simply not on the list.
   - { name: ComponentUpdatesEnabled, value: 0 }
 
+# THE EDGE BUILD THE WHOLE FLEET RUNS, declared once, in git — the same rule as the inventory being the
+# single source of truth for which boxes exist.
+#
+# It has to be declared and installed rather than left to the updater, because **the EdgeUpdate registry
+# policies below do not apply to these machines**. Microsoft documents twelve of them, `UpdateDefault` and
+# the per-app `Update{56EB18F8-…}` among them, as "available only on Windows instances that are joined to a
+# Microsoft Active Directory domain". These are standalone boxes. So the values provisioning writes are
+# STORED and never honoured, and reading them back — which this role does — proves only that they are
+# stored. Measured 2026-08-21: `UpdateDefault=0` read back correctly on all four guests and a11y-worker-2
+# updated itself from 151.0.4129.93 to .101 anyway, four days into a five-day uptime.
+#
+# `browserVersion` is a capture cache key, so a guest that drifts fragments the corpus. `fleet:status`
+# reports the split — once `fileProductVersion` stopped memoising the value for the life of the process,
+# which is what hid this one for five days.
+#
+# The URL and hash come from Microsoft's enterprise catalogue, https://edgeupdates.microsoft.com/api/products?view=enterprise.
+# Pinned by CHECKSUM, not just by URL: the point is a build we can name, and an unverified download would
+# make the version claim rest on a hostname.
+worker_edge_version: "151.0.4129.101"
+worker_edge_msi_url: "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d209ad46-3748-45ee-9a0f-826275ced29c/MicrosoftEdgeEnterpriseX64.msi"
+worker_edge_msi_sha256: "46dcccee1669f746dd527561cbd25e5b049333117a6996ba0ed9c14275656cef"
+# The binary is the source of truth for "which Edge is installed", not the registry's recorded version.
+# Same rule the worker itself now follows: it reported a version it was not running for five days because
+# the value was read once and cached, and the file on disk had moved underneath it.
+worker_edge_exe: 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+worker_edge_msi_path: 'C:\Windows\Temp\MicrosoftEdgeEnterpriseX64-{{ worker_edge_version }}.msi'
+
+# The updater's tasks and services, stopped and disabled BECAUSE the policy cannot do it here. Blunt, and
+# the only lever that actually holds on a non-domain-joined box. Provisioning never touched these: they were
+# found `Ready` on every guest while the policy that was supposed to make them inert sat unhonoured.
+worker_edge_updater_tasks:
+  - MicrosoftEdgeUpdateTaskMachineCore
+  - MicrosoftEdgeUpdateTaskMachineUA
+worker_edge_updater_services:
+  - edgeupdate
+  - edgeupdatem
+
 # On a workstation Edge auto-update is right; on a capture appliance it means an installer runs
 # unannounced while we are driving the browser.
+#
+# KEPT even though it is not honoured on a non-domain-joined machine, because it costs nothing, it is
+# correct if one of these ever is domain-joined, and removing it would read as "we decided auto-update is
+# fine". What changed is that it is no longer the mechanism relied upon — see `worker_edge_version`.
 worker_edge_update_policy:
   - { name: UpdateDefault, value: 0 }
   - { name: AutoUpdateCheckPeriodMinutes, value: 0 }

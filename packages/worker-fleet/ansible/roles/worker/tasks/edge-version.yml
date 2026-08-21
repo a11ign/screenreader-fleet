@@ -1,0 +1,107 @@
+---
+# ONE EDGE BUILD ACROSS THE FLEET, installed deliberately and held there.
+#
+# `browserVersion` is part of the capture cache key, for the documented reason that a fleet can run more
+# than one browser. So a guest that updates itself stops being interchangeable with its neighbours: two
+# builds must never write into one corpus, and a split shows up first as unexplained cache misses.
+#
+# ## Why the policy in policy.yml is not the mechanism
+#
+# Microsoft documents twelve EdgeUpdate policies -- `UpdateDefault`, the per-app `Update{56EB18F8-...}` and
+# `TargetVersionPrefix{...}` among them -- as "available only on Windows instances that are joined to a
+# Microsoft Active Directory domain". These boxes are standalone, so those values are stored and never
+# honoured. Provisioning set them, this role read them back correctly, and a11y-worker-2 updated itself
+# anyway. A read-back that can only prove a value is STORED is not proof that anything obeys it.
+#
+# Hence: install the build we want, and stop the updater by the two levers that do work here.
+
+- name: What Edge is actually installed
+  # From the binary, never from the registry's "installed version" -- the same rule the worker itself now
+  # follows after reporting a version it was not running for five days.
+  become: true
+  ansible.windows.win_powershell:
+    parameters:
+      Exe: "{{ worker_edge_exe }}"
+    script: |
+      param($Exe)
+      $Ansible.Changed = $false
+      if (Test-Path -LiteralPath $Exe) { (Get-Item -LiteralPath $Exe).VersionInfo.ProductVersion } else { "" }
+  changed_when: false
+  register: edge_installed
+
+- name: Fetch the pinned installer
+  # Only when it would change something: this is a ~150 MB download onto a box that may be mid-corpus.
+  when: (edge_installed.output | first | default('')) != worker_edge_version
+  become: true
+  ansible.windows.win_get_url:
+    url: "{{ worker_edge_msi_url }}"
+    dest: "{{ worker_edge_msi_path }}"
+    checksum: "{{ worker_edge_msi_sha256 }}"
+    checksum_algorithm: sha256
+    # A version claim that rests on a hostname is not a version claim. The checksum is what makes
+    # "the fleet runs 151.0.4129.101" a fact rather than a hope.
+    force: false
+
+- name: Install it
+  when: (edge_installed.output | first | default('')) != worker_edge_version
+  become: true
+  ansible.windows.win_package:
+    path: "{{ worker_edge_msi_path }}"
+    state: present
+    arguments: /quiet /norestart
+  register: edge_installed_now
+
+- name: Stop and disable the updater's scheduled tasks
+  # The policy cannot do this on a non-domain-joined box, so it is done directly. Found `Ready` on every
+  # guest -- provisioning had never touched them, because the policy was believed to be the mechanism.
+  become: true
+  community.windows.win_scheduled_task:
+    name: "{{ item }}"
+    enabled: false
+    state: present
+  loop: "{{ worker_edge_updater_tasks }}"
+  failed_when: false   # a task absent on a given image is not a fault; the read-back below is the judge
+
+- name: Stop and disable the updater's services
+  become: true
+  ansible.windows.win_service:
+    name: "{{ item }}"
+    state: stopped
+    start_mode: disabled
+  loop: "{{ worker_edge_updater_services }}"
+  failed_when: false
+
+- name: Refuse to call this provisioned unless Edge is the pinned build and the updater is off
+  # The "prove it" half, matching every other concern in this role. Read back from the binary and from the
+  # live task/service state -- never from the variables we just wrote, which would assert our own intent.
+  become: true
+  ansible.windows.win_powershell:
+    parameters:
+      Exe: "{{ worker_edge_exe }}"
+      Want: "{{ worker_edge_version }}"
+      Tasks: "{{ worker_edge_updater_tasks }}"
+      Services: "{{ worker_edge_updater_services }}"
+    script: |
+      param($Exe, $Want, $Tasks, $Services)
+      $Ansible.Changed = $false
+      $wrong = @()
+      $have = if (Test-Path -LiteralPath $Exe) { (Get-Item -LiteralPath $Exe).VersionInfo.ProductVersion } else { "(absent)" }
+      if ($have -ne $Want) { $wrong += "Edge is $have, expected $Want" }
+      foreach ($t in $Tasks) {
+        $task = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+        if ($task -and $task.State -ne 'Disabled') { $wrong += "scheduled task $t is $($task.State), expected Disabled" }
+      }
+      foreach ($s in $Services) {
+        $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
+        if ($svc) {
+          if ($svc.Status -ne 'Stopped') { $wrong += "service $s is $($svc.Status), expected Stopped" }
+          if ($svc.StartType -ne 'Disabled') { $wrong += "service $s start type is $($svc.StartType), expected Disabled" }
+        }
+      }
+      if ($wrong.Count) { throw ($wrong -join '; ') }
+      "Edge $have, updater disabled"
+  register: edge_proof
+
+- name: Say what it is on
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: {{ edge_proof.output | first | default('unknown') }}"
