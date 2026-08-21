@@ -88,6 +88,11 @@
 # execution with a whitelisted job name and an empty argv. `PYTHONUNBUFFERED` is not cosmetic: without it a
 # six-minute training run shows nothing in `journalctl` but its `Started` line until it exits, and live
 # progress is the entire reason for having logs.
+#
+# `job_setenv` does NOT weaken that, and the distinction is the whole point: it comes from the job CATALOGUE,
+# which is a checked-in whitelist, and the one entry that uses it (`A11Y_WORKERS`, so a corpus run reaches
+# the whole fleet) is built from the inventory and asserted against a strict address pattern before it gets
+# here. A caller still supplies only a job name and enumerated arguments.
 - name: "Start it: {{ job_name }}"
   ansible.builtin.command:
     argv: >-
@@ -97,6 +102,7 @@
         "--property=RuntimeMaxSec=" ~ (job_timeout | int),
         "--property=ReadWritePaths=" ~ lab_runs_path,
         "--setenv=PYTHONUNBUFFERED=1",
+      ] + (job_setenv | default([]) | map('regex_replace', '^(.*)$', '--setenv=\\1') | list) + [
         "--"
       ] + job_argv }}
   changed_when: true

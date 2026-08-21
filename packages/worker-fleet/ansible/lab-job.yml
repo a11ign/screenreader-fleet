@@ -77,6 +77,34 @@
       check-signals:
         argv: ["/usr/bin/node", "packages/lab/src/training/check-signals.mjs"]
         timeout: 900
+      # THE SYNTHETIC CORPUS, across the WHOLE FLEET. `A11Y_WORKERS` comes from `lab_fleet_workers` below,
+      # which is built from the inventory and asserted against a strict pattern — never from the caller, for
+      # the reason in this file's header.
+      #
+      # Pooled because that is the only way the hardware gets used: the runner already dispatches one case
+      # per worker from a shared queue, evicts a worker that fails three in a row and hands its cases back.
+      # 2,124 captures at the ~30 s each these boxes measure is ~17.7 h on one worker and ~4.4 h on four.
+      capture:
+        argv: ["/usr/bin/node", "packages/lab/src/training/capture-screenreader-dataset.mjs"]
+        setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
+        # Above the ~4.4 h a full recapture measures, because a ceiling that expires early turns "still
+        # working" into "failed" — and this is the most expensive job in the catalogue to lose.
+        timeout: 28800
+      # Cheap, and here because it is a STEP rather than a check: it rewrites the labels every later stage
+      # reads, and it silently used a stale manifest twice in one session before the drift guard existed.
+      export:
+        argv: ["/usr/bin/node", "packages/lab/src/training/export-screenreader-dataset.mjs"]
+        timeout: 900
+      # Single worker ON PURPOSE, unlike `capture`. This asks whether the evidence MOVED, so a second guest
+      # is a second variable: a CHANGED verdict on a split fleet cannot be told apart from "a different box
+      # took that case". Check `fleet:status` is consistent first — and if it is not, the worker you name
+      # here is the one whose answer you are getting.
+      evidence-check:
+        argv: ["{{ lab_tsx }}", "packages/lab/scripts/evidence-check.mjs",
+               "http://{{ hostvars[worker | default('')].ansible_host | default('') }}:8765",
+               "--sample={{ sample | default(24) | int }}"]
+        # 48 captures measured 24 min on one bare-metal worker; generous for a larger sample.
+        timeout: 7200
 
   tasks:
     - name: A job must be named, and it must be one we have
@@ -103,9 +131,46 @@
           ({{ groups['a11y_workers'] | join(', ') }}), optionally -e role=training|calibration and
           -e shard=i/n. The worker is named rather than addressed so a malformed URL cannot be expressed.
 
+    - name: An evidence check names one worker, and a sample size that is a number
+      when: job == 'evidence-check'
+      ansible.builtin.assert:
+        that:
+          - worker is defined
+          - worker in groups['a11y_workers']
+          - (sample | default(24)) | int > 0
+          - (sample | default(24)) | int <= 200
+        fail_msg: >-
+          evidence-check needs -e worker=<name from a11y_workers>
+          ({{ groups['a11y_workers'] | join(', ') }}) and optionally -e sample=<1..200>. One worker, on
+          purpose: this asks whether the evidence moved, and a second guest is a second variable.
+
+    # BUILT HERE, from the inventory, and then asserted — not interpolated straight into the env.
+    #
+    # Extra vars have the highest precedence in Ansible, so a value referenced from the job catalogue is
+    # reachable by `-e` even when it looks like it comes from the inventory. The assert is what makes an
+    # injected `A11Y_WORKERS` inexpressible rather than merely unlikely: the same shape as `isValidCaptureId`
+    # and the `--worker` rule above, and the same reason — this env is read by a process that runs as root
+    # on the box holding the corpus.
+    - name: Address every worker in the fleet, for the jobs that pool
+      ansible.builtin.set_fact:
+        lab_fleet_workers: >-
+          {{ groups['a11y_workers']
+             | map('extract', hostvars, 'ansible_host')
+             | map('regex_replace', '^(.*)$', 'http://\1:8765')
+             | join(',') }}
+
+    - name: The fleet address list must be exactly that, and nothing else
+      ansible.builtin.assert:
+        that:
+          - lab_fleet_workers is match('^http://[0-9.]+:8765(,http://[0-9.]+:8765)*$')
+        fail_msg: >-
+          Refusing to run: A11Y_WORKERS would be {{ lab_fleet_workers | truncate(120) }}, which is not a
+          plain comma-separated list of worker addresses. Something has overridden the inventory.
+
     - name: "Run {{ job }}"
       ansible.builtin.include_tasks: tasks/run-job.yml
       vars:
         job_name: "{{ job }}"
         job_argv: "{{ lab_jobs[job].argv }}"
+        job_setenv: "{{ lab_jobs[job].setenv | default([]) }}"
         job_timeout: "{{ lab_jobs[job].timeout }}"

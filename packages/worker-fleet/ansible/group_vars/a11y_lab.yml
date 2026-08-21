@@ -64,3 +64,8 @@ lab_runs_path: /srv/a11y-runs
 # above: pointing Ansible at this one would have it import its modules from a venv built for a wholly
 # different purpose, and pointing the scorer at the system python would fail on a missing torch.
 lab_python: /opt/a11y/.venv/bin/python
+
+# `tsx`, for the jobs that apply the pipeline's own gates — those live in TypeScript
+# (@a11y-witness/evidence/verify), which is why `evidence-check.mjs` cannot run under plain node.
+# The binary rather than `npx`, so a job cannot become a package install on a box holding the corpus.
+lab_tsx: /opt/a11y/node_modules/.bin/tsx

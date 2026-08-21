@@ -91,3 +91,51 @@ test("the environment is fixed by the runner, never supplied by the caller", () 
     "without this a six-minute job shows nothing in journalctl until it exits");
   assert.ok(!/\{\{\s*job_env\s*\}\}/.test(RUN_JOB), "no caller-supplied environment may reach the child");
 });
+
+test("a job's environment additions come from the CATALOGUE, never from an extra var", () => {
+  // `job_setenv` widens what can reach the child, so it needs the same scrutiny as `job_argv`. The rule it
+  // must keep: the VALUE is a checked-in catalogue entry, and the one entry that exists is built from the
+  // inventory and asserted before use. A caller still supplies only a job name and enumerated arguments.
+  assert.match(RUN_JOB, /job_setenv \| default\(\[\]\)/,
+    "a job with no setenv must contribute nothing, not an empty string argument");
+  // Every setenv value in the catalogue must be a template over inventory-derived facts or a literal --
+  // never a bare `{{ something }}` a caller could set with -e.
+  for (const [, value] of LAB_JOB.matchAll(/setenv:\s*\[([^\]]*)\]/g)) {
+    for (const [, expression] of value.matchAll(/\{\{\s*([a-z_]+)[^}]*\}\}/g)) {
+      assert.equal(expression, "lab_fleet_workers",
+        `setenv may only interpolate asserted facts; found ${expression}`);
+    }
+  }
+});
+
+test("the pooled corpus job addresses the whole fleet, and the value is proved before it is used", () => {
+  // Extra vars have the highest precedence in Ansible, so a fact referenced from the catalogue is reachable
+  // by `-e` even when it reads as inventory-derived. The assert is what makes an injected A11Y_WORKERS
+  // inexpressible rather than merely unlikely -- the `--worker=http://:8765` lesson, which cost 29 minutes,
+  // applied to the environment instead of to argv.
+  assert.match(LAB_JOB, /A11Y_WORKERS=\{\{ lab_fleet_workers \}\}/,
+    "the corpus capture must reach every worker, or the fleet sits idle for ~17.7 h instead of ~4.4 h");
+  assert.match(LAB_JOB, /groups\['a11y_workers'\]\s*\n?\s*\| map\('extract', hostvars, 'ansible_host'\)/,
+    "the addresses must come from the inventory, which ADR 0012 makes the single source of truth");
+  assert.match(LAB_JOB, /lab_fleet_workers is match\('\^http:\/\/\[0-9\.\]\+:8765/,
+    "and must be proved to be exactly an address list before it becomes an environment variable");
+
+  const built = LAB_JOB.indexOf("lab_fleet_workers: >-");
+  const proved = LAB_JOB.indexOf("lab_fleet_workers is match");
+  const used = LAB_JOB.indexOf("Run {{ job }}");
+  assert.ok(built < proved && proved < used,
+    "build, then prove, then use — asserting after dispatch would prove nothing");
+});
+
+test("evidence-check takes ONE worker, by name, and a bounded sample", () => {
+  // Single worker on purpose, unlike `capture`: this asks whether the evidence MOVED, so a second guest is
+  // a second variable and a CHANGED verdict could not be told from "a different box took that case".
+  assert.match(LAB_JOB, /evidence-check:/);
+  assert.match(LAB_JOB, /when: job == 'evidence-check'/, "its arguments must be validated like any other");
+  assert.match(LAB_JOB, /worker in groups\['a11y_workers'\]/);
+  assert.match(LAB_JOB, /\(sample \| default\(24\)\) \| int <= 200/,
+    "an unbounded sample is an unbounded run on hardware somebody else may want");
+  // It runs under tsx because it applies gates that live in TypeScript, and from the binary rather than
+  // `npx`, so a job cannot turn into a package install on the box holding the corpus.
+  assert.ok(!/npx/.test(LAB_JOB), "no job may invoke npx");
+});
