@@ -185,3 +185,16 @@ test("the two gates are jobs, and the one needing a worker validates it", () => 
   assert.match(LAB_JOB, /lab_named_worker is match\('\^http:\/\/\[0-9\.\]\+:8765\$'\)/,
     "an address reaching the environment must be proved to be an address");
 });
+
+test("a setenv value reaches systemd without a backreference", () => {
+  // `'^(.*)$' -> '--setenv=\\1'` is the natural way to write this and it does not survive YAML-then-Jinja:
+  // the escape arrived at systemd literally and it refused the whole unit with
+  // `Cannot assign environment variable \1: Invalid argument`. Caught immediately, because systemd would
+  // not start — but the corpus recapture is the job that carries setenv, so "immediately" meant at the
+  // moment somebody kicked off a 4.4 h run and walked away.
+  //
+  // Replacing the EMPTY MATCH at the start needs no capture group, so it cannot fail this way at all.
+  assert.match(RUN_JOB, /map\('regex_replace', '\^', '--setenv='\)/,
+    "prefix by replacing the start anchor; a backreference here does not survive the escaping");
+  assert.ok(!/--setenv=\\\\1/.test(RUN_JOB), "no backreference may appear in the setenv transformation");
+});
