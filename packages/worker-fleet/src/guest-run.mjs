@@ -29,6 +29,7 @@
 //      service owns it.
 import { execFile } from "node:child_process";
 import { createReadStream, readFileSync, existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -142,7 +143,12 @@ async function main() {
     `pull ${guestOutput} to see how far it got`);
 }
 
-if (process.argv[1]?.endsWith("guest-run.mjs")) {
+// `import.meta.url === pathToFileURL(process.argv[1])`, not `endsWith("guest-run.mjs")`. The old form
+// worked but matched on a SUFFIX, so any entry point whose path happened to end that way -- a
+// `my-guest-run.mjs`, a copy under another directory -- would have run this file's main instead of its own.
+// Every other entry point in this repo now uses the exact comparison; one idiom, so there is one thing to
+// get right.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   main().catch((error) => {
     process.stderr.write(`guest-run failed: ${error.message}\n`);
     process.exit(1);

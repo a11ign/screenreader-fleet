@@ -13,7 +13,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
@@ -339,13 +339,6 @@ function checkRunState() {
 
 // --- report ---------------------------------------------------------------
 
-await checkJudge();
-await checkWorker();
-await checkDatasetPages();
-checkRunState();
-
-const ready = checks.every((c) => c.ok);
-
 // The single most useful line for anything automated: what to run next. A list of green ticks
 // still leaves a caller deciding, and deciding is where they go wrong.
 function nextCommand() {
@@ -355,14 +348,37 @@ function nextCommand() {
   return broken.fix ?? "see the failing check above";
 }
 
-if (JSON_OUT) {
-  console.log(JSON.stringify({ ready, next_command: nextCommand(), checks }, null, 2));
-} else {
-  for (const c of checks) {
-    console.log(`${c.ok ? "OK  " : "FAIL"}  ${c.name.padEnd(11)} ${c.detail}`);
-    if (!c.ok && c.fix) console.log(`        fix: ${c.fix}`);
+/**
+ * Only when RUN, never on import.
+ *
+ * Every check here probes something real -- it spawns the Python scorer, polls each worker's `/health`,
+ * looks for strays on the pages port and reads the run's progress file -- and then calls `process.exit`.
+ * So importing this file ran the whole diagnostic against the fleet and then terminated the IMPORTING
+ * process with doctor's verdict.
+ *
+ * A brace-depth scan for dangerous calls at module scope reports this file CLEAN, because the work is one
+ * call deeper inside `checkJudge`/`checkWorker`/`checkDatasetPages`. Indirection is that check's blind
+ * spot, which is why these guards were placed by reading each file rather than by running a tool over them.
+ */
+async function main() {
+  await checkJudge();
+  await checkWorker();
+  await checkDatasetPages();
+  checkRunState();
+
+  const ready = checks.every((c) => c.ok);
+
+  if (JSON_OUT) {
+    console.log(JSON.stringify({ ready, next_command: nextCommand(), checks }, null, 2));
+  } else {
+    for (const c of checks) {
+      console.log(`${c.ok ? "OK  " : "FAIL"}  ${c.name.padEnd(11)} ${c.detail}`);
+      if (!c.ok && c.fix) console.log(`        fix: ${c.fix}`);
+    }
+    console.log(`\n${ready ? "READY" : "NOT READY — see the fixes above"}`);
+    console.log(`next: ${nextCommand()}`);
   }
-  console.log(`\n${ready ? "READY" : "NOT READY — see the fixes above"}`);
-  console.log(`next: ${nextCommand()}`);
+  process.exit(ready ? 0 : 1);
 }
-process.exit(ready ? 0 : 1);
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
