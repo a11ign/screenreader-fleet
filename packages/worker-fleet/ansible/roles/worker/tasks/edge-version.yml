@@ -56,6 +56,33 @@
     # "the fleet runs 151.0.4129.101" a fact rather than a hope.
     force: false
 
+- name: Refuse to upgrade a worker that is mid-capture
+  # Installing means stopping Edge, and stopping Edge under a running capture destroys 12-520 s of real
+  # screen-reader work and writes a fault the run reads as a flaky guest. `ready` is the field to ask --
+  # `ok` only ever meant "the HTTP server is answering".
+  when: (edge_installed.output | default([]) | first | default('', true)) != worker_edge_version
+  delegate_to: localhost
+  become: false
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:8765/health"
+    return_content: true
+  register: edge_worker_health
+  failed_when: edge_worker_health.json.busy | default(true)
+
+- name: Stop Edge, or the installer cannot replace the launcher
+  # THE REASON THIS TASK EXISTS, measured on a11y-worker-3: `win_package` reported success, the version
+  # directory 151.0.4129.101 was created, and `msedge.exe` stayed at .93 -- because 8 msedge processes were
+  # holding it. The worker keeps a browser alive between captures on purpose (`A11Y_REUSE_BROWSER`, which
+  # took `windowsActivate` from 8.9 s to 3.6 s), so an idle worker still has Edge running.
+  #
+  # An install that reports success and changes nothing is the worst outcome available here: it is the
+  # "green result vouching for an inert remedy" shape, applied to the browser the whole corpus is keyed on.
+  when: (edge_installed.output | default([]) | first | default('', true)) != worker_edge_version
+  become: true
+  ansible.windows.win_shell: taskkill /im msedge.exe /f
+  failed_when: false   # "not found" is success here; the verify at the end is the judge
+  changed_when: true
+
 - name: Install it
   when: (edge_installed.output | default([]) | first | default('', true)) != worker_edge_version
   become: true
@@ -64,6 +91,27 @@
     state: present
     arguments: /quiet /norestart
   register: edge_installed_now
+
+- name: Reboot, because a deferred file swap is exactly what just bit us
+  # Unconditional after an install rather than conditional on a second read. This fleet's own rule: a
+  # reboot always picks up a replaced file, and anything cleverer has already been observed reporting
+  # success while serving the old thing. ~1 minute, and only on the boxes that actually installed.
+  when: edge_installed_now is changed
+  become: true
+  ansible.windows.win_reboot:
+    reboot_timeout: 600
+
+- name: Wait for the worker to serve /health again
+  when: edge_installed_now is changed
+  delegate_to: localhost
+  become: false
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:8765/health"
+    return_content: true
+  register: edge_health_after
+  until: edge_health_after.status | default(0) == 200
+  retries: 30
+  delay: 10
 
 - name: Stop and disable the updater's scheduled tasks
   # The policy cannot do this on a non-domain-joined box, so it is done directly. Found `Ready` on every
