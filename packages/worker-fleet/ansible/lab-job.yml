@@ -95,6 +95,21 @@
       export:
         argv: ["/usr/bin/node", "packages/lab/src/training/export-screenreader-dataset.mjs"]
         timeout: 900
+      # The gate that must pass before a corpus run, and the one that must pass after a rule change. Both
+      # were run by hand today, which is the same reason `evidence-check` and `export` are here.
+      #
+      # `gate:stability` captures 6 canary pages 5 times each and compares by CONTENT, so it needs a worker
+      # and takes ~25 min. One worker, like evidence-check and for the same reason: it is asking whether the
+      # PIPELINE is deterministic, and a second guest is a second variable.
+      stability:
+        argv: ["{{ lab_tsx }}", "packages/lab/scripts/stability-gate.mjs"]
+        setenv: ["A11Y_WORKER={{ lab_named_worker }}"]
+        timeout: 5400
+      # No worker: it scores the rule layer against captures already on disk. Seconds, and here because it
+      # is what says whether the corpus still supports every boundary `rule-ownership.json` declares.
+      rules-gate:
+        argv: ["{{ lab_tsx }}", "packages/lab/scripts/score-rules.ts", "--gate"]
+        timeout: 900
       # Single worker ON PURPOSE, unlike `capture`. This asks whether the evidence MOVED, so a second guest
       # is a second variable: a CHANGED verdict on a split fleet cannot be told apart from "a different box
       # took that case". Check `fleet:status` is consistent first — and if it is not, the worker you name
@@ -130,6 +145,33 @@
           capture-real-pages needs -e worker=<name from a11y_workers>
           ({{ groups['a11y_workers'] | join(', ') }}), optionally -e role=training|calibration and
           -e shard=i/n. The worker is named rather than addressed so a malformed URL cannot be expressed.
+
+    - name: A stability gate names one worker from the inventory
+      when: job == 'stability'
+      ansible.builtin.assert:
+        that:
+          - worker is defined
+          - worker in groups['a11y_workers']
+        fail_msg: >-
+          stability needs -e worker=<name from a11y_workers> ({{ groups['a11y_workers'] | join(', ') }}).
+          One worker, on purpose: it asks whether the pipeline is deterministic, so a second guest is a
+          second variable.
+
+    # Built and then asserted, exactly like `lab_fleet_workers` -- an address that reaches the environment
+    # must be proved to be an address, or `--worker=http://:8765` returns by a different door.
+    - name: Address the one named worker, for the jobs that take a single guest
+      when: worker is defined and worker in (groups['a11y_workers'] | default([]))
+      ansible.builtin.set_fact:
+        lab_named_worker: "http://{{ hostvars[worker].ansible_host }}:8765"
+
+    - name: That address must be exactly an address
+      when: lab_named_worker is defined
+      ansible.builtin.assert:
+        that:
+          - lab_named_worker is match('^http://[0-9.]+:8765$')
+        fail_msg: >-
+          Refusing to run: A11Y_WORKER would be {{ lab_named_worker | truncate(80) }}, which is not a worker
+          address. Something has overridden the inventory.
 
     - name: An evidence check names one worker, and a sample size that is a number
       when: job == 'evidence-check'

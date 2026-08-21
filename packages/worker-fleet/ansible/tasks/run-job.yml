@@ -93,6 +93,83 @@
 # which is a checked-in whitelist, and the one entry that uses it (`A11Y_WORKERS`, so a corpus run reaches
 # the whole fleet) is built from the inventory and asserted against a strict address pattern before it gets
 # here. A caller still supplies only a job name and enumerated arguments.
+- name: "Is any other job running right now"
+  # A pull writes into the checkout a running job is EXECUTING FROM -- `a11y-bootstrap.service` documents
+  # that as "the one way this unit can be quietly wrong". The unit-name lock above only refuses a second job
+  # of the SAME name, so a different job running concurrently is exactly the case it cannot see.
+  ansible.builtin.command:
+    argv: [systemctl, list-units, "a11y-job-*", "--state=running", "--no-legend", "--plain"]
+  changed_when: false
+  failed_when: false
+  register: lab_other_jobs
+
+- name: "Is somebody working in the lab checkout"
+  ansible.builtin.command:
+    argv: [git, status, --porcelain]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: false
+  register: lab_dirty
+
+- name: "Whether this job may pull, in one place"
+  # Named because it is used three times and because the REASONS are the interesting part: an explicit
+  # `pull=false`, another job executing from this checkout, or somebody's uncommitted work in it. Any of the
+  # three means the job runs at whatever is there -- which the stamp then records rather than hides.
+  ansible.builtin.set_fact:
+    lab_should_pull: >-
+      {{ (pull | default(true) | bool)
+         and (lab_other_jobs.stdout | default('') | trim) == ''
+         and (lab_dirty.stdout | default('') | trim) == '' }}
+
+- name: "Fetch origin"
+  # THE STEP THAT WAS DONE BY HAND BEFORE EVERY JOB, which means it was done by hand or not at all. The lab
+  # was once 23 commits behind `main` when a retrain was started on it, so the artefact named a commit that
+  # had not produced it -- and an artefact whose provenance is wrong is worse than one carrying none.
+  #
+  # `command` with `argv:`, never `shell`, because this file's own test forbids a shell here and is right to:
+  # the quoting class it removes is what sent four capture shards at `--worker=http://:8765` for 29 minutes.
+  when: "{{ lab_should_pull }}"
+  ansible.builtin.command:
+    argv: [git, fetch, --quiet, origin]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: false
+
+- name: "Fast-forward to origin/main"
+  # `--ff-only`, never merge or rebase: a diverged lab checkout is a fact somebody needs to look at, not
+  # something for a job launcher to resolve at 2am. If it cannot fast-forward, this fails and the job does
+  # not start, which is the correct direction -- running unknown code is what the stamp below exists to stop.
+  when: "{{ lab_should_pull }}"
+  ansible.builtin.command:
+    argv: [git, merge, --ff-only, origin/main]
+    chdir: "{{ lab_repo_path }}"
+  register: lab_pull
+  changed_when: "'Already up to date' not in (lab_pull.stdout | default(''))"
+
+- name: "Say why the checkout was left alone"
+  when: not lab_should_pull
+  ansible.builtin.debug:
+    msg: >-
+      Not pulling:
+      {{ 'pull=false was passed' if not (pull | default(true) | bool)
+         else ('another job is running (' ~ (lab_other_jobs.stdout | trim | replace('\n', '; ')) ~ ')'
+               if (lab_other_jobs.stdout | default('') | trim) != ''
+               else 'the checkout is dirty — somebody is working in it') }}.
+      This job runs at whatever is checked out, which the next task records.
+
+- name: "Record the commit this job actually runs at"
+  # Recorded rather than assumed, and AFTER the pull, so it describes what will run. The stamp is the
+  # difference between "the run says which code produced it" and "we know which code we asked for".
+  ansible.builtin.command:
+    argv: [git, rev-parse, --short, HEAD]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: false
+  register: lab_commit
+
+- name: "Running {{ job_name }} at {{ lab_commit.stdout | trim }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ job_name }} runs at {{ lab_commit.stdout | trim }}
+      {{ '(pulled)' if (lab_pull is defined and lab_pull is changed) else '(checkout unchanged)' }}
+
 - name: "Start it: {{ job_name }}"
   ansible.builtin.command:
     argv: >-

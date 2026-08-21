@@ -101,8 +101,11 @@ test("a job's environment additions come from the CATALOGUE, never from an extra
   // Every setenv value in the catalogue must be a template over inventory-derived facts or a literal --
   // never a bare `{{ something }}` a caller could set with -e.
   for (const [, value] of LAB_JOB.matchAll(/setenv:\s*\[([^\]]*)\]/g)) {
+    // Both permitted names are facts BUILT from the inventory and then asserted against a strict address
+    // pattern before use. Anything else -- notably a bare `-e` variable -- must fail here.
+    const ASSERTED_FACTS = new Set(["lab_fleet_workers", "lab_named_worker"]);
     for (const [, expression] of value.matchAll(/\{\{\s*([a-z_]+)[^}]*\}\}/g)) {
-      assert.equal(expression, "lab_fleet_workers",
+      assert.ok(ASSERTED_FACTS.has(expression),
         `setenv may only interpolate asserted facts; found ${expression}`);
     }
   }
@@ -138,4 +141,47 @@ test("evidence-check takes ONE worker, by name, and a bounded sample", () => {
   // It runs under tsx because it applies gates that live in TypeScript, and from the binary rather than
   // `npx`, so a job cannot turn into a package install on the box holding the corpus.
   assert.ok(!/npx/.test(LAB_JOB), "no job may invoke npx");
+});
+
+test("a job pulls the lab checkout, and records the commit it actually ran at", () => {
+  // Done by hand before every job today, which means done by hand or not at all. The lab was once 23
+  // commits behind `main` when a retrain was started on it, so the artefact named a commit that had not
+  // produced it — an artefact whose provenance is WRONG is worse than one carrying none.
+  assert.match(RUN_JOB, /argv: \[git, fetch, --quiet, origin\]/);
+  assert.match(RUN_JOB, /argv: \[git, merge, --ff-only, origin\/main\]/,
+    "ff-only: a diverged lab checkout is for a human to look at, not for a launcher to resolve at 2am");
+  assert.match(RUN_JOB, /argv: \[git, rev-parse, --short, HEAD\]/,
+    "and the commit must be READ BACK, not assumed from what we asked for");
+
+  // The stamp is unconditional; the pull is not. A job that skips the pull must still say what it ran.
+  const stamp = RUN_JOB.indexOf("Record the commit this job actually runs at");
+  const start = RUN_JOB.indexOf('- name: "Start it:');
+  assert.ok(stamp > 0 && stamp < start, "the commit must be resolved before the job starts, or it describes nothing");
+  const stampBlock = RUN_JOB.slice(stamp, start);
+  // `^\s*when:` and not `when:` — `changed_when:` contains the substring, so the loose form failed on a
+  // correct file. A guard a correct file can break gets weakened rather than fixed, which is the same
+  // reasoning as `executable()` stripping comments above.
+  assert.ok(!/^\s*when:/m.test(stampBlock), "the stamp must never be conditional — that is the whole point");
+});
+
+test("a pull never runs into a checkout somebody or something else is using", () => {
+  // `git pull` mid-job writes into the checkout a running job is EXECUTING FROM — a11y-bootstrap.service
+  // documents that as "the one way this unit can be quietly wrong". The unit-name lock cannot see it: it
+  // refuses a second job of the SAME name, and the hazard is a DIFFERENT job running concurrently.
+  assert.match(RUN_JOB, /list-units, "a11y-job-\*", "--state=running"/,
+    "another running job must suppress the pull");
+  assert.match(RUN_JOB, /argv: \[git, status, --porcelain\]/,
+    "and so must uncommitted work — a shared checkout is somebody else's in progress");
+  assert.match(RUN_JOB, /lab_should_pull/, "the three reasons belong in one named condition");
+  assert.match(RUN_JOB, /Say why the checkout was left alone/,
+    "and a skipped pull must say which of the three it was, or it is indistinguishable from not trying");
+});
+
+test("the two gates are jobs, and the one needing a worker validates it", () => {
+  assert.match(LAB_JOB, /stability:/, "the gate a corpus run must not start without");
+  assert.match(LAB_JOB, /rules-gate:/);
+  assert.match(LAB_JOB, /when: job == 'stability'/, "its worker must be checked like any other");
+  assert.match(LAB_JOB, /A11Y_WORKER=\{\{ lab_named_worker \}\}/);
+  assert.match(LAB_JOB, /lab_named_worker is match\('\^http:\/\/\[0-9\.\]\+:8765\$'\)/,
+    "an address reaching the environment must be proved to be an address");
 });
