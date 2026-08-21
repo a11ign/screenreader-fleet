@@ -163,6 +163,18 @@ npm run lab:status                              # every a11y-job-* unit and its 
 npm run lab:status -- -e job=train              # one job, systemd's view + its journal + its own progress file
 ```
 
+> **Run these from YOUR machine, not from the control container.** `a11y_lab` authenticates with
+> `~/.ssh/a11y-pve_ed25519`, the Proxmox key, which lives on the operator's laptop and is deliberately not
+> on CT 120 — control holds the FLEET key, for the Windows workers, and ADR 0012 keeps those separate. Run
+> `lab:job` from CT 120 and it fails with
+> `no such identity: /root/.ssh/a11y-pve_ed25519 ... Permission denied (publickey)`, which reads like a
+> broken job path rather than the wrong launch point. Cost twenty minutes to work out once.
+>
+> **`npm run capture:check` is operator-machine-only too, for an unrelated reason.** It imports guidepup,
+> which resolves a screen reader at IMPORT time and throws `No available supported screen readers` on
+> Linux — so it cannot run on the lab at all, however it is invoked. macOS resolves VoiceOver and the
+> import succeeds, which is why the worker-mode check runs from the Mac and talks to the guest over HTTP.
+
 **What this replaces, and why it was worth replacing.** Long lab work was started by typing
 `ssh root@REDACTED-INTERNAL-ADDRESS 'pct exec 121 -- bash -lc "..."'`, which appears NOWHERE in the source tree — so the
 way this project's most expensive operations were launched was untested, unversioned and unreviewable. Two
