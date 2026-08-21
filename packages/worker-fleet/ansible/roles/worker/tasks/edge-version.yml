@@ -27,11 +27,25 @@
       $Ansible.Changed = $false
       if (Test-Path -LiteralPath $Exe) { (Get-Item -LiteralPath $Exe).VersionInfo.ProductVersion } else { "" }
   changed_when: false
+  # ALWAYS run, even under --check. This is a read, and a dry run that cannot see the installed version
+  # cannot tell you what it would do: `win_powershell` tasks do not execute in check mode, so without this
+  # the version came back empty, nothing matched, and `--check` reported it would reinstall Edge on the one
+  # box already running the pinned build. A dry run whose answer is wrong is worse than no dry run.
+  check_mode: false
   register: edge_installed
+
+- name: What it would do
+  # Said out loud so `--check` is legible: "changed" on the install tasks below is the interesting part, and
+  # a run that skips them everywhere is the steady state rather than a no-op.
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: Edge {{ edge_installed.output | default([]) | first | default('(absent)', true) }}
+      {{ '— already the pinned build' if (edge_installed.output | default([]) | first | default('', true)) == worker_edge_version
+         else '— would install ' ~ worker_edge_version }}
 
 - name: Fetch the pinned installer
   # Only when it would change something: this is a ~150 MB download onto a box that may be mid-corpus.
-  when: (edge_installed.output | first | default('')) != worker_edge_version
+  when: (edge_installed.output | default([]) | first | default('', true)) != worker_edge_version
   become: true
   ansible.windows.win_get_url:
     url: "{{ worker_edge_msi_url }}"
@@ -43,7 +57,7 @@
     force: false
 
 - name: Install it
-  when: (edge_installed.output | first | default('')) != worker_edge_version
+  when: (edge_installed.output | default([]) | first | default('', true)) != worker_edge_version
   become: true
   ansible.windows.win_package:
     path: "{{ worker_edge_msi_path }}"
