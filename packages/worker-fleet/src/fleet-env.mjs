@@ -27,6 +27,8 @@
  * error too.
  */
 import { readFileSync } from "node:fs";
+
+import { assertWorkerUrl } from "./worker-http.mjs";
 import { fileURLToPath } from "node:url";
 
 export const DEFAULT_WORKER_PORT = 8765;
@@ -51,9 +53,16 @@ export const DEFAULT_WORKER_PORT = 8765;
  */
 export function configuredWorkers() {
   const raw = process.env.A11Y_WORKERS ?? process.env.A11Y_WORKER ?? "";
+  const named = process.env.A11Y_WORKERS !== undefined ? "A11Y_WORKERS" : "A11Y_WORKER";
   return raw.split(",")
-    .map((w) => w.trim().replace(/\/$/, ""))
+    .map((w) => w.trim())
     .filter(Boolean)
+    // Validated, because this is the ENV route into the same defect the `--worker=` clients now refuse.
+    // `A11Y_WORKERS=http://:8765` used to pass straight through to every consumer of this function --
+    // `doctor`, `worker:code`, `fleet:status`, the dataset runner -- each of which would then report a
+    // machine that cannot be addressed as one that is not answering. Note the empty case is untouched:
+    // "no worker was named" is a normal state meaning "find the local VMs", and every caller branches on it.
+    .map((url) => assertWorkerUrl(url, { source: named }))
     .map((url) => ({ name: url.replace(/^https?:\/\//, ""), url }));
 }
 
@@ -64,6 +73,67 @@ const GROUP_VARS = fileURLToPath(new URL("../ansible/group_vars/a11y_workers.yml
 const HOST_LINE = /^\s*ansible_host\s*:\s*(\S+)\s*$/;
 /** Anything that mentions the key but does not parse — a reformat, a quoted value, a list. */
 const SUSPECT = /ansible_host\s*:/;
+/** A mapping key, with or without an inline value. Indentation is the only thing that says where it sits. */
+const KEY_LINE = /^(\s*)([A-Za-z_][\w.-]*)\s*:/;
+
+/**
+ * The inventory group whose hosts are capture workers.
+ *
+ * This reader was GROUPLESS until 2026-08-21, and that was a live hazard rather than an untidiness: every
+ * `ansible_host:` in the file became `http://<addr>:8765`, so adding any non-worker host to `inventory.yml`
+ * -- the lab container, the control container, a switch -- would have silently added a phantom worker to
+ * `A11Y_WORKERS`, and a run would have dispatched capture cases to it. That is the exact failure this
+ * module's own header says it exists to prevent ("dispatched to but never updated", "both of those are
+ * silent"), arriving through the door nobody had shut.
+ */
+export const WORKER_GROUP = "a11y_workers";
+
+/**
+ * The group a host sits in: the key directly beneath `children`.
+ *
+ * Ansible nests as `all.children.<group>.hosts.<name>`, so the group is positional rather than something
+ * to pattern-match on a name. Reading it from the path means a group added later needs no change here.
+ */
+function groupOf(path) {
+  const children = path.indexOf("children");
+  return children === -1 ? undefined : path[children + 1];
+}
+
+/**
+ * Track the YAML path by indentation — a stack, not a parser.
+ *
+ * Deliberately not a YAML library, for the reason the header gives about `ansible-inventory`: the control
+ * plane must be able to read the fleet without installing anything. Indentation is sufficient because the
+ * only question asked of the path is which group a host is in.
+ */
+function descend(stack, line) {
+  const match = line.match(KEY_LINE);
+  if (!match) return;
+  const indent = match[1].length;
+  while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+  stack.push({ indent, key: match[2] });
+}
+
+/**
+ * Which group each line of the inventory sits in, index-aligned with `text.split(/\r?\n/)`.
+ *
+ * Exported so there is ONE group implementation. `fleet-discover.mjs` has its own host reader with its own
+ * regexes -- two readers of one file, which this repo's notes call its most expensive recurring shape -- and
+ * when this module became group-aware that one did not, so `fleet:discover` probed the lab container on
+ * :8765 and reported it "ASLEEP?". A phantom worker in the diagnostic instead of in the dispatch list is
+ * still a phantom worker. Rather than teach a second parser about groups, both now ask this.
+ *
+ * @param {string} text
+ * @returns {Array<string | undefined>}
+ */
+export function groupPerLine(text) {
+  const stack = [];
+  return text.split(/\r?\n/).map((line) => {
+    if (!line.trim() || line.trimStart().startsWith("#")) return groupOf(stack.map((f) => f.key));
+    if (!HOST_LINE.test(line)) descend(stack, line);
+    return groupOf(stack.map((f) => f.key));
+  });
+}
 
 /**
  * Worker URLs from the text of an inventory file.
@@ -72,16 +142,17 @@ const SUSPECT = /ansible_host\s*:/;
  * anything is a reader nobody knows the limits of.
  *
  * @param {string} text
- * @param {{ port?: number }} [options]
+ * @param {{ port?: number, group?: string }} [options]
  * @returns {string[]}
  */
-export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT } = {}) {
+export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
   const hosts = [];
+  const stack = [];
   text.split(/\r?\n/).forEach((line, index) => {
-    if (line.trimStart().startsWith("#")) return;
+    if (!line.trim() || line.trimStart().startsWith("#")) return;
     const match = line.match(HOST_LINE);
     if (match) {
-      hosts.push(match[1].replace(/^["']|["']$/g, ""));
+      collectHost(hosts, { match, index, stack, group });
       return;
     }
     if (SUSPECT.test(line)) {
@@ -90,11 +161,33 @@ export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT } = {}) 
         + "This reader understands `ansible_host: <address>` and nothing else, deliberately — a fleet list "
         + "that silently comes up short is invisible, because a run with fewer workers looks normal.");
     }
+    descend(stack, line);
   });
   if (!hosts.length) {
-    throw new Error("no hosts found in inventory.yml. Add one under a11y_workers.hosts before running.");
+    throw new Error(`no hosts found under ${group}.hosts in inventory.yml. Add one before running.`);
   }
   return hosts.map((host) => `http://${host}:${port}`);
+}
+
+/**
+ * Keep this host if it is in the worker group; refuse it if it is in no group at all.
+ *
+ * A host outside every group is the ambiguous case, and it gets an error rather than a default. Including
+ * it recreates the phantom-worker bug; dropping it silently is how a fleet list comes up short — and this
+ * module exists because both of those are invisible. So it says which line, and which group it expected.
+ */
+function collectHost(hosts, { match, index, stack, group }) {
+  const found = groupOf(stack.map((frame) => frame.key));
+  if (found === group) {
+    hosts.push(match[1].replace(/^["']|["']$/g, ""));
+    return;
+  }
+  if (found === undefined) {
+    throw new Error(
+      `inventory.yml:${index + 1} declares a host outside any group: ${match[0].trim()}\n`
+      + `This reader takes workers from \`${group}\` only, so it cannot tell whether an ungrouped host is a `
+      + "capture worker or something else on the network. Nest it under `all.children.<group>.hosts`.");
+  }
 }
 
 /** The port the group vars declare, so it is stated once and not guessed here. */

@@ -1,0 +1,66 @@
+# How to reach the lab container, and where its parts live on it.
+#
+# ## Every one of these is stated, and none may be left to inherit
+#
+# `group_vars/a11y_workers.yml` sets `ansible_connection`, `ansible_shell_type: powershell` and
+# `ansible_user: witness` as VARIABLES. A new group does not inherit another group's vars, so in principle
+# this file could be shorter — but `wake.yml` records what happens when these are half-specified, and it
+# cost a play that could never have worked:
+#
+#   > `connection: local` is a play KEYWORD, and `group_vars/a11y_workers.yml` sets the VARIABLE
+#   > `ansible_connection: ssh`. The variable wins -- so this play, whose entire purpose is reaching a
+#   > machine that is switched off, was trying to SSH to it first and failing UNREACHABLE on its very
+#   > first task.
+#
+# and, on fixing only half of it:
+#
+#   > overriding only the connection produced `/bin/sh: 1: PowerShell: not found` — Ansible correctly
+#   > running on the Linux control plane and correctly trying to use PowerShell to do it.
+#
+# So `ansible_shell_type: sh` is here explicitly rather than relied upon by absence. A Linux host that
+# inherits `powershell` from anywhere fails with a message about PowerShell, which reads like a broken
+# host rather than a wrong variable.
+#
+# ## Reached DIRECTLY, not through `pct exec` on the Proxmox host
+#
+# The container has its own IP and its own sshd. Everything about this lab used to be driven as
+# `ssh root@REDACTED-INTERNAL-ADDRESS 'pct exec 121 -- bash -lc "..."'`, and that second hop is a second layer of shell
+# quoting for every command to survive — which is where a heredoc came apart and where a bash array
+# evaporated crossing `nohup bash -c`, sending four capture shards at `--worker=http://:8765` for 29
+# minutes while every worker sat idle. Ansible's `command` module takes argv and never invokes a shell, so
+# the whole class goes away; reaching the box directly removes the hop that made it possible.
+#
+# ## The address is DHCP
+#
+# Confirm rather than trust it, and give it a reservation:
+#
+#     pct exec 121 -- ip -4 -br addr show eth0
+#
+# A moved address answers nothing, and nothing-answering is indistinguishable from a dead machine — the
+# same staleness `fleet:discover` exists to catch on the workers.
+ansible_connection: ssh
+ansible_user: root
+ansible_shell_type: sh
+ansible_port: 22
+
+# The Proxmox key, not `~/.ssh/id_ed25519`. Same reasoning as the fleet key: an operator with several keys
+# would otherwise have ssh pick one by luck, and "Permission denied (publickey)" says nothing about which
+# key was offered.
+ansible_ssh_private_key_file: "{{ lookup('env', 'A11Y_PVE_KEY') | default('~/.ssh/a11y-pve_ed25519', true) }}"
+
+# TWO PYTHONS on this box, and they are not interchangeable.
+#
+# This one runs Ansible's own modules and must be the SYSTEM python, because that is where the distro puts
+# the libraries modules import. Pinned rather than discovered: Ansible warns that "future installation of
+# another Python interpreter could cause a different interpreter to be discovered", and a management channel
+# that silently changes interpreter is the kind of drift this whole directory exists to prevent.
+ansible_python_interpreter: /usr/bin/python3
+
+# Where the checkout lives, and where the corpus is mounted. `runs` is a symlink into `mp0`, so the corpus
+# survives a rootfs rebuild — the rootfs is disposable, `mp0` is not.
+lab_repo_path: /opt/a11y
+lab_runs_path: /srv/a11y-runs
+# The SCORER's python — the venv holding torch, transformers and onnxruntime. NOT `ansible_python_interpreter`
+# above: pointing Ansible at this one would have it import its modules from a venv built for a wholly
+# different purpose, and pointing the scorer at the system python would fail on a missing torch.
+lab_python: /opt/a11y/.venv/bin/python

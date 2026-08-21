@@ -45,6 +45,7 @@ import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
 
 import { requestJson } from "./worker-http.mjs";
+import { WORKER_GROUP, groupPerLine } from "./fleet-env.mjs";
 
 const DEFAULT_PORT = 8765;
 const PROBE_TIMEOUT_MS = 2_000;
@@ -65,8 +66,13 @@ const LAST_HOST_IN_SUBNET = 254;
 export function inventoryHosts(text) {
   const hosts = [];
   let current = null;
+  // Group per line from `fleet-env.mjs`, not a second group parser here. Without it this returned the lab
+  // container as a fifth worker, and `reconcile` reported it "ASLEEP?" -- probing :8765 on a box that has
+  // no worker on it and never will.
+  const groups = groupPerLine(text);
   for (const [index, line] of text.split(/\r?\n/).entries()) {
     if (line.trimStart().startsWith("#")) continue;
+    if (groups[index] !== WORKER_GROUP) continue;
     const name = line.match(/^\s{8}([A-Za-z0-9][\w-]*):\s*$/);
     if (name) {
       current = { name: name[1], host: null, mac: null, line: index + 1 };
@@ -244,7 +250,7 @@ export function enrol(text, unknowns, today) {
   const names = declared.map((host) => host.name);
   const added = [];
   const skipped = [];
-  let out = text.endsWith("\n") ? text : `${text}\n`;
+  const blocks = [];
 
   for (const worker of unknowns) {
     if (worker.mac && knownMacs.has(worker.mac)) {
@@ -252,11 +258,52 @@ export function enrol(text, unknowns, today) {
       continue;
     }
     const name = nextWorkerName([...names, ...added.map((entry) => entry.name)]);
-    out += `${enrolmentBlock({ name, ip: worker.ip, mac: worker.mac, health: worker.health, today })}\n`;
+    blocks.push(enrolmentBlock({ name, ip: worker.ip, mac: worker.mac, health: worker.health, today }));
     added.push({ name, ip: worker.ip, mac: worker.mac });
     if (worker.mac) knownMacs.add(worker.mac);
   }
-  return { text: out, added, skipped };
+  return { text: insertIntoWorkerGroup(text, blocks), added, skipped };
+}
+
+/**
+ * Splice new host blocks into the END OF THE WORKER GROUP, not the end of the file.
+ *
+ * This appended to the end of the file until 2026-08-21, which was correct for exactly as long as
+ * `a11y_workers` was the only group. `inventory.yml` now also declares the control plane, and appending
+ * past it would have put a freshly enrolled capture worker inside `a11y_lab` -- where `fleet-env.mjs`
+ * would then correctly refuse to see it. The box would be provisioned, updated, and never dispatched to:
+ * the precise failure both modules carry a header about, reached by making one of them group-aware and
+ * leaving the other appending blindly.
+ *
+ * The insertion point is the last line of the `a11y_workers` block, found by indentation: the group ends
+ * at the first later line indented no deeper than the group key itself. Comments and blank lines at the
+ * tail of the block are left BELOW the insertion, because a trailing comment there belongs to the group
+ * rather than to the last host in it.
+ */
+function insertIntoWorkerGroup(text, blocks) {
+  const body = text.endsWith("\n") ? text : `${text}\n`;
+  if (!blocks.length) return body;
+
+  const lines = body.split("\n");
+  const start = lines.findIndex((line) => new RegExp(`^(\\s*)${WORKER_GROUP}\\s*:\\s*$`).test(line));
+  if (start === -1) {
+    throw new Error(
+      `inventory.yml declares no \`${WORKER_GROUP}:\` group, so there is nowhere to enrol a capture worker.\n`
+      + "Refusing to append at the end of the file: that is how a worker lands in another group and stops "
+      + "being dispatched to. Add the group, or fix the one that was renamed.");
+  }
+  const groupIndent = lines[start].match(/^(\s*)/)[1].length;
+  let end = start + 1;
+  let lastHost = start;
+  while (end < lines.length) {
+    const line = lines[end];
+    const indent = line.match(/^(\s*)/)[1].length;
+    if (line.trim() && indent <= groupIndent) break;
+    if (line.trim() && !line.trimStart().startsWith("#")) lastHost = end;
+    end += 1;
+  }
+  lines.splice(lastHost + 1, 0, ...blocks);
+  return lines.join("\n");
 }
 
 /** A worker's identity in one line, so two boxes can be told apart at a glance. */

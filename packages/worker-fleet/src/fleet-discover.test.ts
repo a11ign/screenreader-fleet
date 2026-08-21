@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { reconcile, inventoryHosts, normaliseMac } from "./fleet-discover.mjs";
+import { reconcile, inventoryHosts, normaliseMac, enrol } from "./fleet-discover.mjs";
+import { workersFromInventory } from "./fleet-env.mjs";
 
 const health = { code: "abc", environment: { screenReaderVersion: "2026.1.1" } };
 
@@ -72,4 +73,73 @@ test("the real inventory parses, and its hosts carry an address", () => {
   const hosts = inventoryHosts(text);
   assert.ok(hosts.length >= 1, "the shipped inventory should declare at least one worker");
   for (const h of hosts) assert.match(h.host, /^[\d.]+$/);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Enrolment has to land in the WORKER group, and the only way to know is to read it back with the
+// reader a run actually uses. These two modules were independently correct and jointly broken for the
+// length of one commit on 2026-08-21: `fleet-env.mjs` became group-aware, `inventory.yml` gained the
+// control-plane group, and `enrol` was still appending to the END OF THE FILE — so the next enrolled
+// worker would have landed in `a11y_lab` and been correctly ignored by the reader. Provisioned,
+// updated, never dispatched to, and nothing to say so.
+
+const REAL_INVENTORY = readFileSync(
+  fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url)), "utf8");
+
+test("an enrolled worker is visible to the reader a RUN uses, not merely present in the file", () => {
+  const { text, added } = enrol(REAL_INVENTORY, [{ ip: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:ff", health }],
+    "2026-08-21");
+
+  assert.equal(added.length, 1);
+  // The real assertion: parsed back, not grepped for. Being in the file is not the same as being a worker.
+  assert.ok(workersFromInventory(text).includes("http://REDACTED-INTERNAL-ADDRESS:8765"),
+    "an enrolled worker must be in the worker group — appending past the last group hides it");
+});
+
+test("enrolment does not disturb the workers already declared", () => {
+  const before = workersFromInventory(REAL_INVENTORY);
+  const { text } = enrol(REAL_INVENTORY, [{ ip: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:ff", health }],
+    "2026-08-21");
+
+  assert.deepEqual(workersFromInventory(text).filter((w) => !w.includes("REDACTED-INTERNAL-ADDRESS")), before);
+});
+
+test("enrolment does not turn the control plane into a capture worker", () => {
+  // The lab is in the inventory so there is one source of truth for what exists. It must never become
+  // something a run dispatches capture cases to, before or after an enrolment.
+  const { text } = enrol(REAL_INVENTORY, [{ ip: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:ff", health }],
+    "2026-08-21");
+
+  for (const url of workersFromInventory(text)) {
+    assert.ok(!url.includes("REDACTED-INTERNAL-ADDRESS"), `the lab leaked into the fleet as ${url}`);
+  }
+});
+
+test("enrolling nothing changes nothing", () => {
+  const { text, added } = enrol(REAL_INVENTORY, [], "2026-08-21");
+  assert.equal(added.length, 0);
+  assert.equal(text, REAL_INVENTORY);
+});
+
+test("an inventory with no worker group REFUSES the enrolment rather than appending anyway", () => {
+  assert.throws(
+    () => enrol("all:\n  children:\n    a11y_lab:\n      hosts:\n        a11y-lab:\n          ansible_host: 1.2.3.4\n",
+      [{ ip: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:ff", health }], "2026-08-21"),
+    /declares no `a11y_workers:` group/);
+});
+
+test("inventoryHosts is group-aware too, or discover reports the lab as a sleeping worker", () => {
+  // This module has its own host reader with its own regexes, and it matched host names at exactly eight
+  // spaces of indentation — which is what the control-plane entry uses. So it returned the lab as a fifth
+  // worker and `reconcile` called it ASLEEP?, probing :8765 on a box that has no worker and never will.
+  const hosts = inventoryHosts(REAL_INVENTORY);
+
+  assert.ok(hosts.length >= 4, "the real workers must still be found");
+  for (const host of hosts) {
+    assert.notEqual(host.name, "a11y-lab", "the control plane is not a capture worker");
+    assert.notEqual(host.host, "REDACTED-INTERNAL-ADDRESS", "the control plane is not a capture worker");
+  }
+  // And the MACs still parse — wake.yml sends its magic packet to these, and a host read without its mac
+  // is SKIPPED by wake rather than woken.
+  assert.ok(hosts.every((h) => h.mac), "every declared worker still has its mac");
 });

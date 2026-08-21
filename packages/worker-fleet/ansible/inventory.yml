@@ -74,3 +74,30 @@ all:
           # Enrolled by `fleet:discover --enroll` on 2026-08-16: NVDA 2026.1.1, Microsoft Windows 11 Pro 10.0.22631/x64
           ansible_host: REDACTED-INTERNAL-ADDRESS
           mac: "6c:4b:90:70:1a:3d"
+
+    ## The control plane — in the inventory because it EXISTS, not because it captures
+    #
+    # Added 2026-08-21, and it could not have been added before that date: `fleet-env.mjs` read every
+    # `ansible_host:` in this file as a capture worker at :8765, so putting the lab here would have put
+    # `http://REDACTED-INTERNAL-ADDRESS:8765` into `A11Y_WORKERS` and a run would have dispatched capture cases to a
+    # box with no NVDA on it. The reader is now group-aware and `fleet-env.test.ts` asserts a host in
+    # another group never becomes a worker, in either group order.
+    #
+    # Two containers on one Proxmox host (`pve-micro`, REDACTED-INTERNAL-ADDRESS), split per ADR 0012 so the credential
+    # that can reconfigure twelve Windows boxes does not sit beside the largest supply-chain surface in the
+    # system. `control` holds Ansible and the fleet key; `lab` holds node_modules, the venv and the corpus,
+    # and holds NO key — it can WAKE a worker, because a magic packet needs no credential, and nothing else.
+    #
+    # Both are DHCP and their descriptions say to confirm rather than trust the address:
+    #
+    #     pct exec 121 -- ip -4 -br addr show eth0
+    #
+    # A DHCP reservation for each is worth having for the same reason the workers have one: a moved address
+    # answers nothing, and nothing-answering is indistinguishable from a dead machine.
+    a11y_lab:
+      hosts:
+        a11y-lab:
+          # CT 121 on pve-micro. Debian 12, 2 cores, 4096 MB. Reached directly over SSH with the
+          # `a11y-pve` key — NOT through `pct exec` on the host, which is a second hop and therefore a
+          # second layer of shell quoting for every command to survive.
+          ansible_host: REDACTED-INTERNAL-ADDRESS

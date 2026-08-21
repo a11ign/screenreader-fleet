@@ -24,6 +24,7 @@ test("a commented-out machine is not in the fleet", () => {
   // Commenting a box out is how you take it out of rotation for a week. It must not come back because a
   // regex was hungry.
   const workers = workersFromInventory([
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
     "        a11y-worker-1:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
     "        # a11y-worker-2:", "        #   ansible_host: REDACTED-INTERNAL-ADDRESS",
   ].join("\n"));
@@ -47,8 +48,10 @@ test("an inventory with no hosts is refused rather than returning an empty fleet
 });
 
 test("quoted addresses are accepted, because YAML allows them", () => {
-  assert.deepEqual(workersFromInventory('          ansible_host: "REDACTED-INTERNAL-ADDRESS"', { port: 1 }),
-    ["http://REDACTED-INTERNAL-ADDRESS:1"]);
+  assert.deepEqual(workersFromInventory([
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
+    "        a11y-worker-1:", '          ansible_host: "REDACTED-INTERNAL-ADDRESS"',
+  ].join("\n"), { port: 1 }), ["http://REDACTED-INTERNAL-ADDRESS:1"]);
 });
 
 test("the port comes from the group vars, not from a second copy in here", () => {
@@ -121,4 +124,123 @@ test("the name is the host, for a readable per-worker report", () => {
   withEnv({ A11Y_WORKERS: "http://REDACTED-INTERNAL-ADDRESS:8765", A11Y_WORKER: undefined }, () => {
     assert.equal(configuredWorkers()[0].name, "REDACTED-INTERNAL-ADDRESS:8765");
   });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Group awareness. This reader was groupless until 2026-08-21, which meant `inventory.yml` could only
+// ever describe capture workers: adding the lab container to it would have put `http://<lab>:8765` into
+// `A11Y_WORKERS` and a run would have dispatched capture cases to a box with no NVDA on it. Nothing
+// would have said so — `fleet:status` would just have shown one unreachable "worker".
+
+test("a host in another group is NOT a capture worker", () => {
+  // The whole reason for this change: the lab and control containers belong in the inventory (one source
+  // of truth for what exists) without becoming things a run dispatches to.
+  const workers = workersFromInventory([
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
+    "        a11y-worker-2:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "    a11y_lab:", "      hosts:",
+    "        a11y-lab:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+  ].join("\n"), { port: 8765 });
+
+  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+});
+
+test("group order does not matter — a non-worker group FIRST must not leak", () => {
+  // Ordering is exactly the kind of thing a reformat changes, and a reader that only works when the
+  // worker group comes first is one that breaks silently on somebody else's tidy-up.
+  const workers = workersFromInventory([
+    "all:", "  children:", "    a11y_lab:", "      hosts:",
+    "        a11y-lab:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "    a11y_workers:", "      hosts:",
+    "        a11y-worker-2:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+  ].join("\n"), { port: 8765 });
+
+  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+});
+
+test("a host in no group at all is an ERROR, not a guess", () => {
+  // Including it recreates the phantom worker; dropping it silently shortens the fleet. Both are
+  // invisible, so neither is a safe default.
+  assert.throws(
+    () => workersFromInventory("        a11y-worker-1:\n          ansible_host: REDACTED-INTERNAL-ADDRESS"),
+    /declares a host outside any group/);
+});
+
+test("host vars other than the address do not disturb the group", () => {
+  // `mac:` sits at the same indentation as `ansible_host:`, so a path tracker that mishandled leaves
+  // would lose the group and reject a perfectly good worker.
+  const workers = workersFromInventory([
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
+    "        a11y-worker-2:", '          mac: "e8:6a:64:e2:3c:8d"',
+    "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+  ].join("\n"), { port: 8765 });
+
+  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+});
+
+test("indentation width is not assumed", () => {
+  // The real file uses two spaces per level; a reader that hardcoded that would break on a reformat and
+  // report a short fleet, which is the failure mode this module is built to refuse.
+  const workers = workersFromInventory([
+    "all:", "    children:", "        a11y_workers:", "            hosts:",
+    "                a11y-worker-2:", "                    ansible_host: REDACTED-INTERNAL-ADDRESS",
+  ].join("\n"), { port: 8765 });
+
+  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+});
+
+test("asking for a group that has no hosts is refused, naming the group", () => {
+  assert.throws(() => workersFromInventory([
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
+    "        a11y-worker-2:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+  ].join("\n"), { group: "a11y_lab" }), /no hosts found under a11y_lab\.hosts/);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The ENV route into the same defect the `--worker=` clients now refuse. `A11Y_WORKERS=http://:8765`
+// used to pass straight through here into `doctor`, `worker:code`, `fleet:status` and the dataset
+// runner — each of which would then report a machine that cannot be addressed as one that is merely
+// not answering, which is the single most misleading thing this fleet tooling can say.
+
+test("a malformed entry in A11Y_WORKERS is refused, naming the variable", () => {
+  const original = process.env.A11Y_WORKERS;
+  try {
+    process.env.A11Y_WORKERS = "http://:8765";
+    assert.throws(() => configuredWorkers(), /A11Y_WORKERS=http:\/\/:8765/);
+  } finally {
+    if (original === undefined) delete process.env.A11Y_WORKERS;
+    else process.env.A11Y_WORKERS = original;
+  }
+});
+
+test("one bad entry fails the whole list, rather than silently shortening the fleet", () => {
+  // Fail closed. A pool of one where two were named looks exactly like a pool of one, which is this
+  // module's founding complaint.
+  const original = process.env.A11Y_WORKERS;
+  try {
+    process.env.A11Y_WORKERS = "http://good:8765,http://:8765";
+    assert.throws(() => configuredWorkers(), /is not a URL/);
+  } finally {
+    if (original === undefined) delete process.env.A11Y_WORKERS;
+    else process.env.A11Y_WORKERS = original;
+  }
+});
+
+test("validation does NOT disturb the empty case, which is a normal state", () => {
+  // "No worker was named" means "find the local VMs" and every caller branches on emptiness. Turning
+  // that into a throw would break the default path for every developer on a Mac.
+  const workers = process.env.A11Y_WORKERS;
+  const worker = process.env.A11Y_WORKER;
+  try {
+    delete process.env.A11Y_WORKERS;
+    delete process.env.A11Y_WORKER;
+    assert.deepEqual(configuredWorkers(), []);
+    process.env.A11Y_WORKERS = "";
+    assert.deepEqual(configuredWorkers(), []);
+    process.env.A11Y_WORKERS = " , ";
+    assert.deepEqual(configuredWorkers(), []);
+  } finally {
+    if (workers === undefined) delete process.env.A11Y_WORKERS; else process.env.A11Y_WORKERS = workers;
+    if (worker === undefined) delete process.env.A11Y_WORKER; else process.env.A11Y_WORKER = worker;
+  }
 });
