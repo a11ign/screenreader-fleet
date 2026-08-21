@@ -94,6 +94,19 @@ all:
     #
     # A DHCP reservation for each is worth having for the same reason the workers have one: a moved address
     # answers nothing, and nothing-answering is indistinguishable from a dead machine.
+    ## fleet CONTROL — the box these playbooks actually run FROM
+    #
+    # Here for the same reason the lab is: one source of truth for the machines that exist. It is NOT a
+    # target of `deploy.yml`, `wake.yml` or `provision*.yml`, all of which name `a11y_workers`.
+    #
+    # This is the half of ADR 0012's split that holds the fleet SSH key, which is why worker playbooks can
+    # only be run from here and not from a developer's Mac.
+    a11y_control:
+      hosts:
+        a11y-control:
+          # CT 120 on pve-micro. Debian 12, 1 core, 1024 MB — it runs Ansible and holds the key, nothing else.
+          ansible_host: REDACTED-INTERNAL-ADDRESS
+
     a11y_lab:
       hosts:
         a11y-lab:

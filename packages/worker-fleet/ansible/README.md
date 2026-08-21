@@ -288,3 +288,28 @@ which served the previous code for another hour. A reboot always picks up pushed
 - **A box that is off stays in the inventory.** `any_errors_fatal = false` means the rest of the fleet
   still gets the play and the recap names the one that did not answer. Deleting a machine to make a run go
   green is how it stops being maintained.
+- **Set a UTF-8 locale, or `ansible-playbook` refuses to start.** On the control container it dies with
+  `ERROR: Ansible could not initialize the preferred locale: unsupported locale setting` — before a single
+  task, so it reads like a broken install rather than a missing environment variable. `LANG` is `C` there,
+  both through `pct exec` and over a direct SSH session, so it has to be given explicitly:
+
+  ```bash
+  ssh root@<control>                       # NOT `pct exec` on the Proxmox host: see below
+  cd a11y-witness/packages/worker-fleet/ansible
+  LC_ALL=C.UTF-8 LANG=C.UTF-8 ansible-playbook deploy.yml
+  ```
+
+- **Reach a container DIRECTLY over SSH, not through `pct exec` on the Proxmox host.** Both containers have
+  their own IP and their own sshd, and they are in `inventory.yml` — `a11y_control` is REDACTED-INTERNAL-ADDRESS,
+  `a11y_lab` is REDACTED-INTERNAL-ADDRESS, both DHCP, so confirm rather than trust. The `pct exec` route is a second hop
+  and therefore a second layer of shell quoting for every command to survive, which is where a heredoc came
+  apart and where a bash array evaporated crossing `nohup bash -c`. It also carries a thinner environment,
+  which is how the locale failure above was first met.
+
+- **`npm run gate:isolation` cannot complete on the Linux control plane, so neither can `release:gate`.**
+  Two of six packages fail there for platform reasons rather than defects: `nvda-worker` says so honestly
+  ("this machine has no screen reader, so guidepup refuses to import … Run the gate on macOS or Windows"),
+  but `worker-fleet` fails with a bare `AssertionError` because host capacity is read from `vm_stat`, which
+  is macOS-only. Since `gate:isolation` is the FIRST leg of `release:gate`, its failure stops the chain and
+  the model-quality gates behind it never run. Until that check skips as honestly as its neighbour, run
+  `gate:isolation` on a Mac and the remaining legs on the lab, which is where the Python venv lives.
