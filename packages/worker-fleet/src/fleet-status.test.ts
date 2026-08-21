@@ -39,6 +39,29 @@ test("a busy worker says what it is doing and for how long", () => {
 
 test("an idle worker reports no activity rather than a stale one", () => {
   assert.equal(activityOf(ready), "");
+
+  // THE CASE THIS TEST WAS NAMED FOR AND DID NOT COVER. `/progress` keeps the last capture's record after
+  // it completes, so the probe that matters is an idle worker WITH a progress record, not one without.
+  // Observed on a11y-worker-2: `ready`, and reported as `36m41s @browserKeptAlive` on a case that had
+  // finished half an hour earlier.
+  //
+  // `elapsedMs` keeps growing while the box sits idle, so the stale line reads as an ever-worsening hang —
+  // indistinguishable from the fault this column exists to detect, and the reason the name was written
+  // before the behaviour existed.
+  const finished = {
+    ...ready,
+    health: { ...ready.health, busy: false },
+    // Copied from a real /progress on a11y-worker-2, 42 minutes after the capture ended: `busy` had
+    // cleared, `capturing` had not, and `elapsedMs` was still growing.
+    progress: {
+      busy: false,
+      capturing: "http://REDACTED-INTERNAL-ADDRESS:5050/table-unassociated-hilltown/bad.html",
+      elapsedMs: 2_526_239,
+      lastPhase: "browserKeptAlive",
+    },
+  };
+  assert.equal(activityOf(finished), "",
+    "a finished capture must not render identically to one that is still running");
 });
 
 test("a degraded worker is surfaced even though every capture is succeeding", () => {

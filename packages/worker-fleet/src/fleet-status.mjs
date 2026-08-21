@@ -100,9 +100,28 @@ export function stateOf(probe) {
   return "ready";
 }
 
-/** What a busy worker is actually doing, in one line. */
+/**
+ * What a busy worker is actually doing, in one line.
+ *
+ * **Gated on `busy`, which this function's own comment always claimed and the code never checked.**
+ * `/progress` keeps the last capture's record after it finishes, so an IDLE worker reported the case it
+ * had already completed — and `elapsedMs` keeps growing, so it presents as a capture that has been stuck
+ * for however long the box has been sitting there. Observed: a `ready` worker showing
+ * `36m41s @browserKeptAlive` half an hour after its run ended.
+ *
+ * That is not cosmetic. A long-running phase is precisely the signature this column exists to surface —
+ * "a phase current for four minutes is the one that is stuck" — so a stale record is indistinguishable
+ * from the fault it was built to detect, and it gets worse the longer the fleet is healthy. The repo's
+ * "404 and 202 are different answers" rule, applied to a status display: *finished* and *still going*
+ * must never render the same.
+ */
 export function activityOf(probe) {
   const progress = probe.progress;
+  // `progress.busy`, not `health.busy`: `capturing` comes from this same payload, and health and progress
+  // are two separate requests, so reading the flag from one and the case from the other samples two
+  // different instants. Measured on a11y-worker-2: `{busy: false, capturing: ".../table-unassociated-
+  // hilltown/bad.html", elapsedMs: 2526239}` -- 42 minutes after that capture finished, and still climbing.
+  if (!progress?.busy) return "";
   if (!progress?.capturing) return "";
   const seconds = Math.round((progress.elapsedMs ?? 0) / MS_PER_SECOND);
   const elapsed = seconds >= SECONDS_PER_MINUTE
