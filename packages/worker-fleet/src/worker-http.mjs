@@ -67,6 +67,60 @@ import { request as httpsRequest } from "node:https";
 export const CAPTURE_CLIENT_TIMEOUT_MS = 560_000;
 
 /**
+ * A worker address, validated at the BOUNDARY where it enters the program.
+ *
+ * `requestJson` already calls `new URL(url)`, which throws `ERR_INVALID_URL` on a malformed address — so an
+ * empty host dies in under a second, in principle. In practice it did not, and the way it did not is the
+ * reason this function exists.
+ *
+ * `--worker=http://:8765` reached `capture-real-pages.mjs` because nothing there did more than check the
+ * value was truthy, and `http://:8765` is truthy. The readiness loop then caught the resulting
+ * `ERR_INVALID_URL` in a bare `catch` whose only content was the comment "mid-boot or mid-restart; keep
+ * waiting", and so classified a permanent
+ * programmer error as a transient network condition: 60 attempts, 5 s apart, per page — then recorded
+ * "worker never became ready" as a failure of the PAGE. Four shards spent 29 minutes that way while every
+ * worker sat idle, and the run blamed the corpus.
+ *
+ * So the fix is two-part and both halves are needed: refuse the value here, and stop the readiness loop
+ * swallowing what it cannot recover from. Validating without fixing the catch leaves the next unrecoverable
+ * error to be absorbed the same way.
+ *
+ * Node's URL parser does the work. There is no regex here on purpose — a hand-rolled one would accept
+ * `http://:8765` again, since the only thing wrong with it is an empty host. Note `http:/x` and
+ * `http:///path` DO parse, to host `x` and host `path`; that is the parser's business and not something to
+ * second-guess here.
+ *
+ * @param {string | null | undefined} value the raw `--worker=` or `A11Y_WORKER` value
+ * @param {{ source?: string }} [options] what to name in the error, e.g. "--worker"
+ * @returns {string} the address, trailing slash removed
+ */
+export function assertWorkerUrl(value, { source = "--worker" } = {}) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${source} is required and was empty. Give a worker address, e.g. ${source}=http://REDACTED-INTERNAL-ADDRESS:8765`);
+  }
+  const raw = value.trim().replace(/\/$/, "");
+  let target;
+  try {
+    target = new URL(raw);
+  } catch (cause) {
+    // A missing HOST lands here rather than in a hostname check below, and there is no such check on
+    // purpose: verified against Node's parser, no `http:`/`https:` URL can parse with an empty hostname —
+    // `http://`, `http://:8765` and `http://:/x` all throw. A `!target.hostname` branch would therefore be
+    // unreachable, which is this repo's own most-repeated defect, so the message that belongs to that case
+    // is folded in here where it can actually be read.
+    throw new Error(
+      `${source}=${raw} is not a URL. Expected something like http://REDACTED-INTERNAL-ADDRESS:8765\n`
+      + "If the host is missing, that is what a shell variable expanding to nothing looks like: a bash "
+      + "array does not survive `nohup bash -c`, and zsh does not word-split a scalar. Both produce "
+      + "exactly this.", { cause });
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    throw new Error(`${source}=${raw} must be http: or https:, not ${target.protocol}`);
+  }
+  return raw;
+}
+
+/**
  * One request, with a single deadline covering connect, headers and body.
  *
  * @param {string} url
