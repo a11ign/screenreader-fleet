@@ -1,0 +1,156 @@
+---
+# Run a long job on the lab, detached and supervised, and wait for its real exit code.
+#
+#   - ansible.builtin.include_tasks: tasks/run-job.yml
+#     vars:
+#       job_name: train
+#       job_argv: ["{{ lab_python }}", "packages/lab/scripts/train-screenreader-model.py", "--data", "..."]
+#       job_timeout: 3600
+#
+# ## This is `run-interactive.yml` for Linux, and deliberately the same shape
+#
+# That file drives a long job on a Windows worker through a one-shot scheduled task, because SSH lands in
+# session 0 and cannot reach the desktop. The lab has no such problem — SSH can run anything — so the
+# reason here is different, but the SHAPE is identical and worth keeping identical: fire it, poll for it to
+# stop, read its result BACK, print what it said, clean up whether it passed or failed, assert on the code.
+#
+# Its governing comment applies verbatim: `LastTaskResult` is "read back rather than inferred from
+# Start-ScheduledTask returning cleanly — that call only means the request was accepted". `systemd-run`
+# returning 0 means exactly the same thing and nothing more.
+#
+# ## What is being replaced
+#
+# `ssh root@REDACTED-INTERNAL-ADDRESS 'pct exec 121 -- bash -lc "..."'`, which is not in the source tree at all — so the
+# way this project's most expensive operations were started was untested, unversioned and unreviewable. It
+# cost, in two days: a heredoc mangled through two hops of shell quoting; a bash array that evaporated
+# crossing `nohup bash -c`, sending four capture shards at `--worker=http://:8765` for 29 minutes while
+# every worker sat idle; four `pgrep -f X` waiters that matched their own command lines and waited forever;
+# and a job reported "still running" 28 minutes after it finished.
+#
+# `ansible.builtin.command` with `argv:` never invokes a shell, so the quoting class is gone by
+# construction rather than by care. `systemd-run` gives the rest: a durable handle, an exit code, logs with
+# rotation, a real timeout, and mutual exclusion by unit name.
+#
+# ## Three things measured on this box, each of which would otherwise be a bug here
+#
+#   1. **Poll `SubState`, never `systemctl is-active`.** With `--remain-after-exit` an exited unit stays
+#      `active (exited)` forever, so `is-active` returns true for good. A waiter written that way hangs
+#      indefinitely reporting "still running" for a finished job — which is the original incident,
+#      reproduced inside its own fix. Measured: `is-active` says `active` while `show -p SubState` says
+#      `exited`.
+#   2. **`Result` and `ExecMainStatus` are populated WHILE the job runs.** Observed `Result=success
+#      ExecMainStatus=0` on a job seven minutes from finishing. They are only meaningful once `SubState`
+#      has left `running`, which is why they are read in a separate task after the poll and never before.
+#   3. **`--remain-after-exit`, not `--collect`.** A collected unit is unloaded on exit and takes its exit
+#      code with it — the handle would vanish at the moment it matters. Verified both ways on this
+#      container: `/bin/true` leaves `Result=success ExecMainStatus=0`, and `exit 42` leaves
+#      `Result=exit-code ExecMainStatus=42 ActiveState=failed` rather than disappearing.
+- name: "Settle the defaults for: {{ job_name }}"
+  ansible.builtin.set_fact:
+    job_unit: "a11y-job-{{ job_name }}"
+    # Exit codes other than 0 that mean success, matching `run-interactive.yml`'s `interactive_ok`.
+    job_ok: "{{ [0] + (job_success_codes | default([])) }}"
+
+- name: "What is this unit doing right now: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [systemctl, show, "-p", SubState, "--value", "{{ job_unit }}"]
+  register: job_before
+  changed_when: false
+  # An unknown unit is not an error here: it is the normal case, and `show` answers `dead` for one.
+  failed_when: false
+
+# Mutual exclusion, and the two cases must not be confused. A RUNNING job of this name is somebody else's
+# work — including a previous invocation of this file from another shell — and killing it to make room
+# would destroy hours. A unit left `failed` or `exited` from last time is just an unreaped handle, and
+# refusing on that would mean every second run needed manual cleanup.
+- name: "Refuse to start a second {{ job_name }} while one is running"
+  ansible.builtin.assert:
+    that: job_before.stdout | trim != "running"
+    fail_msg: >-
+      {{ job_unit }} is already running on {{ inventory_hostname }}. This is the lock working, not a fault.
+      Watch it with `journalctl -u {{ job_unit }} -f`, or stop it deliberately with
+      `systemctl stop {{ job_unit }}`.
+
+- name: "Clear the handle left by a previous run: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [systemctl, reset-failed, "{{ job_unit }}"]
+  changed_when: false
+  failed_when: false
+
+- name: "Release the exited unit so the name is free: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [systemctl, stop, "{{ job_unit }}"]
+  changed_when: false
+  failed_when: false
+
+# The env is a FIXED dict built here, and nothing from the caller reaches it. `A11Y_PYTHON` is read at four
+# sites in this repo and becomes the executed interpreter, so an env passthrough would be arbitrary code
+# execution with a whitelisted job name and an empty argv. `PYTHONUNBUFFERED` is not cosmetic: without it a
+# six-minute training run shows nothing in `journalctl` but its `Started` line until it exits, and live
+# progress is the entire reason for having logs.
+- name: "Start it: {{ job_name }}"
+  ansible.builtin.command:
+    argv: >-
+      {{ [
+        "systemd-run", "--unit=" ~ job_unit, "--remain-after-exit",
+        "--working-directory=" ~ lab_repo_path,
+        "--property=RuntimeMaxSec=" ~ (job_timeout | int),
+        "--property=ReadWritePaths=" ~ lab_runs_path,
+        "--setenv=PYTHONUNBUFFERED=1",
+        "--"
+      ] + job_argv }}
+  changed_when: true
+
+- name: "Wait for it to finish: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [systemctl, show, "-p", SubState, "--value", "{{ job_unit }}"]
+  register: job_state
+  changed_when: false
+  # Polled rather than slept, and the budget is generous on purpose — the same reasoning as
+  # `run-interactive.yml`: a deadline that expires early turns "still working" into "failed".
+  retries: "{{ ((job_timeout | int) / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  until: job_state.stdout is defined and job_state.stdout | trim != "running"
+
+# Read BACK, and only now — see note 2 in the header. These two answer different questions: `Result` says
+# how it ended (`success`, `exit-code`, `timeout`, `signal`, `oom-kill`) and `ExecMainStatus` says with what
+# code. A timeout reports `Result=timeout` with a signal status, which is why the assert below names both.
+- name: "Collect its result: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [systemctl, show, "-p", Result, "-p", ExecMainStatus, "--value", "{{ job_unit }}"]
+  register: job_result
+  changed_when: false
+
+- name: "Collect its output: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [journalctl, "-u", "{{ job_unit }}", "--no-pager", "-n", "200"]
+  register: job_log
+  changed_when: false
+
+- name: "What it said: {{ job_name }}"
+  ansible.builtin.debug:
+    var: job_log.stdout_lines
+
+- name: "Read the outcome it recorded: {{ job_name }}"
+  ansible.builtin.set_fact:
+    job_outcome: "{{ job_result.stdout_lines[0] | default('unknown') | trim }}"
+    job_exit: "{{ job_result.stdout_lines[1] | default('-1') | trim | int }}"
+
+# Released whether it passed or failed, matching `run-interactive.yml`'s reasoning about a one-shot task
+# left registered. Here the cost of not releasing is smaller but real: the name stays taken, so the next
+# run of this job has to reap it first.
+- name: "Release the unit: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [systemctl, stop, "{{ job_unit }}"]
+  changed_when: false
+  failed_when: false
+
+- name: "Fail if it did not succeed: {{ job_name }}"
+  ansible.builtin.assert:
+    that: (job_exit | int) in (job_ok | map('int') | list)
+    fail_msg: >-
+      {{ job_name }} ended {{ job_outcome }} with exit {{ job_exit }} on {{ inventory_hostname }}
+      (expected one of {{ job_ok }}). Its output is above, and all of it is still on the box:
+      `journalctl -u {{ job_unit }}`. A `timeout` outcome means it hit RuntimeMaxSec={{ job_timeout }}s,
+      which is a budget to raise rather than a failure to debug.
+    success_msg: "{{ job_name }} completed ({{ job_outcome }}, exit {{ job_exit }})"

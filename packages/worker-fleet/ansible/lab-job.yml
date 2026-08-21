@@ -1,0 +1,111 @@
+---
+# Run a long lab job by NAME, and wait for its real exit code.
+#
+#     ansible-playbook lab-job.yml -e job=train
+#     ansible-playbook lab-job.yml -e job=sweep -e model=runs/model-candidate
+#     ansible-playbook lab-job.yml -e job=capture-real-pages -e role=training -e shard=0/4 -e worker=a11y-worker-2
+#
+# ## Named jobs, never a command
+#
+# The catalogue below is the whole interface, and that is the security design rather than a convenience.
+# This plays against the box holding the capture corpus (not reproducible — `browserVersion` is a capture
+# cache key), the `a11y-corpus` GitHub deploy key, the release weights, and the ability to wake twelve
+# Windows machines. `ansible/README.md` rejected an `/admin/update` route on a WORKER because "a mutating
+# route there is unauthenticated remote code execution on twelve boxes"; a route that runs training jobs is
+# strictly worse, since executing code is its entire purpose. Ansible is agentless, so there is no route to
+# secure — but a free-form `command` parameter would put one back.
+#
+# So: no `command` variable exists. `argv` comes from this file, and the only things a caller supplies are
+# CHOICES, checked below.
+#
+# ## The parameters are enums and names, not paths and URLs
+#
+# `worker=a11y-worker-2` resolves through the inventory to an address. That is not decoration: it makes an
+# arbitrary URL INEXPRESSIBLE rather than rejected, which is the same shape as `isValidCaptureId` on the
+# worker ("path traversal is the reason this check exists"). `role` and `shard` are checked the same way,
+# and note `--shard` is validated a second time by `shard.mjs` at the far end — deliberately, because a
+# malformed shard silently doing the whole list means four runs each fetching all 77 pages from other
+# people's sites.
+#
+# ## Deliberately NOT here
+#
+# No env passthrough. `A11Y_PYTHON` is read at four sites in this repo and becomes the executed
+# interpreter, so a caller-supplied environment is arbitrary code execution with a whitelisted job name and
+# an empty argv. `run-job.yml` builds a fixed env and nothing reaches it from here.
+- name: Run a lab job
+  hosts: a11y_lab
+  gather_facts: false
+
+  vars:
+    # Every job this playbook can run. `timeout` becomes `RuntimeMaxSec`, so it is a real ceiling rather
+    # than advice — set it above the slowest honest run, because a deadline that expires early turns "still
+    # working" into "failed".
+    lab_jobs:
+      train:
+        # Trains to a SCRATCH directory on purpose. The trainer now refuses to overwrite a release-eligible
+        # model without `--allow-overwrite`, and promoting is a separate, deliberate step — one was already
+        # lost to a `git checkout` on the assumption that a tracked file is always recoverable.
+        argv: ["{{ lab_python }}", "packages/lab/scripts/train-screenreader-model.py",
+               "--data", "runs/screenreader-dataset/with-realism.jsonl",
+               "--output", "runs/model-candidate"]
+        timeout: 3600
+      build-realism:
+        argv: ["/usr/bin/node", "packages/lab/scripts/build-realism-tier.mjs",
+               "--out=runs/screenreader-dataset/with-realism.jsonl"]
+        timeout: 900
+      sweep:
+        argv: ["/usr/bin/node", "packages/lab/scripts/calibrate-abstention.mjs"]
+        timeout: 1800
+      acceptance:
+        argv: ["{{ lab_python }}", "packages/lab/scripts/evaluate-screenreader-acceptance.py",
+               "--data", "runs/screenreader-acceptance/repeat-1.jsonl",
+               "--data", "runs/screenreader-acceptance/repeat-2.jsonl",
+               # The disjointness proof must be against what the model was actually TRAINED on. Defaulting
+               # to the base dataset means it never examines the realism tier.
+               "--training-data", "runs/screenreader-dataset/with-realism.jsonl",
+               "--model", "runs/model-candidate",
+               "--training-report", "runs/model-candidate/training-report.json",
+               "--out", "runs/model-candidate/acceptance-report.json"]
+        timeout: 1800
+      capture-real-pages:
+        argv: ["/usr/bin/node", "packages/lab/src/training/capture-real-pages.mjs",
+               "--role={{ role | default('training') }}",
+               "--shard={{ shard | default('0/1') }}",
+               "--worker=http://{{ hostvars[worker | default('')].ansible_host | default('') }}:8765"]
+        # 77 real pages on one worker measured ~6.5 h; a quarter of them ~1.6 h. Generous either way.
+        timeout: 28800
+      check-signals:
+        argv: ["/usr/bin/node", "packages/lab/src/training/check-signals.mjs"]
+        timeout: 900
+
+  tasks:
+    - name: A job must be named, and it must be one we have
+      ansible.builtin.assert:
+        that:
+          - job is defined
+          - job in lab_jobs
+        fail_msg: >-
+          Pass -e job=<name>, one of: {{ lab_jobs.keys() | list | join(', ') }}.
+          There is deliberately no way to pass a command: see this playbook's header.
+
+    # Only for the job that needs it, and only from the inventory. An address cannot be supplied directly,
+    # so `--worker=http://:8765` — which cost 29 minutes — is not a value this interface can express.
+    - name: A capture job names a worker from the inventory
+      when: job == 'capture-real-pages'
+      ansible.builtin.assert:
+        that:
+          - worker is defined
+          - worker in groups['a11y_workers']
+          - role | default('training') in ['training', 'calibration']
+          - shard | default('0/1') is match('^[0-9]+/[0-9]+$')
+        fail_msg: >-
+          capture-real-pages needs -e worker=<name from a11y_workers>
+          ({{ groups['a11y_workers'] | join(', ') }}), optionally -e role=training|calibration and
+          -e shard=i/n. The worker is named rather than addressed so a malformed URL cannot be expressed.
+
+    - name: "Run {{ job }}"
+      ansible.builtin.include_tasks: tasks/run-job.yml
+      vars:
+        job_name: "{{ job }}"
+        job_argv: "{{ lab_jobs[job].argv }}"
+        job_timeout: "{{ lab_jobs[job].timeout }}"

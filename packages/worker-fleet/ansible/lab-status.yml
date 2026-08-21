@@ -1,0 +1,91 @@
+---
+# What is the lab doing, and did the last job finish?
+#
+#     ansible-playbook lab-status.yml
+#     ansible-playbook lab-status.yml -e job=train      # one job, with its recent output
+#
+# ## Two independent sources, deliberately
+#
+# `systemctl` is systemd's view of the process. The progress file is the job's own self-report. They can
+# disagree, and the disagreement is the diagnosis:
+#
+#   - active + progress advancing      → working
+#   - active + progress STALE          → wedged; alive but not getting anywhere
+#   - inactive + progress incomplete   → died mid-run, and the last phase says where
+#   - inactive + progress complete     → finished
+#
+# Before this existed those states were one state — "no answer" — and telling them apart took six read-only
+# commands, one of which searched the wrong directory for logs. `ansible/README.md` states the rule this
+# implements: "Verification never shares a failure mode with the action." A status check that asked only
+# systemd would report a wedged job as healthy, and one that asked only the file would report a crashed job
+# as merely quiet.
+#
+# ## Read-only
+#
+# Nothing here mutates. That is what makes it safe to run at any time, including while a job is mid-flight,
+# and it is why there is no `--force`, no cleanup, and no restart: this answers a question, and acting on
+# the answer is `lab-job.yml`'s business.
+- name: What the lab is doing
+  hosts: a11y_lab
+  gather_facts: false
+
+  tasks:
+    # `list-units --all` rather than a name we guessed, so a job nobody remembered starting still shows up.
+    # `--plain --no-legend` because the decorated output has a header and a footer to strip.
+    - name: Which a11y jobs exist at all
+      ansible.builtin.command:
+        argv: [systemctl, list-units, "--all", "--plain", "--no-legend", "a11y-job-*"]
+      register: units
+      changed_when: false
+
+    - name: Every unit, with its state
+      ansible.builtin.debug:
+        msg: "{{ units.stdout_lines | default(['(no a11y-job-* units — nothing has run since boot)']) }}"
+
+    # SubState first and separately, for the reason `run-job.yml` documents: with `--remain-after-exit` an
+    # exited unit reads `active` forever, so `is-active` cannot tell finished from running, and `Result`
+    # is populated while a job is still going.
+    - name: "Detail for {{ job | default('(no job named)') }}"
+      when: job is defined
+      ansible.builtin.command:
+        argv: [systemctl, show, "-p", SubState, "-p", ActiveState, "-p", Result, "-p", ExecMainStatus,
+               "-p", ActiveEnterTimestamp, "a11y-job-{{ job }}"]
+      register: detail
+      changed_when: false
+      failed_when: false
+
+    - name: "systemd's view of {{ job | default('') }}"
+      when: job is defined
+      ansible.builtin.debug:
+        msg: "{{ detail.stdout_lines | default(['(no such unit)']) }}"
+
+    - name: "Its recent output"
+      when: job is defined
+      ansible.builtin.command:
+        argv: [journalctl, "-u", "a11y-job-{{ job }}", "--no-pager", "-n", "40"]
+      register: recent
+      changed_when: false
+      failed_when: false
+
+    - name: "journal for {{ job | default('') }}"
+      when: job is defined
+      ansible.builtin.debug:
+        msg: "{{ recent.stdout_lines | default(['(no journal — has it ever run?)']) }}"
+
+    # The job's OWN report, which is the half systemd cannot give. `training:status` already knows how to
+    # read this and reports `eta_minutes` and a `next_command`; this surfaces it without needing a shell on
+    # the box. Exit codes are its contract — 0 clean, 1 finished with failures, 2 no run, 3 wedged — so a
+    # non-zero here is information rather than a fault, hence `failed_when: false`.
+    - name: The run's own progress report
+      ansible.builtin.command:
+        argv: [npm, run, "--silent", "training:status", "--", "--json"]
+        chdir: "{{ lab_repo_path }}"
+      register: progress
+      changed_when: false
+      failed_when: false
+
+    - name: What the run says about itself
+      ansible.builtin.debug:
+        msg: >-
+          {{ (progress.stdout | from_json) if (progress.stdout | default('') | trim | length > 0
+             and progress.rc != 2) else '(no run in flight — training:status rc=' ~ progress.rc ~ ')' }}

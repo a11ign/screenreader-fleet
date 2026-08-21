@@ -148,15 +148,38 @@ else
 #
 # pipx rather than apt: Windows-over-SSH support is ansible-core 2.18+, and Debian ships older. That
 # version gap is not cosmetic -- on an older core every Windows task fails at connection time.
+#
+# The REQUIREMENT is enforced here rather than documented here. It used to be neither: this block installed
+# `ansible-core` with no version constraint, and the "already present" branch accepted whatever was on the
+# box -- so the one case the comment above warns about, an older core, passed the check silently and failed
+# later at connection time, which reads like a broken worker rather than a stale controller.
+#
+# `collections/ansible_collections/a11y/worker/meta/runtime.yml` states the same floor as
+# `requires_ansible`, so Ansible itself refuses the collection on an older core. This makes the bootstrap
+# agree with it instead of leaving the two to drift.
+ANSIBLE_MIN="2.18"
+
+ansible_core_version() { ansible --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1; }
+# Sort-based compare, so 2.9 does not read as newer than 2.18 the way a string compare would. That is the
+# specific wrong answer this guard has to avoid, because 2.9 is exactly what Debian ships.
+version_at_least() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+
 if command -v ansible-playbook >/dev/null; then
-  ok "ansible already present ($(ansible --version | head -1))"
+  found="$(ansible_core_version)"
+  if [ -n "$found" ] && version_at_least "$found" "$ANSIBLE_MIN"; then
+    ok "ansible already present (core $found, >= $ANSIBLE_MIN)"
+  else
+    warn "ansible core ${found:-unknown} is older than $ANSIBLE_MIN — every Windows task will fail at"
+    warn "connection time, which looks like a broken worker rather than a stale controller. Upgrade with:"
+    warn "  pipx upgrade ansible-core   ||   pipx install --force 'ansible-core>=$ANSIBLE_MIN'"
+  fi
 else
   $SUDO apt-get install -y -qq pipx >/dev/null 2>&1 || $SUDO apt-get install -y -qq python3-pip >/dev/null
   if command -v pipx >/dev/null; then
-    pipx install ansible-core >/dev/null
+    pipx install "ansible-core>=$ANSIBLE_MIN" >/dev/null
     pipx ensurepath >/dev/null 2>&1 || true
   else
-    $SUDO pip3 install --break-system-packages -q ansible-core
+    $SUDO pip3 install --break-system-packages -q "ansible-core>=$ANSIBLE_MIN"
   fi
   export PATH="$HOME/.local/bin:$PATH"
   ok "ansible installed ($(ansible --version 2>/dev/null | head -1))"

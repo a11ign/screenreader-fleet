@@ -149,6 +149,69 @@ Three prerequisites, and only two are automated:
    `a11y_power_timeouts` turns hibernation off, which disables Fast Startup as a side effect. That is a
    real dependency between two modules, not a coincidence — do not "tidy" the hibernation setting.
 
+## Driving the LAB, not just the workers
+
+The inventory has a second group. `a11y_lab` is CT 121 on the Proxmox host — the container holding the
+capture corpus, the venv, the trained scorer and the `a11y-corpus` deploy key. It is here because it
+EXISTS, not because it captures: `wake.yml`, `sleep.yml`, `deploy.yml` and `provision*.yml` all target
+`a11y_workers` and are unaffected.
+
+```bash
+npm run lab:job -- -e job=train                 # named jobs only; see lab-job.yml for the catalogue
+npm run lab:job -- -e job=capture-real-pages -e worker=a11y-worker-2 -e role=training -e shard=0/4
+npm run lab:status                              # every a11y-job-* unit and its state
+npm run lab:status -- -e job=train              # one job, systemd's view + its journal + its own progress file
+```
+
+**What this replaces, and why it was worth replacing.** Long lab work was started by typing
+`ssh root@REDACTED-INTERNAL-ADDRESS 'pct exec 121 -- bash -lc "..."'`, which appears NOWHERE in the source tree — so the
+way this project's most expensive operations were launched was untested, unversioned and unreviewable. Two
+days of it cost: a heredoc mangled through two hops of shell quoting; a bash array that evaporated crossing
+`nohup bash -c`, sending four capture shards at `--worker=http://:8765` for 29 minutes while every worker
+sat idle; four `pgrep -f X` waiters that matched their own command lines and waited forever; and a job
+reported "still running" 28 minutes after it had finished.
+
+`ansible.builtin.command` with `argv:` never invokes a shell, so the quoting class is gone by construction.
+`systemd-run` supplies the rest — a durable handle, a real exit code, `journalctl` with rotation, a
+`RuntimeMaxSec` ceiling, and mutual exclusion by unit name that holds against the ssh path too, which an
+in-process flag could not.
+
+**Why not an HTTP job API on the lab.** It was designed and rejected, for the reason the section below
+rejects `/admin/update` on a worker — and with more force, because a route that starts training runs
+executes code by design. The conclusion there generalises: *"Ansible subsumes the HTTP route; the reverse is
+not true."* Ansible is agentless, so nothing listens on the box that holds the corpus. ADR 0012's "there is
+no service between them, deliberately" is satisfied rather than argued around.
+
+**Named jobs, not commands.** `lab-job.yml` holds the catalogue and there is deliberately no `command`
+parameter. Callers pass CHOICES: a job name, and for a capture, a worker NAME resolved through the
+inventory — which makes a malformed address inexpressible rather than merely rejected, the same shape as
+`isValidCaptureId` on the worker. The environment is fixed by `run-job.yml`; nothing from the caller reaches
+it, because `A11Y_PYTHON` is read at four sites in this repo and becomes the executed interpreter.
+
+**`tasks/run-job.yml` is `tasks/run-interactive.yml` for Linux**, and deliberately the same shape: fire it,
+poll for it to stop, read the result BACK, print what it said, release the handle whether it passed or
+failed, assert on the code. Three details were measured on the container and each would otherwise be a bug,
+so `lab-job.test.ts` pins them:
+
+- **Poll `SubState`, never `systemctl is-active`.** Under `--remain-after-exit` an exited unit stays
+  `active (exited)` for good, so `is-active` returns true forever — a waiter written that way hangs
+  indefinitely reporting "still running" for a finished job. That is the original incident reproduced
+  inside its own fix, and it happened here before the test existed.
+- **`Result` and `ExecMainStatus` are populated WHILE the job runs.** Observed `Result=success
+  ExecMainStatus=0` on a job seven minutes from finishing, so they mean nothing until `SubState` leaves
+  `running`.
+- **`--remain-after-exit`, not `--collect`.** A collected unit is unloaded on exit and takes its exit code
+  with it. Verified both ways: `exit 42` leaves `Result=exit-code ExecMainStatus=42`, rather than vanishing.
+
+**The lab must never become a capture worker.** `fleet-env.mjs` read every `ansible_host:` in this file as a
+worker at :8765 until 2026-08-21, so adding the lab would have put `http://REDACTED-INTERNAL-ADDRESS:8765` into
+`A11Y_WORKERS` and a run would have dispatched cases to a box with no NVDA. The reader is group-aware now,
+`inventoryHosts` shares that one implementation rather than carrying a second, and `enrol` splices new
+workers into the `a11y_workers` block rather than appending at the end of the file — which would otherwise
+land a freshly discovered worker inside `a11y_lab`, where it would be correctly ignored. Provisioned,
+updated, never dispatched to. `fleet-discover.test.ts` reads an enrolment back through the reader a run
+actually uses, because being in the file is not the same as being a worker.
+
 ## Why SSH and not WinRM
 
 WinRM against the `witness` account needs `LimitBlankPasswordUse=0`, and that setting is exactly what
