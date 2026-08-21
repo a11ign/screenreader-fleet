@@ -124,16 +124,23 @@
     if ($p.ExitCode -ne 0) { throw "rename-chrome-exe exited $($p.ExitCode)" }
   changed_when: true
 
-- name: Stop and disable the updater's scheduled tasks
-  # The policy cannot do this on a non-domain-joined box, so it is done directly. Found `Ready` on every
-  # guest -- provisioning had never touched them, because the policy was believed to be the mechanism.
+- name: Stop and disable EVERY Edge-updater scheduled task
+  # BY PREFIX, NOT BY NAME. The first version named the two tasks that were known -- Core and UA -- and a
+  # freshly installed guest turned out to carry a third, `MicrosoftEdgeUpdateBrowserReplacementTask`, sitting
+  # `Ready` while the other two were correctly disabled. A task called "browser replacement" is precisely the
+  # thing this concern exists to stop, and an enumerated list could not see it.
+  #
+  # Same shape as `edgePolicy` reporting two policy values, and as the probe flags that had to be forwarded
+  # by prefix rather than by name. When the set can grow underneath you, match the set.
   become: true
-  community.windows.win_scheduled_task:
-    name: "{{ item }}"
-    enabled: false
-    state: present
-  loop: "{{ worker_edge_updater_tasks }}"
-  failed_when: false   # a task absent on a given image is not a fault; the read-back below is the judge
+  ansible.windows.win_shell: |
+    $tasks = Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdate*' -ErrorAction SilentlyContinue
+    if (-not $tasks) { "none found"; exit 0 }
+    foreach ($t in $tasks) {
+      if ($t.State -ne 'Disabled') { Disable-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath | Out-Null }
+      "$($t.TaskName) -> $((Get-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath).State)"
+    }
+  changed_when: true
 
 - name: Stop and disable the updater's services
   become: true
@@ -160,9 +167,11 @@
       $wrong = @()
       $have = if (Test-Path -LiteralPath $Exe) { (Get-Item -LiteralPath $Exe).VersionInfo.ProductVersion } else { "(absent)" }
       if ($have -ne $Want) { $wrong += "Edge is $have, expected $Want" }
-      foreach ($t in $Tasks) {
-        $task = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
-        if ($task -and $task.State -ne 'Disabled') { $wrong += "scheduled task $t is $($task.State), expected Disabled" }
+      # Enumerated, not looked up by name -- and it must be, because the fault this catches is a task nobody
+      # listed. The old form asked after two known names and would have passed vacuously on a guest carrying a
+      # third: `$task -and ...` reads an ABSENT task as compliant.
+      foreach ($task in @(Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdate*' -ErrorAction SilentlyContinue)) {
+        if ($task.State -ne 'Disabled') { $wrong += "scheduled task $($task.TaskName) is $($task.State), expected Disabled" }
       }
       foreach ($s in $Services) {
         $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
