@@ -34,9 +34,20 @@ for (const [name, path] of Object.entries(scripts)) {
 // fails in a confusing way — the caller sees EACCES, not "we forgot the mode bit".
 assert.ok(statSync(scripts.workerCtl).mode & 0o111, "worker-ctl.sh shipped without an executable bit");
 
-// The capacity read is real, and macOS-specific by design: the fleet drives UTM. It must never be `os.freemem()`
-// — that reported 402 MB on a host with ~12 GB to give, because macOS counts compressed and inactive pages as
-// used, and a cap built on it would refuse to start any worker at all.
+// LAST, and only on macOS. The capacity read is real and macOS-specific by design: the fleet drives UTM, and
+// it must never be `os.freemem()` — that reported 402 MB on a host with ~12 GB to give, because macOS counts
+// compressed and inactive pages as used, and a cap built on it would refuse to start any worker at all.
+//
+// Reported as a platform limit rather than asserted, matching `nvda-worker`'s smoke test, which declines the
+// same way when there is no screen reader. Asserting here failed on the Linux control plane with a bare
+// `AssertionError` — and because `gate:isolation` is the FIRST leg of `release:gate`, that stopped the chain
+// and every model-quality gate behind it silently never ran. A check that cannot run somewhere should say so.
+if (process.platform !== "darwin") {
+  console.error(`cannot verify the host-capacity read on ${process.platform}: it is macOS-specific by design, `
+    + "because the fleet drives UTM. Every tarball and resolution check above passed. Run the gate on macOS.");
+  process.exit(3);
+}
+
 const availableMb = availableHostMemoryMb();
 assert.equal(typeof availableMb, "number");
 assert.ok(availableMb > 0, `expected a positive memory reading, got ${availableMb}`);
