@@ -66,6 +66,16 @@
       sweep:
         argv: ["/usr/bin/node", "packages/lab/scripts/calibrate-abstention.mjs"]
         timeout: 1800
+      # WHICH records does a head fire on wrongly, and what do they have in common? A report says "36 false
+      # positives" and cannot distinguish "the head lost a veto that was doing real work" from "something
+      # specific changed about one group of pages" — opposite fixes, and the second is invisible to every
+      # summary statistic.
+      false-positives:
+        argv: ["{{ lab_python }}", "packages/lab/scripts/diagnose-false-positives.py",
+               "--model", "runs/model-{{ out | default('candidate') }}",
+               "--data", "runs/screenreader-dataset/with-realism.jsonl",
+               "--out", "runs/model-{{ out | default('candidate') }}/false-positives.json"]
+        timeout: 1800
       # The veto audit, against a NAMED candidate rather than the shipped weights. `release:gate` runs the
       # same audit but always on what is shipped, which cannot answer "did this retrain help?" — the
       # question a candidate exists to settle. Reads files already on disk; no worker, seconds.
@@ -87,7 +97,21 @@
                # to the new candidate while describing the old one.
                "--model", "runs/model-{{ out | default('candidate') }}",
                "--training-report", "runs/model-{{ out | default('candidate') }}/training-report.json",
-               "--out", "runs/model-{{ out | default('candidate') }}/acceptance-report.json"]
+               "--out", "runs/model-{{ out | default('candidate') }}/acceptance-report.json",
+               # WITHOUT THIS THE JOB CANNOT RUN, and the deadlock is circular: the trainer marks a fresh
+               # candidate `releaseEligible: false` with the blocker "held-out acceptance has not been
+               # evaluated for these weights", and the evaluator refuses any model that is not
+               # releaseEligible. So the gate that would qualify a candidate declines to run on an
+               # unqualified one, and no candidate can ever pass. Measured 2026-08-23 on the first
+               # candidate anyone tried to evaluate through this interface; the shipped model predates it
+               # and was made by hand.
+               #
+               # The flag's help calls it "only for diagnostics", and that naming is what hid this: running
+               # acceptance on a candidate is the NORMAL path, not a diagnostic. What the flag actually
+               # guards is reporting on an ineligible model AS IF it were shippable — and this job's whole
+               # purpose is to produce the evidence that decides eligibility, which `promote:model` then
+               # reads back before anything ships.
+               "--allow-ineligible"]
         timeout: 1800
       capture-real-pages:
         argv: ["/usr/bin/node", "packages/lab/src/training/capture-real-pages.mjs",
@@ -202,7 +226,7 @@
     # directory the trainer creates and writes weights into, so an unvalidated value here would be an
     # arbitrary write on the box holding the corpus and the release keys.
     - name: A train job names its scratch output from a fixed list
-      when: job in ['train', 'acceptance', 'shortcuts']
+      when: job in ['train', 'acceptance', 'shortcuts', 'false-positives']
       ansible.builtin.assert:
         that: out | default('candidate') in ['candidate', 'multidefect', 'scratch']
         fail_msg: >-
