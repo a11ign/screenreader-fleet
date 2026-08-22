@@ -1,0 +1,113 @@
+---
+# Stop a lab job you started, deliberately.
+#
+#     ansible-playbook lab-stop.yml -e job=capture
+#
+# ## Why this exists
+#
+# `run-job.yml` refuses to start a second job of a name while one is running — the unit name is the lock,
+# and its fail message told you to `systemctl stop <unit>` over ssh. So the one operation that ENDS the most
+# expensive thing this project runs was the only one left outside the interface, which is exactly the shape
+# ADR 0013 was written to remove: "the way this project's most expensive operations are actually launched is
+# untested, unversioned and unreviewable."
+#
+# It came up the first time somebody needed it. A corpus change landed mid-recapture, making the run in
+# flight stale on arrival; continuing would have burned four hours producing captures nobody could use.
+# That is a routine decision, and it should not require remembering a unit name and an ssh hop.
+#
+# ## Deliberate, and it says what it destroyed
+#
+# Stopping a capture throws away work — 64 captures, in the case above. So this reports the job's own
+# progress BEFORE stopping, not after: afterwards the file is whatever the process managed to flush, and
+# "how far did it get" is the question you are about to want. A stop that prints nothing is
+# indistinguishable from a stop that hit the wrong unit.
+#
+# ## Not a fault handler
+#
+# For a job that has FAILED or exited, `run-job.yml` already reaps the handle itself (`reset-failed`, then
+# `stop`) on the next start, so nothing here is needed for cleanup. This is only for ending a job that is
+# genuinely running.
+- name: Stop a running lab job
+  hosts: a11y_lab
+  gather_facts: false
+
+  vars:
+    lab_stop_unit: "a11y-job-{{ job | default('') }}"
+    # `lab_repo_path` comes from group_vars/a11y_lab.yml, exactly as it does for `lab-status.yml`. Not
+    # redefined here: a second definition is a second thing to keep in step, and this playbook runs `npm`
+    # in that directory.
+
+  tasks:
+    # The same containment `lab-job.yml` applies: a name from a fixed list, never a command and never a
+    # unit spelled out by the caller. `systemctl stop` takes a pattern, so an unvalidated name here could
+    # stop every a11y unit at once.
+    - name: A job must be named, and it must be one the catalogue has
+      ansible.builtin.assert:
+        that:
+          - job is defined
+          - job is match('^[a-z][a-z0-9-]{0,40}$')
+        fail_msg: >-
+          Pass -e job=<name>. Names come from lab-job.yml's catalogue; this playbook takes a NAME, never a
+          unit or a command, because `systemctl stop` accepts patterns.
+
+    - name: What is this unit doing right now
+      ansible.builtin.command:
+        argv: [systemctl, show, "-p", SubState, "--value", "{{ lab_stop_unit }}"]
+      register: before
+      changed_when: false
+      failed_when: false
+
+    # Refusing here rather than stopping anyway. "It was already finished" and "I stopped your job" are
+    # different outcomes, and a stop command that reports success for both teaches you to ignore it.
+    - name: Refuse to stop what is not running, and say what it is instead
+      ansible.builtin.assert:
+        that: before.stdout | trim == "running"
+        fail_msg: >-
+          {{ lab_stop_unit }} is '{{ before.stdout | trim | default("absent", true) }}', not running, so
+          there is nothing to stop. A failed or exited unit is reaped by the next `lab:job` start.
+
+    # BEFORE the stop. Afterwards this reports whatever the process flushed, and how far it got is the
+    # thing you are about to want — especially when deciding whether the discarded work was worth keeping.
+    #
+    # Through `training:status`, not by slurping a file path. The first version of this read
+    # `capture-progress.json` directly and printed an EMPTY message, which reads as "nothing to report" and
+    # is exactly the silence this task exists to break. `training:status` owns where that file lives and
+    # already computes `captured`, `total` and `eta_minutes`; duplicating the path here was a second copy
+    # that was wrong on its first run.
+    - name: How far it had got, read before anything is stopped
+      ansible.builtin.command:
+        argv: [npm, run, "--silent", "training:status", "--", "--json"]
+        chdir: "{{ lab_repo_path }}"
+      register: progress
+      changed_when: false
+      failed_when: false
+
+    - name: What is being discarded
+      ansible.builtin.debug:
+        msg: >-
+          {{ (progress.stdout | from_json) if (progress.stdout | default('') | trim | length > 0
+             and progress.rc != 2)
+             else '(this job writes no progress file — training:status rc=' ~ progress.rc ~ ')' }}
+
+    - name: "Stop it: {{ job }}"
+      ansible.builtin.command:
+        argv: [systemctl, stop, "{{ lab_stop_unit }}"]
+      changed_when: true
+
+    # Read back, because `systemctl stop` returning cleanly only means the request was accepted — the same
+    # rule `run-interactive.yml` states for `Start-ScheduledTask`, and the reason this project polls
+    # SubState everywhere rather than trusting a command's exit code.
+    - name: Confirm it actually stopped
+      ansible.builtin.command:
+        argv: [systemctl, show, "-p", SubState, "--value", "{{ lab_stop_unit }}"]
+      register: after
+      changed_when: false
+      failed_when: false
+
+    - name: It must no longer be running
+      ansible.builtin.assert:
+        that: after.stdout | trim != "running"
+        fail_msg: >-
+          {{ lab_stop_unit }} still reports SubState=running after `systemctl stop`. Do not assume it
+          stopped: check `journalctl -u {{ lab_stop_unit }}` before starting anything with this name.
+        success_msg: "{{ lab_stop_unit }} stopped (SubState={{ after.stdout | trim }})"
