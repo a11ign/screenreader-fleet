@@ -84,8 +84,20 @@
       # Pooled because that is the only way the hardware gets used: the runner already dispatches one case
       # per worker from a shared queue, evicts a worker that fails three in a row and hands its cases back.
       # 2,124 captures at the ~30 s each these boxes measure is ~17.7 h on one worker and ~4.4 h on four.
+      # GENERATES THE PAGES FIRST, and that is not a convenience.
+      #
+      # This entry ran `capture-screenreader-dataset.mjs` alone, so it captured whatever pages happened to
+      # be on the lab's disk. Measured 2026-08-22: a change that made 808 of 1,061 pairs stale locally was
+      # dispatched here, the job pulled the new commit, captured the OLD pages, hit cache on every case and
+      # reported success in 13 seconds. A full recapture reported as done, having done nothing — the
+      # silent-no-op shape this repo keeps paying for, one layer out from the code that was fixed today.
+      #
+      # `training:capture` is not enough on its own for the same reason `worker:deploy` is not "copy the
+      # files": the artifact under test has to be REBUILT from the checkout the job pulled, or the job is
+      # testing the previous commit. Generation is idempotent — same code, same bytes — so this costs
+      # nothing on a run where the pages were already current, including a `--resume`.
       capture:
-        argv: ["/usr/bin/node", "packages/lab/src/training/capture-screenreader-dataset.mjs"]
+        argv: ["/usr/bin/npm", "run", "training:capture:fresh"]
         setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
         # Above the ~4.4 h a full recapture measures, because a ceiling that expires early turns "still
         # working" into "failed" — and this is the most expensive job in the catalogue to lose.
