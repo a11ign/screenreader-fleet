@@ -124,15 +124,19 @@
       rules-gate:
         argv: ["{{ lab_tsx }}", "packages/lab/scripts/score-rules.ts", "--gate"]
         timeout: 900
-      # Single worker ON PURPOSE, unlike `capture`. This asks whether the evidence MOVED, so a second guest
-      # is a second variable: a CHANGED verdict on a split fleet cannot be told apart from "a different box
-      # took that case". Check `fleet:status` is consistent first — and if it is not, the worker you name
-      # here is the one whose answer you are getting.
+      # POOLED, and this entry used to say the opposite — "single worker ON PURPOSE, because a second guest
+      # is a second variable". That argument does not survive inspection: the BASELINE corpus was itself
+      # captured across all four workers, so using one fresh worker does not remove the confound, it only
+      # hides which side of the comparison it sits on. What actually defends the diff is fleet consistency,
+      # which `fleet:status` proves — and which was itself inert until the browserVersion memo was fixed.
+      # Check it is consistent before trusting a CHANGED verdict.
+      # `argv` is a LIST, so the addresses are spliced in as
+      # separate elements — joining them with a space would hand the script one argument containing four
+      # URLs, which is the quoting class `argv:` exists to remove, reintroduced by hand.
       evidence-check:
-        argv: ["{{ lab_tsx }}", "packages/lab/scripts/evidence-check.mjs",
-               "http://{{ hostvars[worker | default('')].ansible_host | default('') }}:8765",
-               "--sample={{ sample | default(24) | int }}"]
-        # 48 captures measured 24 min on one bare-metal worker; generous for a larger sample.
+        argv: "{{ [lab_tsx, 'packages/lab/scripts/evidence-check.mjs']
+                  + (lab_fleet_workers | split(','))
+                  + ['--sample=' ~ (sample | default(24) | int)] }}"
         timeout: 7200
 
   tasks:
@@ -191,14 +195,11 @@
       when: job == 'evidence-check'
       ansible.builtin.assert:
         that:
-          - worker is defined
-          - worker in groups['a11y_workers']
           - (sample | default(24)) | int > 0
           - (sample | default(24)) | int <= 200
         fail_msg: >-
-          evidence-check needs -e worker=<name from a11y_workers>
-          ({{ groups['a11y_workers'] | join(', ') }}) and optionally -e sample=<1..200>. One worker, on
-          purpose: this asks whether the evidence moved, and a second guest is a second variable.
+          evidence-check takes optionally -e sample=<1..200>. It no longer names a worker: it runs across the
+          whole fleet from the inventory, which is asserted to be an address list before it is used.
 
     # BUILT HERE, from the inventory, and then asserted — not interpolated straight into the env.
     #
