@@ -45,9 +45,19 @@
         # Trains to a SCRATCH directory on purpose. The trainer now refuses to overwrite a release-eligible
         # model without `--allow-overwrite`, and promoting is a separate, deliberate step — one was already
         # lost to a `git checkout` on the assumption that a tracked file is always recoverable.
+        # `-e out=<name>` names WHICH scratch directory, from a fixed list. A path is not expressible.
+        #
+        # It was hardcoded to `runs/model-candidate`, which made the job single-use: the trainer refuses to
+        # overwrite a release-eligible model, so the SECOND train always failed with "REFUSING to
+        # overwrite". Measured 2026-08-22 — the multi-defect retrain died on it in 1.9 s.
+        #
+        # The fix is not `--allow-overwrite`. That guard exists because a model was lost once, and a job
+        # that always passes the flag is a guard nobody has. Naming the output keeps every candidate,
+        # which is also what makes a comparison possible: shipped vs candidate vs multidefect, side by
+        # side, rather than each one destroying its predecessor.
         argv: ["{{ lab_python }}", "packages/lab/scripts/train-screenreader-model.py",
                "--data", "runs/screenreader-dataset/with-realism.jsonl",
-               "--output", "runs/model-candidate"]
+               "--output", "runs/model-{{ out | default('candidate') }}"]
         timeout: 3600
       build-realism:
         argv: ["/usr/bin/node", "packages/lab/scripts/build-realism-tier.mjs",
@@ -63,9 +73,12 @@
                # The disjointness proof must be against what the model was actually TRAINED on. Defaulting
                # to the base dataset means it never examines the realism tier.
                "--training-data", "runs/screenreader-dataset/with-realism.jsonl",
-               "--model", "runs/model-candidate",
-               "--training-report", "runs/model-candidate/training-report.json",
-               "--out", "runs/model-candidate/acceptance-report.json"]
+               # All three follow `out`, or the gate grades one model and files its verdict under another.
+               # Half-parameterising this is worse than not doing it: the report would LOOK like it belongs
+               # to the new candidate while describing the old one.
+               "--model", "runs/model-{{ out | default('candidate') }}",
+               "--training-report", "runs/model-{{ out | default('candidate') }}/training-report.json",
+               "--out", "runs/model-{{ out | default('candidate') }}/acceptance-report.json"]
         timeout: 1800
       capture-real-pages:
         argv: ["/usr/bin/node", "packages/lab/src/training/capture-real-pages.mjs",
@@ -175,6 +188,18 @@
           capture-real-pages needs -e worker=<name from a11y_workers>
           ({{ groups['a11y_workers'] | join(', ') }}), optionally -e role=training|calibration and
           -e shard=i/n. The worker is named rather than addressed so a malformed URL cannot be expressed.
+
+    # Same containment as `worker` and `role`: a NAME from a fixed list, never a path. `--output` is a
+    # directory the trainer creates and writes weights into, so an unvalidated value here would be an
+    # arbitrary write on the box holding the corpus and the release keys.
+    - name: A train job names its scratch output from a fixed list
+      when: job in ['train', 'acceptance']
+      ansible.builtin.assert:
+        that: out | default('candidate') in ['candidate', 'multidefect', 'scratch']
+        fail_msg: >-
+          -e out=<name> must be one of: candidate, multidefect, scratch. It is a NAME, not a path — the
+          trainer writes weights into `runs/model-<name>`, so a path here would be an arbitrary write.
+          Add a name to this list if you need another; do not pass a directory.
 
     - name: A stability gate names one worker from the inventory
       when: job == 'stability'
