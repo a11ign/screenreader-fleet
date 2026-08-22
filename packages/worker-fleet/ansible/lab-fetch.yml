@@ -1,0 +1,62 @@
+---
+# Bring a named artifact back from the lab, so it can be read properly.
+#
+#     ansible-playbook lab-fetch.yml -e artifact=training-report -e out=multidefect
+#
+# ## Why this exists
+#
+# `lab-status.yml` shows the journal, and the journal WRAPS AND TRUNCATES every line. A training report is
+# JSON with per-head calibration detail, and read through the journal it arrives as fragments —
+# `"4.1.2:unnamed-control: no threshold` with the rest cut off. On 2026-08-23 that made it impossible to
+# say WHY a candidate failed its release gate, and the honest answer to "do the three whys" was "I cannot,
+# I have no way to read the evidence".
+#
+# So this is the missing half of ADR 0013: that ADR gave the lab a way to RUN things and no way to read
+# what they produced. A job interface that can start a 4-hour training run and cannot return its report
+# leaves you diagnosing from log fragments, which is where this project's worst misdiagnoses have started.
+#
+# ## Read-only, and a NAME rather than a path
+#
+# Nothing here mutates. The artifact is chosen from a fixed list and the model directory from the same
+# enum `lab-job.yml` uses, so a path cannot be expressed — the containment `worker`, `role` and `out`
+# already have, for the same reason: this box holds the corpus and the fleet key.
+- name: Fetch an artifact from the lab
+  hosts: a11y_lab
+  gather_facts: false
+
+  vars:
+    lab_artifacts:
+      training-report: "runs/model-{{ out | default('candidate') }}/training-report.json"
+      acceptance-report: "runs/model-{{ out | default('candidate') }}/acceptance-report.json"
+      abstention-sweep: "runs/real-page-corpus/abstention-sweep.json"
+      capture-progress: "runs/screenreader-dataset/capture-progress.json"
+
+  tasks:
+    - name: The artifact must be one we have, and the model directory a name
+      ansible.builtin.assert:
+        that:
+          - artifact is defined
+          - artifact in lab_artifacts
+          - out | default('candidate') in ['candidate', 'multidefect', 'scratch']
+        fail_msg: >-
+          Pass -e artifact=<name>, one of: {{ lab_artifacts.keys() | list | join(', ') }};
+          optionally -e out=candidate|multidefect|scratch. Both are NAMES, never paths.
+
+    - name: "Read {{ artifact }}"
+      ansible.builtin.slurp:
+        src: "{{ lab_repo_path }}/{{ lab_artifacts[artifact] }}"
+      register: fetched
+
+    # To a fixed local directory, named for the artifact and the model it describes — so two fetches of
+    # different candidates cannot overwrite each other and leave you reading the wrong one, which is the
+    # failure this whole exercise is about.
+    - name: Write it locally
+      ansible.builtin.copy:
+        content: "{{ fetched.content | b64decode }}"
+        dest: "{{ playbook_dir }}/../../../runs/fetched/{{ out | default('candidate') }}.{{ artifact }}.json"
+        mode: "0644"
+      delegate_to: localhost
+
+    - name: Where it landed
+      ansible.builtin.debug:
+        msg: "runs/fetched/{{ out | default('candidate') }}.{{ artifact }}.json"

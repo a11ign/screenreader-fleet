@@ -66,6 +66,15 @@
       sweep:
         argv: ["/usr/bin/node", "packages/lab/scripts/calibrate-abstention.mjs"]
         timeout: 1800
+      # The veto audit, against a NAMED candidate rather than the shipped weights. `release:gate` runs the
+      # same audit but always on what is shipped, which cannot answer "did this retrain help?" — the
+      # question a candidate exists to settle. Reads files already on disk; no worker, seconds.
+      shortcuts:
+        argv: ["{{ lab_python }}", "packages/lab/scripts/audit-scorer-shortcuts.py",
+               "--model", "runs/model-{{ out | default('candidate') }}",
+               "--data", "runs/screenreader-dataset/with-realism.jsonl",
+               "--no-baseline"]
+        timeout: 900
       acceptance:
         argv: ["{{ lab_python }}", "packages/lab/scripts/evaluate-screenreader-acceptance.py",
                "--data", "runs/screenreader-acceptance/repeat-1.jsonl",
@@ -193,7 +202,7 @@
     # directory the trainer creates and writes weights into, so an unvalidated value here would be an
     # arbitrary write on the box holding the corpus and the release keys.
     - name: A train job names its scratch output from a fixed list
-      when: job in ['train', 'acceptance']
+      when: job in ['train', 'acceptance', 'shortcuts']
       ansible.builtin.assert:
         that: out | default('candidate') in ['candidate', 'multidefect', 'scratch']
         fail_msg: >-
