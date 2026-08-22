@@ -105,6 +105,20 @@
         argv: ["{{ lab_tsx }}", "packages/lab/scripts/stability-gate.mjs"]
         setenv: ["A11Y_WORKER={{ lab_named_worker }}"]
         timeout: 5400
+      # THE COMPOSITE, and the only entry that delegates to an npm script rather than naming a binary.
+      #
+      # That is deliberate: `release:gate` IS the ordering -- isolation, then signals, then rules, then
+      # held-out acceptance, then judge quality, cheapest first so a cheap failure does not wait behind an
+      # expensive one. Re-listing the five here would duplicate that ordering into a second place, and the
+      # two would drift; the thing being run is a sequence, not a program.
+      #
+      # `npm run <fixed name>` interpolates nothing, so it introduces none of the quoting risk the argv rule
+      # exists to remove. Every component reads from disk and the venv -- none needs a capture worker, which
+      # is why this can run while the fleet is doing something else.
+      release-gate:
+        argv: ["/usr/bin/npm", "run", "release:gate"]
+        # eval:gate alone is 34 fixtures x EVAL_RUNS=3 against the local scorer.
+        timeout: 5400
       # No worker: it scores the rule layer against captures already on disk. Seconds, and here because it
       # is what says whether the corpus still supports every boundary `rule-ownership.json` declares.
       rules-gate:
