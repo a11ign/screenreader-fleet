@@ -161,6 +161,25 @@
                else 'the checkout is dirty — somebody is working in it') }}.
       This job runs at whatever is checked out, which the next task records.
 
+- name: "Rebuild the compiled packages"
+  # THE GATE SCORED CODE THAT WAS NOT THE CODE. `@a11y-witness/judge/rules` resolves to `dist/rules.js`,
+  # so `rules:gate` runs COMPILED output — and a pull updates the source without touching it. Measured
+  # 2026-08-22: a freshly added 2.4.2 rule fired when imported from source while the gate reported
+  # `0/1 MISSING EVIDENCE`, because the lab's `dist/rules.js` contained zero occurrences of it. The gate
+  # was correct about what it ran and wrong about what it claimed to be checking.
+  #
+  # CLAUDE.md already records the sibling — "a release-gate re-run measured code from three commits
+  # earlier" — but that was a pull that silently FAILED. This is a pull that succeeded and a build that
+  # never happened, which is harder to notice: `git log` says exactly what you expect.
+  #
+  # 3 seconds measured, so it runs whenever the pull changed anything rather than depending on cleverness
+  # about which packages a given job touches.
+  when: lab_pull is defined and lab_pull is changed
+  ansible.builtin.command:
+    argv: [/usr/bin/npm, run, build]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: true
+
 - name: "Record the commit this job actually runs at"
   # Recorded rather than assumed, and AFTER the pull, so it describes what will run. The stamp is the
   # difference between "the run says which code produced it" and "we know which code we asked for".

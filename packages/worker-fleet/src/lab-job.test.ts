@@ -198,3 +198,19 @@ test("a setenv value reaches systemd without a backreference", () => {
     "prefix by replacing the start anchor; a backreference here does not survive the escaping");
   assert.ok(!/--setenv=\\\\1/.test(RUN_JOB), "no backreference may appear in the setenv transformation");
 });
+
+test("a job that pulled rebuilds, or a gate scores compiled code that is not the code", () => {
+  // `@a11y-witness/judge/rules` resolves to `dist/rules.js`, so `rules:gate` runs COMPILED output while a
+  // pull only updates source. Measured 2026-08-22: a newly added 2.4.2 rule fired when imported from source
+  // and the gate reported `0/1 MISSING EVIDENCE`, because the lab's dist contained zero occurrences of it.
+  //
+  // The sibling failure is already in CLAUDE.md — "a release-gate re-run measured code from three commits
+  // earlier" — but that was a pull that silently failed. This is a pull that SUCCEEDED and a build that
+  // never happened, which is harder to notice: `git log` says exactly what you expect.
+  assert.match(RUN_JOB, /argv: \[\/usr\/bin\/npm, run, build\]/, "a pulled checkout must be rebuilt");
+  const build = RUN_JOB.indexOf("Rebuild the compiled packages");
+  const merge = RUN_JOB.indexOf("Fast-forward to origin/main");
+  const start = RUN_JOB.indexOf('- name: "Start it:');
+  assert.ok(merge < build && build < start,
+    "the build must follow the pull and precede the job, or it rebuilds the wrong tree or none at all");
+});
