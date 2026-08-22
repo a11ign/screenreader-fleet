@@ -97,21 +97,13 @@
                # to the new candidate while describing the old one.
                "--model", "runs/model-{{ out | default('candidate') }}",
                "--training-report", "runs/model-{{ out | default('candidate') }}/training-report.json",
-               "--out", "runs/model-{{ out | default('candidate') }}/acceptance-report.json",
-               # WITHOUT THIS THE JOB CANNOT RUN, and the deadlock is circular: the trainer marks a fresh
-               # candidate `releaseEligible: false` with the blocker "held-out acceptance has not been
-               # evaluated for these weights", and the evaluator refuses any model that is not
-               # releaseEligible. So the gate that would qualify a candidate declines to run on an
-               # unqualified one, and no candidate can ever pass. Measured 2026-08-23 on the first
-               # candidate anyone tried to evaluate through this interface; the shipped model predates it
-               # and was made by hand.
-               #
-               # The flag's help calls it "only for diagnostics", and that naming is what hid this: running
-               # acceptance on a candidate is the NORMAL path, not a diagnostic. What the flag actually
-               # guards is reporting on an ineligible model AS IF it were shippable — and this job's whole
-               # purpose is to produce the evidence that decides eligibility, which `promote:model` then
-               # reads back before anything ships.
-               "--allow-ineligible"]
+               # NO `--allow-ineligible` here, deliberately. It was needed until 2026-08-23, when the
+               # eligibility guard lived in `verify_artifact` for every caller alike: the trainer marks a
+               # fresh candidate ineligible BECAUSE acceptance has not run, and the evaluator refused any
+               # ineligible model — so the gate that would qualify a candidate declined to run on an
+               # unqualified one. The fix is at the call site, where the evaluator declares it does not
+               # require eligibility, rather than here where a job would pass a flag every single time.
+               "--out", "runs/model-{{ out | default('candidate') }}/acceptance-report.json"]
         timeout: 1800
       capture-real-pages:
         argv: ["/usr/bin/node", "packages/lab/src/training/capture-real-pages.mjs",
