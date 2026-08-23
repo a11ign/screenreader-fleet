@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 const read = (name: string) =>
   readFileSync(fileURLToPath(new URL(`../ansible/${name}`, import.meta.url)), "utf8");
@@ -77,11 +78,46 @@ test("there is no way to pass a command — only a job NAME from the catalogue",
   assert.match(LAB_JOB, /job in lab_jobs/, "the job name must be checked against the catalogue");
 });
 
-test("a capture job names a worker from the inventory rather than taking a URL", () => {
+/**
+ * The catalogue, PARSED — every job and its argv.
+ *
+ * The guard below used to grep the whole file for two strings. That made it a test of whether ANY job
+ * still resolved a worker by name, which is a much weaker claim than the one its title makes, and it went
+ * quiet the moment `capture-real-pages` stopped taking a worker: `evidence-check` and `stability` still
+ * contained both strings, so the file matched and the job it was written about was no longer examined.
+ * This repo's rule, in its own words: a test must not derive its expectations from source TEXT.
+ */
+function catalogueJobs(): Record<string, { argv?: unknown }> {
+  const doc = parseYaml(read("lab-job.yml")) as Array<{ vars?: { lab_jobs?: Record<string, { argv?: unknown }> } }>;
+  const jobs = doc.flatMap((play) => (play?.vars?.lab_jobs ? [play.vars.lab_jobs] : []))[0];
+  if (!jobs) throw new Error("lab_jobs not found in lab-job.yml — this guard is parsing the wrong shape");
+  return jobs;
+}
+
+test("no job can be handed a worker URL — a worker is always resolved from the inventory", () => {
   // `--worker=http://:8765` cost 29 minutes. Resolving a NAME through the inventory makes a malformed
   // address inexpressible rather than merely rejected — the same shape as `isValidCaptureId`.
-  assert.match(LAB_JOB, /worker in groups\['a11y_workers'\]/);
-  assert.match(LAB_JOB, /hostvars\[worker[^\]]*\]\.ansible_host/);
+  //
+  // Asserted over every job the catalogue DISCOVERS, so a job added later is covered the day it is added
+  // rather than the day somebody remembers this file.
+  const jobs = catalogueJobs();
+  assert.ok(Object.keys(jobs).length >= 15,
+    `only ${Object.keys(jobs).length} jobs parsed out of the catalogue; the shape changed and this is blind`);
+
+  const takesWorker = Object.entries(jobs).filter(([, spec]) =>
+    JSON.stringify(spec.argv ?? "").includes("--worker="));
+  for (const [name, spec] of takesWorker) {
+    const argv = JSON.stringify(spec.argv);
+    assert.match(argv, /hostvars\[/,
+      `${name} builds a --worker argument without resolving it through the inventory, so a malformed `
+      + "address is expressible");
+  }
+
+  // And the inverse, which is the half that went silent: a job that names no worker must not be able to
+  // have one forced on it by an operator's -e. It uses the fleet, and the guard says so.
+  assert.match(LAB_JOB, /worker is not defined/,
+    "capture-real-pages runs across the fleet and must REFUSE -e worker, not ignore it — an operator who "
+    + "asked for one machine and got four must be told");
 });
 
 test("the environment is fixed by the runner, never supplied by the caller", () => {

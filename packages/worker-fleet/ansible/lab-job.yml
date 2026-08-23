@@ -105,12 +105,28 @@
                # require eligibility, rather than here where a job would pass a flag every single time.
                "--out", "runs/model-{{ out | default('candidate') }}/acceptance-report.json"]
         timeout: 1800
+      # THE REAL-PAGE CORPUS, across the WHOLE FLEET — same as `capture` above, and for the same reason.
+      #
+      # This took a single `--worker` and captured 77 pages serially while three identical boxes sat idle:
+      # ~6.5 h of a ~1.6 h job. The escape hatch was `--shard=i/n` launched by hand N times, which is not
+      # parallelism so much as parallelism the operator must perform correctly every time — and it is the
+      # exact surface that once sent four shards at `--worker=http://:8765` for 29 minutes.
+      #
+      # `A11Y_WORKERS` comes from `lab_fleet_workers`, derived from `inventory.yml`, so adding a box to the
+      # fleet makes it participate with no change here. That is the property a per-shard job entry could
+      # never have: four hardcoded shards is a fleet size written down in a second place, and this repo's
+      # record on facts stated twice is that they drift.
+      #
+      # Politeness does NOT depend on how many workers run: `host-throttle.mjs` keys the gap on the
+      # publisher, so each site sees the same rate at any fleet size. `--shard` still works, for splitting a
+      # run across separate machines; it is no longer how you use more than one worker.
       capture-real-pages:
         argv: ["/usr/bin/node", "packages/lab/src/training/capture-real-pages.mjs",
                "--role={{ role | default('training') }}",
-               "--shard={{ shard | default('0/1') }}",
-               "--worker=http://{{ hostvars[worker | default('')].ansible_host | default('') }}:8765"]
-        # 77 real pages on one worker measured ~6.5 h; a quarter of them ~1.6 h. Generous either way.
+               "--shard={{ shard | default('0/1') }}"]
+        setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
+        # 77 real pages on one worker measured ~6.5 h; across the fleet ~1.6 h. Generous either way, and a
+        # ceiling rather than a cost.
         timeout: 28800
       check-signals:
         argv: ["/usr/bin/node", "packages/lab/src/training/check-signals.mjs"]
@@ -264,18 +280,25 @@
 
     # Only for the job that needs it, and only from the inventory. An address cannot be supplied directly,
     # so `--worker=http://:8765` — which cost 29 minutes — is not a value this interface can express.
-    - name: A capture job names a worker from the inventory
+    - name: A real-page capture names a role and, if it shards, a well-formed shard
+      # `worker` is no longer required, and no longer accepted: the run uses the whole fleet from
+      # `A11Y_WORKERS`. It USED to be mandatory and named rather than addressed, so a malformed URL could
+      # not be expressed — that guard has moved to where the value now comes from, `inventory.yml` via
+      # `configuredWorkers()`, which every other fleet tool already reads.
+      #
+      # Refused rather than ignored when passed. Accepting `-e worker=` and silently running on all four
+      # would be the worst kind of wrong: the operator asked for one machine, watched four get used, and
+      # nothing said so. "It did something other than what you asked" must never be silent.
       when: job == 'capture-real-pages'
       ansible.builtin.assert:
         that:
-          - worker is defined
-          - worker in groups['a11y_workers']
+          - worker is not defined
           - role | default('training') in ['training', 'calibration']
           - shard | default('0/1') is match('^[0-9]+/[0-9]+$')
         fail_msg: >-
-          capture-real-pages needs -e worker=<name from a11y_workers>
-          ({{ groups['a11y_workers'] | join(', ') }}), optionally -e role=training|calibration and
-          -e shard=i/n. The worker is named rather than addressed so a malformed URL cannot be expressed.
+          capture-real-pages now runs across the whole fleet ({{ groups['a11y_workers'] | join(', ') }})
+          and takes no -e worker. Optionally -e role=training|calibration and -e shard=i/n; sharding is for
+          splitting a run across separate machines, not for using more than one worker.
 
     # Same containment as `worker` and `role`: a NAME from a fixed list, never a path. `--output` is a
     # directory the trainer creates and writes weights into, so an unvalidated value here would be an
