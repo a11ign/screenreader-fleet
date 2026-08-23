@@ -112,12 +112,33 @@
       ansible.builtin.command:
         argv: [npm, run, "--silent", "training:status", "--", "--json"]
         chdir: "{{ lab_repo_path }}"
+      # A TASK keyword, not a module argument — nested under `command:` it becomes an unknown arg, the task
+      # fails, and `progress` registers a dict with no `rc`, which then breaks the debug below with
+      # "object of type 'dict' has no attribute 'rc'". The error names the symptom two tasks away from the
+      # cause.
+      #
+      # `training:status` reads DATASET_ROOT, which defaults to the training corpus — so while an
+      # ACCEPTANCE job ran, this reported the last training run's finished numbers (`captured: 4,
+      # total: 1303`) as if they were the live one. Two runs, one progress file consulted, and the wrong
+      # answer looked entirely plausible.
+      environment:
+        DATASET_ROOT: "{{ 'runs/screenreader-acceptance'
+                          if (job | default('')) is search('acceptance')
+                          else 'runs/screenreader-dataset' }}"
       register: progress
       changed_when: false
       failed_when: false
 
     - name: What the run says about itself
       ansible.builtin.debug:
+        # Guarded on the stdout LOOKING like JSON, not merely on being non-empty. `training:status` prints
+        # prose on some paths — a warning, a next_command hint — and `from_json` throws on those, which
+        # failed the whole task and reported nothing at all. Absent and unparseable must not both become
+        # silence: say which one it was.
         msg: >-
-          {{ (progress.stdout | from_json) if (progress.stdout | default('') | trim | length > 0
-             and progress.rc != 2) else '(no run in flight — training:status rc=' ~ progress.rc ~ ')' }}
+          {{ (progress.stdout | from_json)
+             if (progress.rc != 2 and (progress.stdout | default('') | trim) is match('^\s*[{[]'))
+             else ('(no run in flight — training:status rc=' ~ progress.rc ~ ')'
+                   if (progress.stdout | default('') | trim | length) == 0
+                   else '(training:status did not return JSON, rc=' ~ progress.rc ~ '): '
+                        ~ (progress.stdout | default('') | trim | truncate(300))) }}
