@@ -128,8 +128,11 @@
         # 77 real pages on one worker measured ~6.5 h; across the fleet ~1.6 h. Generous either way, and a
         # ceiling rather than a cost.
         timeout: 28800
+      # `--require-complete` because THIS box owns the corpus. Here "no evidence for that case" is a real
+      # answer — go capture — rather than the unanswerable question it is on a laptop, where `runs/` is
+      # gitignored and a copy is only ever as fresh as its last sync.
       check-signals:
-        argv: ["/usr/bin/node", "packages/lab/src/training/check-signals.mjs"]
+        argv: ["/usr/bin/node", "packages/lab/src/training/check-signals.mjs", "--require-complete"]
         timeout: 900
       # THE SYNTHETIC CORPUS, across the WHOLE FLEET. `A11Y_WORKERS` comes from `lab_fleet_workers` below,
       # which is built from the inventory and asserted against a strict pattern — never from the caller, for
