@@ -18,6 +18,22 @@
 //
 // Written in the grants syntax this tailnet was provisioned with. Tailscale REFUSES a policy containing
 // both `acls` and `grants`, so an older-style file cannot simply be added alongside the default.
+// ## The order matters, and only one sequence works
+//
+//   1. Save this policy. `tagOwners` must exist before any node can claim the tag.
+//   2. `npm run fleet:tailscale -- -e tag=true` — re-runs tailscale up with
+//      `--advertise-tags=tag:a11y-fleet`. This RE-AUTHENTICATES: applying a tag transfers the node from
+//      your account to the tag, so a fresh login is unavoidable.
+//   3. Routes then auto-approve, for this machine and any added later. No console visit.
+//
+// Doing 2 before 1 fails: a node cannot advertise a tag the tailnet has not declared.
+//
+// ## Nothing may follow the closing brace
+//
+// HuJSON allows comments INSIDE the object and nothing after it. A trailing note here produced
+// `parsing comment: unexpected EOF` in the admin console — a syntax error that reads like a truncated
+// file. Keep prose above the `{` or inside it.
+
 {
   // Lets the subnet router hold a tag. A tag matters for more than tidiness: an untagged node is owned by
   // a user and inherits that user's KEY EXPIRY — default 180 days — after which it silently drops off the
@@ -98,13 +114,3 @@
     },
   ],
 }
-
-// ## The order matters, and only one sequence works
-//
-//   1. Save this policy. `tagOwners` must exist before any node can claim the tag.
-//   2. `npm run fleet:tailscale -- -e tag=true` — re-runs `tailscale up --advertise-tags=tag:a11y-fleet`.
-//      This RE-AUTHENTICATES: applying a tag transfers the node from your account to the tag, so it needs
-//      a fresh login.
-//   3. Routes then auto-approve. No console visit for this or any machine added later.
-//
-// Doing 2 before 1 fails: a node cannot advertise a tag the policy does not define.
