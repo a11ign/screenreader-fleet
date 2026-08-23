@@ -209,11 +209,26 @@
         <AcceptEula>true</AcceptEula>
         <FullName>a11y-witness</FullName>
         <Organization>a11y-witness</Organization>
-        <!-- Generic Windows 11 Pro KMS client key: selects the edition during an unattended install.
-             It does NOT activate, which is what we want — an unactivated Windows is fully functional
-             for capture. -->
+        <!-- NO product key, deliberately, and the element is present-but-empty rather than absent.
+             `/IMAGE/NAME` above already selects the edition, which is the only job a key was doing
+             here: we do not want activation, and an unactivated Windows is fully functional for
+             capture.
+
+             It used to carry the generic Windows 11 Pro KMS client key
+             (W269N-WFGWX-YVC9B-4J6C9-T83GX). That worked while the media shipped a single
+             install.wim, and started failing with "the unattended answer file contains an invalid
+             product key" once install.wim was SPLIT into install.swm parts to fit the ISO's file-size
+             limit. Setup validates the key against the edition it resolved from the split image, and
+             the two stopped agreeing. Naming the edition and omitting the key removes the
+             disagreement rather than trying to satisfy both halves of it.
+
+             The `Key` element must be PRESENT and EMPTY, exactly like the blank password below.
+             Omitting it entirely fails differently and just as fatally: Setup stops with "Windows
+             cannot read the <ProductKey> setting from the unattend answer file". Empty means "no key,
+             do not ask"; absent means "malformed". `WillShowUI=Never` is what suppresses the "enter
+             your product key" page, which on a headless fleet is a hang nobody is there to clear. -->
         <ProductKey>
-          <Key>W269N-WFGWX-YVC9B-4J6C9-T83GX</Key>
+          <Key></Key>
           <WillShowUI>Never</WillShowUI>
         </ProductKey>
       </UserData>
