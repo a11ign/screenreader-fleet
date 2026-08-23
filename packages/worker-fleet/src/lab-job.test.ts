@@ -184,8 +184,14 @@ test("a job pulls the lab checkout, and records the commit it actually ran at", 
   // commits behind `main` when a retrain was started on it, so the artefact named a commit that had not
   // produced it — an artefact whose provenance is WRONG is worse than one carrying none.
   assert.match(RUN_JOB, /argv: \[git, fetch, --quiet, origin\]/);
-  assert.match(RUN_JOB, /argv: \[git, merge, --ff-only, origin\/main\]/,
-    "ff-only: a diverged lab checkout is for a human to look at, not for a launcher to resolve at 2am");
+  // A CHECKOUT of `origin/<ref>`, not a merge, since `-e ref=` made "which branch" a parameter. The
+  // property that mattered is unchanged and is what this asserts: the launcher moves the checkout to
+  // exactly what origin says and never RESOLVES anything. A merge or rebase here would let a diverged lab
+  // be silently reconciled at 2am, which is a fact for a human to look at.
+  assert.match(RUN_JOB, /argv: \[git, checkout, --detach, "origin\/\{\{ lab_ref \}\}"\]/,
+    "the launcher must move to origin's ref verbatim, never merge or rebase toward it");
+  assert.ok(!/git, (merge|rebase|pull)(?!.*--ff-only)/.test(RUN_JOB),
+    "a launcher that can merge or rebase can resolve a divergence nobody looked at");
   assert.match(RUN_JOB, /argv: \[git, rev-parse, --short, HEAD\]/,
     "and the commit must be READ BACK, not assumed from what we asked for");
 
@@ -265,9 +271,9 @@ test("a checkout that cannot pull reports HOW FAR behind it is, not just that it
   assert.ok(!/^\s*when:/m.test(fetchTask),
     "the fetch is gated again, so a checkout that cannot pull has no way to know how stale it is");
 
-  assert.match(RUN_JOB, /rev-list, --count, HEAD\.\.origin\/main/,
+  assert.match(RUN_JOB, /rev-list, --count, "HEAD\.\.origin\/\{\{ lab_ref \}\}"/,
     "nothing measures the drift");
-  assert.match(RUN_JOB, /COMMIT\(S\) BEHIND origin\/main/,
+  assert.match(RUN_JOB, /COMMIT\(S\) BEHIND origin\//,
     "the drift is measured and never said out loud");
 
   // The stamp is what a reader sees after the fact. "(checkout unchanged)" reads as reassurance; it has to
@@ -291,4 +297,28 @@ test("a job that leaves the checkout dirty is named, and compared against the st
   assert.match(RUN_JOB, /lab_dirty_after\.stdout \| trim\) != \(lab_dirty\.stdout/,
     "the after-state is compared against clean rather than against the before-state, so an already-dirty "
     + "checkout blames whichever job ran next");
+});
+
+test("a job can run at a named ref, and the ref is validated rather than trusted", () => {
+  // `-e ref=<branch>` exists for a change that CANNOT land on main alone. The worked example is a
+  // feature-schema change: `scorer-artifact.test.ts` refuses a tree whose committed weights carry a
+  // different FEATURE_SCHEMA_VERSION from the shipped feature pipeline — correctly, since the scorer
+  // rejects that pairing and the default judge stops working. So the fix and the weights it produces must
+  // land in one commit, and the weights can only be trained by a lab that already has the fix.
+  //
+  // Without it the only routes are breaking main for half an hour, or copying a file onto the box by hand.
+  // The second is what dirtied the lab checkout on 2026-08-23 and blocked every subsequent pull.
+  assert.match(RUN_JOB, /lab_ref: "\{\{ ref \| default\('main'\) \}\}"/,
+    "no way to name a ref, so a coupled change has no CLI path");
+  assert.match(RUN_JOB, /origin\/\{\{ lab_ref \}\}/,
+    "the ref is accepted and then ignored — the checkout still hardcodes a branch");
+
+  // Validated, not trusted. `argv:` never invokes a shell so this is not injection, but `origin/..` and
+  // friends should be inexpressible rather than merely unlikely — the same shape as isValidCaptureId.
+  assert.match(RUN_JOB, /lab_ref is match\(/, "the ref reaches git without a pattern check");
+  assert.match(RUN_JOB, /'\.\.' not in lab_ref/, "a ref containing .. can walk out of the ref namespace");
+
+  // And the stamp must say which ref, or an artefact trained on a branch is indistinguishable from one
+  // trained on main — provenance that is wrong being worse than provenance that is absent.
+  assert.match(RUN_JOB, /pulled ' ~ lab_ref/, "the run stamp does not record which ref it ran at");
 });

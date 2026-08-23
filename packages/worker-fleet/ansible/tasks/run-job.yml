@@ -152,7 +152,7 @@
   # ("the lab was once 23 commits behind"); the auto-pull fixed the case where pulling was possible and left
   # this one exactly as it was.
   ansible.builtin.command:
-    argv: [git, rev-list, --count, HEAD..origin/main]
+    argv: [git, rev-list, --count, "HEAD..origin/{{ lab_ref }}"]
     chdir: "{{ lab_repo_path }}"
   changed_when: false
   failed_when: false
@@ -162,13 +162,40 @@
   ansible.builtin.set_fact:
     lab_behind_count: "{{ (lab_behind.stdout | default('0') | trim | int) }}"
 
-- name: "Fast-forward to origin/main"
+- name: "Which ref this job runs at"
+  # `-e ref=<branch>` runs a job at something other than main, and it exists for one specific, recurring
+  # need: a change that CANNOT land on main by itself.
+  #
+  # A feature-schema change is the worked example. `scorer-artifact.test.ts` refuses a tree whose committed
+  # weights carry a different `FEATURE_SCHEMA_VERSION` from the shipped feature pipeline — correctly, since
+  # the scorer rejects that pairing at runtime and the default judge simply stops working. So the extractor
+  # fix and the weights it produces must land in ONE commit; but the weights can only be trained by a lab
+  # that already has the fix. Without this the only ways through are to break main for half an hour, or to
+  # copy a file onto the box by hand — which is how the lab checkout got dirtied on 2026-08-23, blocking
+  # every subsequent pull.
+  #
+  # Validated against a strict pattern rather than trusted: `command` with `argv:` never invokes a shell, so
+  # this is not about injection, but `origin/$(anything)` should not be expressible from a `-e` var.
+  ansible.builtin.set_fact:
+    lab_ref: "{{ ref | default('main') }}"
+
+- name: "A ref must look like a ref"
+  ansible.builtin.assert:
+    that:
+      - lab_ref is match('^[A-Za-z0-9._/-]{1,100}$')
+      - "'..' not in lab_ref"
+    fail_msg: "ref must be a plain branch or tag name, got: {{ lab_ref }}"
+
+- name: "Fast-forward to origin/{{ lab_ref }}"
   # `--ff-only`, never merge or rebase: a diverged lab checkout is a fact somebody needs to look at, not
   # something for a job launcher to resolve at 2am. If it cannot fast-forward, this fails and the job does
   # not start, which is the correct direction -- running unknown code is what the stamp below exists to stop.
   when: "{{ lab_should_pull }}"
   ansible.builtin.command:
-    argv: [git, merge, --ff-only, origin/main]
+    # `--ff-only` still, for the same reason: a diverged checkout is a fact somebody must look at, not
+    # something a job launcher resolves at 2am. Moving BETWEEN refs is a checkout, not a merge, so a run at
+    # a branch and the run back at main are both explicit acts the stamp below records.
+    argv: [git, checkout, --detach, "origin/{{ lab_ref }}"]
     chdir: "{{ lab_repo_path }}"
   register: lab_pull
   changed_when: "'Already up to date' not in (lab_pull.stdout | default(''))"
@@ -219,9 +246,9 @@
   ansible.builtin.debug:
     msg: >-
       {{ job_name }} runs at {{ lab_commit.stdout | trim }}
-      {{ '(pulled)' if (lab_pull is defined and lab_pull is changed)
-         else ('(checkout unchanged, up to date)' if lab_behind_count | int == 0
-               else '(checkout unchanged and ' ~ lab_behind_count ~ ' COMMIT(S) BEHIND origin/main)') }}
+      {{ ('(pulled ' ~ lab_ref ~ ')') if (lab_pull is defined and lab_pull is changed)
+         else (('(checkout unchanged, up to date with ' ~ lab_ref ~ ')') if lab_behind_count | int == 0
+               else '(checkout unchanged and ' ~ lab_behind_count ~ ' COMMIT(S) BEHIND origin/' ~ lab_ref ~ ')') }}
 
 - name: "Start it: {{ job_name }}"
   ansible.builtin.command:
