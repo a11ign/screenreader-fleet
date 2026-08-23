@@ -140,6 +140,20 @@
         # Above the ~4.4 h a full recapture measures, because a ceiling that expires early turns "still
         # working" into "failed" — and this is the most expensive job in the catalogue to lose.
         timeout: 28800
+      # THE WHOLE RETRAIN, as one job. Until 2026-08-23 this sequence existed nowhere — producing a
+      # candidate meant running eight things in order, and the ORDER and the STOP CONDITIONS lived in
+      # somebody's head. Every defect found that day existed because the pipeline had never once been run
+      # end to end; a human silently works around what a script cannot.
+      #
+      # It STOPS at the first failing gate rather than carrying on, because a pipeline that continues past
+      # `check-signals` produces a candidate trained on a corpus with a hole in it, and the number at the
+      # end looks exactly like a good one.
+      retrain:
+        argv: ["/usr/bin/npm", "run", "lab:retrain"]
+        setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
+        # A full corpus capture is the long pole; the rest is minutes. Above the ~9.8 h a full recapture
+        # measures on this fleet, because a ceiling that expires early turns "still working" into "failed".
+        timeout: 50400
       # THE ACCEPTANCE INSTRUMENTS — generate, capture, export. They had no job at all until 2026-08-23,
       # which is the third pipeline step found this week reachable only by hand (promotion and artifact
       # reading were the others). The held-out set is what decides whether a candidate ships, so the way it
