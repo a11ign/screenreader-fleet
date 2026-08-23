@@ -131,9 +131,18 @@
     - name: Re-authenticate under the fleet tag
       when: tag | default(false) | bool
       ansible.builtin.shell:
+        # `tailscale logout` first, and it is not optional. The daemon CACHES a pending auth request and
+        # re-serves the same URL on every subsequent `tailscale up` — so once that URL expires, re-running
+        # this hands back a dead link and reports success. Measured 2026-08-23: two rounds of asking a
+        # human to click a 404. Logging out clears the pending state and forces a fresh URL.
+        #
+        # It DROPS THE NODE off the tailnet until the new login completes, which is why this is the one
+        # task here that must not be run while relying on the tailnet to reach the box — from a hotspot it
+        # would cut the only path to the machine you are trying to fix. Run it from the LAN.
         cmd: >-
           systemctl stop tailscale-up 2>/dev/null;
           systemctl reset-failed tailscale-up 2>/dev/null;
+          tailscale logout 2>/dev/null;
           systemd-run --unit=tailscale-up --remain-after-exit
           tailscale up --advertise-routes={{ tailscale_routes }} --accept-dns=false
           --hostname=a11y-fleet --advertise-tags=tag:a11y-fleet
@@ -153,8 +162,21 @@
       when: tag | default(false) | bool
       ansible.builtin.debug:
         msg: >-
-          {{ ('Sign in at: ' ~ (tag_url.stdout | trim)) if (tag_url.stdout | trim | length) > 0
-             else 'Already tagged; nothing to sign in to.' }}
+          {{ ('Sign in at: ' ~ (tag_url.stdout | trim)
+              ~ ' — this link is freshly minted; the daemon caches pending auth requests, so a link from an
+              earlier run will have expired. Routes auto-approve once the tag is applied.')
+             if (tag_url.stdout | trim | length) > 0
+             else 'No login URL appeared, which means tailscale up did not start one. Check
+                   `journalctl -u tailscale-up` rather than assuming it worked.' }}
+
+    # A URL is not a result. `tailscale up` having printed one only means it is waiting.
+    - name: Refuse to report success without a link to show for it
+      when: tag | default(false) | bool
+      ansible.builtin.assert:
+        that: (tag_url.stdout | trim | length) > 0 or (existing.stdout | from_json).BackendState | default('') == 'Running'
+        fail_msg: >-
+          Tagging produced no login URL and the node is not already running. Nothing was accomplished, and
+          reporting a green playbook here is how a step that did nothing gets believed.
 
     - name: Stop here when tagging
       when: tag | default(false) | bool
