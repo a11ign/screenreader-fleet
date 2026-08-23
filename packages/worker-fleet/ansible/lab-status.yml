@@ -62,7 +62,11 @@
     - name: "Its recent output"
       when: job is defined
       ansible.builtin.command:
-        argv: [journalctl, "-u", "a11y-job-{{ job }}", "--no-pager", "-n", "40"]
+        # 40 by default, `-e lines=N` when that is not enough — and it often is not. `check-signals`
+        # prints a line per case and its SUMMARY comes last, so the one failing case among 1,306 scrolls
+        # off and the count is all you can see. A status tool that shows a failure count and not the
+        # failure is half a tool.
+        argv: [journalctl, "-u", "a11y-job-{{ job }}", "--no-pager", "-n", "{{ lines | default(40) }}"]
       register: recent
       changed_when: false
       failed_when: false
