@@ -224,6 +224,19 @@
       rules-gate:
         argv: ["{{ lab_tsx }}", "packages/lab/scripts/score-rules.ts", "--gate"]
         timeout: 900
+      # THE SHIPPED MODEL against the SAME held-out set — the baseline without which a candidate's score
+      # cannot be read. A candidate scoring 6 false positives is good or bad depending entirely on what the
+      # model already in production scores, and until the acceptance set gained multi-defect cases nobody
+      # could ask. Fixed path, no interpolation: this one always means the weights in the package.
+      acceptance-shipped:
+        argv: ["{{ lab_python }}", "packages/lab/scripts/evaluate-screenreader-acceptance.py",
+               "--data", "runs/screenreader-acceptance/repeat-1.jsonl",
+               "--data", "runs/screenreader-acceptance/repeat-2.jsonl",
+               "--training-data", "runs/screenreader-dataset/with-realism.jsonl",
+               "--model", "packages/scorer/models/screenreader-scorer",
+               "--training-report", "packages/scorer/models/screenreader-scorer/training-report.json",
+               "--out", "runs/model-shipped-baseline/acceptance-report.json"]
+        timeout: 1800
       # POOLED, and this entry used to say the opposite — "single worker ON PURPOSE, because a second guest
       # is a second variable". That argument does not survive inspection: the BASELINE corpus was itself
       # captured across all four workers, so using one fresh worker does not remove the confound, it only

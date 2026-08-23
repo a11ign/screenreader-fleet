@@ -28,6 +28,7 @@
     lab_artifacts:
       training-report: "runs/model-{{ out | default('candidate') }}/training-report.json"
       acceptance-report: "runs/model-{{ out | default('candidate') }}/acceptance-report.json"
+      shipped-acceptance: "runs/model-shipped-baseline/acceptance-report.json"
       false-positives: "runs/model-{{ out | default('candidate') }}/false-positives.json"
       abstention-sweep: "runs/real-page-corpus/abstention-sweep.json"
       capture-progress: "runs/screenreader-dataset/capture-progress.json"
