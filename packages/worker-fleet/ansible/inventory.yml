@@ -128,14 +128,3 @@ all:
         pve-micro:
           ansible_host: REDACTED-INTERNAL-ADDRESS
 
-    # Machines that are NOT part of the capture fleet but should be reachable over the tailnet.
-    #
-    # Here so the Tailscale routes stay derived from ONE list rather than a second one kept in step by
-    # hand — that is the whole reason `tailscale.yml` builds its routes from this file. Nothing else reads
-    # this group: every playbook names the group it targets, so a host here is never deployed to, woken,
-    # or dispatched work, and `fleet-env.mjs` reads a host's group from its path so it cannot become a
-    # phantom capture worker.
-    a11y_tailnet_only:
-      hosts:
-        ai-server:
-          ansible_host: REDACTED-INTERNAL-ADDRESS

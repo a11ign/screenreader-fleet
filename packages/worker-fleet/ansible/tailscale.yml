@@ -33,17 +33,32 @@
   hosts: a11y_hypervisor
   gather_facts: true
 
-  vars:
-    # Every host in the inventory except this one, as a /32. `| unique` because a host in two groups would
-    # otherwise be advertised twice, which Tailscale accepts and which makes the route list lie about size.
-    tailscale_routes: >-
-      {{ groups['all']
-         | difference(groups['a11y_hypervisor'])
-         | map('extract', hostvars, 'ansible_host')
-         | select('defined') | map('regex_replace', '$', '/32')
-         | unique | sort | join(',') }}
-
   tasks:
+    # OPTIONAL and gitignored. Machines that are yours and are not capture infrastructure — a personal
+    # server you want reachable over the tailnet without publishing it in a public repo as though it were
+    # part of the fleet. Absent by default; `failed_when: false` makes absence unremarkable.
+    #
+    # `include_vars` rather than a templated `vars_files:` entry. The templated form silently produced a
+    # STRING where a list was expected and failed two tasks later with "can only concatenate list (not
+    # str) to list" — an error naming neither the file nor the variable. A task that can be read, and
+    # whose result can be printed, is worth more than a clever one-liner.
+    - name: Hosts from the optional local file
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/extra-hosts.local.yml"
+      failed_when: false
+
+    - name: Every machine to advertise a route to
+      ansible.builtin.set_fact:
+        # `| unique` because a host in two groups would otherwise be advertised twice, which Tailscale
+        # accepts and which makes the route list lie about its own size.
+        tailscale_routes: >-
+          {{ (groups['all']
+              | difference(groups['a11y_hypervisor'])
+              | map('extract', hostvars, 'ansible_host')
+              | select('defined') | list
+              | union(extra_tailnet_hosts | default([])))
+             | map('regex_replace', '$', '/32') | unique | sort | join(',') }}
+
     - name: What is here already
       ansible.builtin.command:
         argv: [sh, -c, "command -v tailscale >/dev/null && tailscale status --json || echo '{}'"]
