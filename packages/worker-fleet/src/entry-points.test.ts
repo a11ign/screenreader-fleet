@@ -25,12 +25,23 @@ import { fileURLToPath } from "node:url";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
-/** Every `.mjs` file an npm script invokes, discovered from `package.json`. */
+/**
+ * Every file an npm script invokes, discovered from `package.json`.
+ *
+ * `.ts` as well as `.mjs`, and the extension is the whole lesson. This read `\.mjs` alone for as long as it
+ * existed, so the entire TypeScript half of the codebase was outside a guard written to cover it — SIX of
+ * the seven `.ts` entry points ran on import, including the CLI, the eval runner and the rules gate. It
+ * surfaced the ordinary way: a test that merely imported `cli.ts` printed the usage string and exited 1
+ * before its first assertion, which is exactly why that file had no tests. A discovery test still only
+ * discovers what its pattern admits.
+ */
 function entryPoints(): string[] {
   const pkg = JSON.parse(readFileSync(`${REPO}package.json`, "utf8"));
   const found = new Set<string>();
   for (const command of Object.values(pkg.scripts as Record<string, string>)) {
-    for (const match of String(command).matchAll(/(?:^|\s)(packages\/[^\s]+\.mjs)/g)) found.add(match[1]);
+    for (const match of String(command).matchAll(/(?:^|\s)(packages\/[^\s]+\.(?:mjs|ts))/g)) {
+      if (!match[1].endsWith(".test.ts")) found.add(match[1]);
+    }
   }
   return [...found].sort();
 }
@@ -42,6 +53,12 @@ test("every npm entry point refuses to run when imported", () => {
   // reporting success having examined nothing. There were 29 when this was written.
   assert.ok(points.length >= 25,
     `only found ${points.length} entry points; the discovery is broken, not the codebase clean`);
+
+  // Pinned separately, because the count above cannot tell 29 .mjs + 0 .ts from 29 .mjs + 7 .ts — and the
+  // all-.mjs reading is precisely the bug this pattern was widened to fix. There were 7 when written.
+  const typescript = points.filter((p) => p.endsWith(".ts"));
+  assert.ok(typescript.length >= 5,
+    `found ${typescript.length} .ts entry points; the pattern has stopped matching TypeScript`);
 
   const unguarded = points.filter((path) => {
     const src = readFileSync(`${REPO}${path}`, "utf8");
