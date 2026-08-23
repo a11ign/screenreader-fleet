@@ -37,3 +37,45 @@
     profiles: [domain, private, public]
     enabled: true
     state: present
+
+- name: sshd will still be there after a reboot
+  # NOT tautological, which is the only reason it earns a task.
+  #
+  # That Ansible reached this box proves sshd is RUNNING. It proves nothing about whether it will come
+  # back: a service can be Running now and StartupType Manual, in which case the next reboot strands the
+  # box with a perfectly healthy worker on :8765 and no way in. From outside that is indistinguishable
+  # from a dead machine, and the repair is a console visit — which this fleet exists to avoid.
+  #
+  # `bootstrap-windows-worker.ps1` sets Automatic when it installs sshd, so this is drift detection rather
+  # than setup. It cannot BE setup: the role is reached over the thing it would be configuring.
+  #
+  # Measured 2026-08-23 across all four workers: Status=Running, StartType=Automatic. Written after an
+  # afternoon spent believing sshd had died on this fleet, when the real cause was an ACL that grants
+  # tcp:8765 and not tcp:22 — so the check that would have settled it in one command did not exist.
+  become: true
+  ansible.windows.win_service:
+    name: sshd
+    start_mode: auto
+    state: started
+  register: worker_sshd
+
+- name: Say so
+  ansible.builtin.debug:
+    msg: >-
+      sshd start_mode={{ worker_sshd.start_mode | default('auto') }}
+      {{ 'CHANGED — it was not set to start on boot, and a reboot would have stranded this box'
+         if worker_sshd.changed else '(already correct)' }}
+
+- name: Inbound rule for SSH
+  # Same Profile Any reasoning as the worker port above: a rule bound to one profile stops applying when
+  # the NIC's network category flips, and management access is the worst thing to lose that way.
+  become: true
+  community.windows.win_firewall_rule:
+    name: OpenSSH Server (a11y-witness)
+    localport: 22
+    protocol: tcp
+    direction: in
+    action: allow
+    profiles: [domain, private, public]
+    enabled: true
+    state: present
