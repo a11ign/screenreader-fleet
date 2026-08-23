@@ -140,6 +140,24 @@
         # Above the ~4.4 h a full recapture measures, because a ceiling that expires early turns "still
         # working" into "failed" — and this is the most expensive job in the catalogue to lose.
         timeout: 28800
+      # THE ACCEPTANCE INSTRUMENTS — generate, capture, export. They had no job at all until 2026-08-23,
+      # which is the third pipeline step found this week reachable only by hand (promotion and artifact
+      # reading were the others). The held-out set is what decides whether a candidate ships, so the way it
+      # is produced should be at least as reviewable as the corpus it is compared against.
+      generate-acceptance:
+        argv: ["/usr/bin/npm", "run", "training:generate-acceptance"]
+        timeout: 900
+      # NEVER CACHES, by design: `DATASET_KIND=acceptance` refuses reuse, because these runs exist to test
+      # whether NVDA's output is still stable. So this is a full capture of every acceptance page every
+      # time — 42 pairs, and TWICE because the two repeats are what measure that stability.
+      capture-acceptance:
+        argv: ["/usr/bin/npm", "run", "training:capture-acceptance"]
+        setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}", "REPEAT=repeat-{{ repeat | default('1') }}"]
+        timeout: 14400
+      export-acceptance:
+        argv: ["/usr/bin/npm", "run", "training:export-acceptance"]
+        setenv: ["REPEAT=repeat-{{ repeat | default('1') }}"]
+        timeout: 900
       # Cheap, and here because it is a STEP rather than a check: it rewrites the labels every later stage
       # reads, and it silently used a stale manifest twice in one session before the drift guard existed.
       export:
@@ -213,6 +231,16 @@
           capture-real-pages needs -e worker=<name from a11y_workers>
           ({{ groups['a11y_workers'] | join(', ') }}), optionally -e role=training|calibration and
           -e shard=i/n. The worker is named rather than addressed so a malformed URL cannot be expressed.
+
+    # A repeat is 1 or 2 and nothing else. It becomes a DIRECTORY name (`captures/repeat-N`), so an
+    # unvalidated value is a path — the containment `out`, `worker` and `role` already have.
+    - name: An acceptance repeat is 1 or 2
+      when: job in ['capture-acceptance', 'export-acceptance']
+      ansible.builtin.assert:
+        that: repeat | default('1') | string in ['1', '2']
+        fail_msg: >-
+          -e repeat=1|2. The two repeats are what measure whether NVDA's output is stable between runs;
+          it is a number, not a path.
 
     # Same containment as `worker` and `role`: a NAME from a fixed list, never a path. `--output` is a
     # directory the trainer creates and writes weights into, so an unvalidated value here would be an
