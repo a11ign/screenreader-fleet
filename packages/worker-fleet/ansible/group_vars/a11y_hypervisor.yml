@@ -1,0 +1,12 @@
+# The Proxmox host. Same key and same user as the containers it runs — it is the machine they live on.
+#
+# STATED EXPLICITLY rather than inherited, and that is a rule this repo learned the expensive way: a new
+# group does NOT inherit another group's `group_vars`, and `wake.yml` records what happens when connection
+# settings are assumed — `ansible_shell_type: powershell` leaked from the workers' group and produced
+# `/bin/sh: 1: PowerShell: not found`. Every connection fact this host needs is written here.
+ansible_connection: ssh
+ansible_user: root
+ansible_shell_type: sh
+ansible_port: 22
+ansible_ssh_private_key_file: "{{ lookup('env', 'A11Y_PVE_KEY') | default('~/.ssh/a11y-pve_ed25519', true) }}"
+ansible_python_interpreter: /usr/bin/python3

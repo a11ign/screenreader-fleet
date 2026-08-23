@@ -1,0 +1,91 @@
+// Tailscale access policy for the a11y-witness fleet.
+//
+// PASTE THIS into the admin console under Access Controls. It lives here rather than only in the console
+// because it is infrastructure configuration, and this project's rule is that configuration nobody can
+// review or diff is configuration that drifts — the same argument that put the fleet in `inventory.yml`
+// and the lab jobs in a catalogue.
+//
+// ## Why this exists at all
+//
+// The four capture workers serve HTTP on :8765 with **no authentication of any kind**. That is deliberate
+// and documented (`packages/worker-fleet/ansible/README.md`): a mutating route on an unauthenticated
+// worker would be remote code execution on every box, which is why the fleet is managed over SSH instead.
+//
+// It was a safe design while "on the LAN" was the trust boundary. Since 2026-08-23 the boundary is "on the
+// tailnet", and Tailscale's DEFAULT policy is allow-all — every device reaching every port. So without
+// this file, adding a phone to the tailnet gives that phone the ability to drive a screen reader on four
+// machines. This narrows it back to what the work actually needs.
+{
+  // Tag the subnet router. A tag is what `autoApprovers` and the rules below can refer to; an untagged
+  // device is identified by its owner, which changes if the machine is ever re-registered.
+  "tagOwners": {
+    "tag:a11y-fleet": ["autogroup:admin"],
+  },
+
+  // Approve advertised routes automatically, INSIDE this prefix and no wider.
+  //
+  // Without it, every machine added to `inventory.yml` needs a visit to the admin console before it is
+  // reachable — a manual step in a workflow that repeats, which is exactly the shape this project keeps
+  // removing. Scoped to REDACTED-INTERNAL-ADDRESS/24 so the router can only ever auto-approve routes on the home LAN;
+  // it cannot approve a route to something else and quietly become a path there.
+  "autoApprovers": {
+    "routes": {
+      "REDACTED-INTERNAL-ADDRESS/24": ["tag:a11y-fleet"],
+    },
+  },
+
+  // Default DENY. Everything not listed below is refused.
+  //
+  // Tailscale's starter policy is a single allow-all rule, and leaving it is the whole risk: it means the
+  // tailnet's security is "every device I ever add is trustworthy forever", which is a promise nobody can
+  // keep. Each rule below names what it is for, so a future reader can tell a deliberate hole from an
+  // accident.
+  "acls": [
+    // Your own devices reach the capture workers on the worker port only.
+    //
+    // Port-scoped rather than `*:*` on purpose: the workers also expose a diagnostics endpoint and a
+    // Windows box has plenty else listening. This is the port the tooling uses and the only one it needs.
+    {
+      "action": "accept",
+      "src": ["autogroup:member"],
+      "dst": [
+        "REDACTED-INTERNAL-ADDRESS:8765",
+        "REDACTED-INTERNAL-ADDRESS:8765",
+        "REDACTED-INTERNAL-ADDRESS:8765",
+        "REDACTED-INTERNAL-ADDRESS:8765",
+      ],
+    },
+
+    // SSH to the lab, the control container, the hypervisor and the AI server.
+    //
+    // `lab:job`, `lab:fetch` and `lab:stop` are Ansible over SSH from a laptop, so this is the rule that
+    // makes working away from home possible at all. The control container holds the fleet key (ADR 0012),
+    // which is why this is deliberately narrow: SSH, and nothing else.
+    {
+      "action": "accept",
+      "src": ["autogroup:member"],
+      "dst": [
+        "REDACTED-INTERNAL-ADDRESS:22",
+        "REDACTED-INTERNAL-ADDRESS:22",
+        "REDACTED-INTERNAL-ADDRESS:22",
+        "tag:a11y-fleet:22",
+      ],
+    },
+
+    // The AI server, on whatever it serves. Left broad on purpose and flagged as such: it is not part of
+    // this project, its ports are not this file's business, and pretending to know them would be a rule
+    // that looks precise and is guesswork. Narrow it when its actual ports are known.
+    {
+      "action": "accept",
+      "src": ["autogroup:member"],
+      "dst": ["REDACTED-INTERNAL-ADDRESS:*"],
+    },
+  ],
+
+  // WAKE-ON-LAN DOES NOT WORK THROUGH THIS, and no rule here can change that.
+  //
+  // `fleet:wake` sends a magic packet, which is a LAN broadcast — it does not cross a tailnet, because a
+  // subnet router forwards unicast to specific addresses. Waking a sleeping worker still needs something
+  // already on the LAN to send it, which the control container is. Recorded here because the symptom
+  // ("wake does nothing when I am away") looks like an ACL problem and is not one.
+}

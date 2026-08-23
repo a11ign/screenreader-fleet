@@ -1,0 +1,153 @@
+---
+# Reach the fleet from anywhere, over Tailscale.
+#
+#     ansible-playbook tailscale.yml            # install, configure, print the login URL
+#     ansible-playbook tailscale.yml -e check=true   # report state, change nothing
+#
+# ## One subnet router, not an agent per box
+#
+# Tailscale runs on the PROXMOX HOST only, advertising a route to each machine in `inventory.yml`. Three
+# reasons, and the first is the one that decided it:
+#
+#   - **Both containers are `--unprivileged 1`.** Tailscale inside one needs `/dev/net/tun` passed through
+#     with host-side cgroup and mount-entry config. It works and it erodes the isolation ADR 0012 chose.
+#     Routing avoids the question entirely.
+#   - **The workers are Windows**, and would each need an agent, a login and a device in the tailnet.
+#   - **Tailscale's free plan allows 50 TAGGED resources.** A subnet router registers ONE, however large
+#     the fleet grows; an agent per box spends one each and eventually costs money for nothing.
+#
+# ## Named machines, and derived rather than listed
+#
+# The routes are `/32`s built FROM the inventory, not a hand-kept list. Advertising the whole
+# `REDACTED-INTERNAL-ADDRESS/24` would have been simpler and would expose every device on the home LAN — phones, a NAS,
+# the router's admin page — to anything on the tailnet. The set of machines this project touches is already
+# written down once, deliberately, and this is the same set: adding a worker to `inventory.yml` extends the
+# route automatically, and a machine that is not in the inventory is not reachable.
+#
+# ## What this does NOT do
+#
+# It does not create your tailnet, and it does not approve the routes — both are yours, in the admin
+# console. It prints the login URL and stops. Nothing here is destructive: `tailscale down` on the host
+# returns everything to exactly how it was.
+- name: Reach the fleet from anywhere
+  hosts: a11y_hypervisor
+  gather_facts: true
+
+  vars:
+    # Every host in the inventory except this one, as a /32. `| unique` because a host in two groups would
+    # otherwise be advertised twice, which Tailscale accepts and which makes the route list lie about size.
+    tailscale_routes: >-
+      {{ groups['all']
+         | difference(groups['a11y_hypervisor'])
+         | map('extract', hostvars, 'ansible_host')
+         | select('defined') | map('regex_replace', '$', '/32')
+         | unique | sort | join(',') }}
+
+  tasks:
+    - name: What is here already
+      ansible.builtin.command:
+        argv: [sh, -c, "command -v tailscale >/dev/null && tailscale status --json || echo '{}'"]
+      register: existing
+      changed_when: false
+      failed_when: false
+
+    - name: The routes that would be advertised
+      ansible.builtin.debug:
+        msg: >-
+          {{ tailscale_routes.split(',') | length }} route(s), one per inventory host:
+          {{ tailscale_routes }}
+
+    # A route list that is empty or suspiciously short would silently advertise nothing, and the symptom
+    # is "Tailscale works but I cannot reach anything" — indistinguishable from a firewall problem. Refuse.
+    - name: There must be a route for every machine
+      ansible.builtin.assert:
+        that: tailscale_routes.split(',') | length >= (groups['all'] | length) - 1
+        fail_msg: >-
+          Only {{ tailscale_routes.split(',') | length }} route(s) built from an inventory of
+          {{ groups['all'] | length }} hosts. A host is missing `ansible_host:` — fix the inventory rather
+          than advertising a subnet, or the gap becomes invisible once this works at all.
+
+    - name: Report and stop
+      when: check | default(false) | bool
+      ansible.builtin.meta: end_play
+
+    - name: Tailscale's signing key
+      ansible.builtin.get_url:
+        url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_distribution_release }}.noarmor.gpg"
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: "0644"
+
+    - name: Tailscale's apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
+          https://pkgs.tailscale.com/stable/debian {{ ansible_distribution_release }} main
+        filename: tailscale
+        state: present
+
+    - name: Install tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+        update_cache: true
+
+    # A subnet router forwards packets for other machines, which the kernel refuses by default. Persistent,
+    # because a reboot that silently stops routing is the fault that reads as "the VPN is broken".
+    - name: Allow forwarding, and keep allowing it across reboots
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: "1"
+        sysctl_file: /etc/sysctl.d/99-tailscale.conf
+        sysctl_set: true
+        reload: true
+      loop: [net.ipv4.ip_forward, net.ipv6.conf.all.forwarding]
+
+    # ALREADY UP? Then just re-point it. `tailscale set` applies the routes without re-authenticating, so
+    # re-running this playbook after adding a machine to the inventory is a one-liner rather than a login.
+    - name: Re-point an already-authenticated node at the current inventory
+      when: (existing.stdout | from_json).BackendState | default('') == 'Running'
+      ansible.builtin.command:
+        argv: [tailscale, set, "--advertise-routes={{ tailscale_routes }}"]
+      changed_when: true
+
+    # NOT YET AUTHENTICATED. `tailscale up` BLOCKS waiting for a browser login, so running it inline hangs
+    # until a timeout and the playbook reports a failure that is really the expected first run.
+    #
+    # Worse, the first version backgrounded it over SSH — and the process died with the session, so when
+    # the login was completed in a browser there was nothing left locally to finish the handshake. The
+    # machine stayed logged out while the routes looked approved. Measured 2026-08-23; it cost two rounds
+    # of asking a human to click the same link.
+    #
+    # `systemd-run --remain-after-exit` parents it to PID 1, exactly as `run-job.yml` does for lab jobs and
+    # for the same reason: the work must outlive the connection that started it.
+    - name: Start the login, detached, so it survives this connection
+      when: (existing.stdout | from_json).BackendState | default('') != 'Running'
+      ansible.builtin.shell:
+        cmd: >-
+          systemctl reset-failed tailscale-up 2>/dev/null;
+          systemd-run --unit=tailscale-up --remain-after-exit
+          tailscale up --advertise-routes={{ tailscale_routes }}
+          --accept-dns=false --hostname=a11y-fleet
+      changed_when: true
+
+    - name: Read back the login URL it is waiting on
+      when: (existing.stdout | from_json).BackendState | default('') != 'Running'
+      ansible.builtin.shell:
+        cmd: >-
+          sleep 8;
+          journalctl -u tailscale-up --no-pager -n 30
+          | grep -oE 'https://login\.tailscale\.com/[a-zA-Z0-9/]+' | head -1
+      register: login_url
+      changed_when: false
+
+    - name: What to do next
+      ansible.builtin.debug:
+        msg: >-
+          {{ ('Sign in at: ' ~ (login_url.stdout | default('') | trim)
+              ~ ' — then approve the routes: Machines -> a11y-fleet -> Edit route settings. Signing in and
+              approving routes are TWO actions and the second is easy to miss; `tailscale status --json`
+              Self.PrimaryRoutes stays empty until it is done, which is the check to trust.')
+             if (login_url.stdout | default('') | trim | length) > 0
+             else 'Already authenticated; routes re-pointed at the current inventory. With the
+                   autoApprovers rule in packages/worker-fleet/tailscale-acl.hujson, new routes need no
+                   console visit.' }}

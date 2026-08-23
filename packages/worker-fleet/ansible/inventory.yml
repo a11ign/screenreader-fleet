@@ -114,3 +114,28 @@ all:
           # `a11y-pve` key — NOT through `pct exec` on the host, which is a second hop and therefore a
           # second layer of shell quoting for every command to survive.
           ansible_host: REDACTED-INTERNAL-ADDRESS
+
+    # The Proxmox host both containers run on. Here because it is the ONE machine that needs Tailscale: it
+    # advertises a route to every other host in this file, so the fleet becomes reachable from anywhere
+    # without an agent on any worker and without touching the unprivileged containers — where Tailscale
+    # would need TUN passed through from the host and would erode the isolation ADR 0012 chose.
+    #
+    # It is NOT a capture worker and must never become one. `fleet-env.mjs` reads a host's group from its
+    # PATH (`all.children.<group>.hosts`) rather than matching on `ansible_host:`, so a host outside
+    # `a11y_workers` cannot turn into a phantom worker URL — which is the failure that guard exists for.
+    a11y_hypervisor:
+      hosts:
+        pve-micro:
+          ansible_host: REDACTED-INTERNAL-ADDRESS
+
+    # Machines that are NOT part of the capture fleet but should be reachable over the tailnet.
+    #
+    # Here so the Tailscale routes stay derived from ONE list rather than a second one kept in step by
+    # hand — that is the whole reason `tailscale.yml` builds its routes from this file. Nothing else reads
+    # this group: every playbook names the group it targets, so a host here is never deployed to, woken,
+    # or dispatched work, and `fleet-env.mjs` reads a host's group from its path so it cannot become a
+    # phantom capture worker.
+    a11y_tailnet_only:
+      hosts:
+        ai-server:
+          ansible_host: REDACTED-INTERNAL-ADDRESS
