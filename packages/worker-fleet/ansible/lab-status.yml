@@ -59,6 +59,14 @@
       ansible.builtin.debug:
         msg: "{{ detail.stdout_lines | default(['(no such unit)']) }}"
 
+    - name: "Which run to show"
+      when: job is defined
+      ansible.builtin.command:
+        argv: [systemctl, show, "-p", InvocationID, "--value", "a11y-job-{{ job }}"]
+      register: job_invocation
+      changed_when: false
+      failed_when: false
+
     - name: "Its recent output"
       when: job is defined
       ansible.builtin.command:
@@ -66,10 +74,30 @@
         # prints a line per case and its SUMMARY comes last, so the one failing case among 1,306 scrolls
         # off and the count is all you can see. A status tool that shows a failure count and not the
         # failure is half a tool.
-        argv: [journalctl, "-u", "a11y-job-{{ job }}", "--no-pager", "-n", "{{ lines | default(40) }}"]
+        # Scoped to ONE invocation when systemd still knows which — see `run-job.yml` for why `-u <unit>`
+        # is a trap: it returns every run since boot, oldest first, so a predecessor's output arrives above
+        # the current one and only a timestamp tells them apart.
+        #
+        # But `run-job.yml` RELEASES the unit when a job finishes, and a released unit has no InvocationID.
+        # So for anything already complete the id is empty, and scoping on it returned `-- No entries --`:
+        # a status tool showing nothing where there is plenty, which is worse than showing too much. Falls
+        # back to the unit journal and SAYS SO, because absent and abundant must not look alike.
+        argv: "{{ ['journalctl', '--no-pager', '-n', lines | default(40) | string]
+               + (['_SYSTEMD_INVOCATION_ID=' ~ (job_invocation.stdout | trim)]
+                  if (job_invocation.stdout | default('') | trim | length) > 0
+                  else ['-u', 'a11y-job-' ~ job]) }}"
       register: recent
       changed_when: false
       failed_when: false
+
+    - name: "Whether that journal is ONE run or the unit's whole history"
+      when: job is defined
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'this invocation only (' ~ (job_invocation.stdout | trim) ~ ')'
+             if (job_invocation.stdout | default('') | trim | length) > 0
+             else 'ALL runs of this unit since boot, oldest first — the unit has been released, so systemd
+                   no longer knows which invocation was last. Read the timestamps.' }}
 
     - name: "journal for {{ job | default('') }}"
       when: job is defined

@@ -229,11 +229,32 @@
   register: job_result
   changed_when: false
 
+# THIS invocation's output, not the unit's whole history.
+#
+# `journalctl -u <unit>` returns every run of that unit since boot, oldest first. So a job that has run
+# before hands back its PREDECESSOR's output above its own, and the two are distinguishable only by reading
+# timestamps. That misled three separate diagnoses on 2026-08-23: a training report showed a two-day-old
+# "seed smoke-test artifact" warning, a diagnostic showed a previous attempt's `can't open`, and
+# `build-realism` appeared to report a stale record count, which read like a race between jobs and was not.
+#
+# systemd stamps every start with a unique `InvocationID`, so filtering on it returns exactly one run.
+# `_SYSTEMD_INVOCATION_ID` is the journal field carrying it. Read AFTER the job finishes, so it is the id
+# of the run just waited on.
+- name: "Which run was this: {{ job_name }}"
+  ansible.builtin.command:
+    argv: [systemctl, show, "-p", InvocationID, "--value", "{{ job_unit }}"]
+  register: job_invocation
+  changed_when: false
+
 - name: "Collect its output: {{ job_name }}"
   ansible.builtin.command:
-    argv: [journalctl, "-u", "{{ job_unit }}", "--no-pager", "-n", "200"]
+    argv: [journalctl, "_SYSTEMD_INVOCATION_ID={{ job_invocation.stdout | trim }}",
+           "--no-pager", "-n", "200"]
   register: job_log
   changed_when: false
+  # An empty InvocationID would make this a journal-wide query rather than a scoped one, which is worse
+  # than the problem: it would return other units' output. Refuse instead.
+  failed_when: job_invocation.stdout | trim | length == 0
 
 - name: "What it said: {{ job_name }}"
   ansible.builtin.debug:
