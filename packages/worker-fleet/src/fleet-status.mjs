@@ -201,7 +201,17 @@ async function main() {
     process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
   } else {
     process.stdout.write(`\n${renderTable(status.rows).join("\n")}\n\n`);
-    process.stdout.write(`  ${status.reachable}/${status.total} reachable\n`);
+    // "reachable" said more than it measured. This probes ONE channel — HTTP :8765 — and a worker can serve
+    // it perfectly while being unmanageable: on 2026-08-23 all four reported reachable and CONSISTENT while
+    // `ansible-playbook deploy.yml` answered UNREACHABLE on every one, because the tailnet ACL grants
+    // tcp:8765 and not tcp:22. Nothing here was wrong; the word invited a conclusion it does not support,
+    // and an afternoon went into diagnosing a fleet that was healthy.
+    process.stdout.write(`  ${status.reachable}/${status.total} serving /health (the capture channel)\n`);
+    if (status.reachable === status.total) {
+      process.stdout.write("  This says nothing about whether you can DEPLOY to them — that is SSH, and it "
+        + "is\n  a separate channel with separate access. `npm run worker:code` compares what they serve\n"
+        + "  against this checkout.\n");
+    }
     if (status.reachable >= 2) {
       process.stdout.write(status.consistent
         ? "  fleet CONSISTENT — these workers are interchangeable for capture\n"

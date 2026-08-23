@@ -5,6 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { stateOf, activityOf, summarise } from "./fleet-status.mjs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const ready = { name: "w1", url: "http://REDACTED-INTERNAL-ADDRESS:8765", reachable: true, health: { ready: true, busy: false }, progress: { busy: false, capturing: null } };
 
@@ -91,4 +93,19 @@ test("a healthy worker's row carries the code, so a stale box is visible here to
   }]);
   assert.equal(row.code, "22822b7a3a08969c");
   assert.equal(row.degraded, false);
+});
+
+test("the summary says WHICH channel it probed, never an unqualified 'reachable'", () => {
+  // This probes one channel — HTTP :8765 — and a worker can serve it perfectly while being unmanageable.
+  // On 2026-08-23 all four reported reachable and CONSISTENT while `ansible-playbook deploy.yml` answered
+  // UNREACHABLE on every one, because the tailnet ACL grants tcp:8765 and not tcp:22. The tool measured
+  // exactly what it said; the WORD invited a conclusion it does not support, and an afternoon went into
+  // diagnosing a fleet that was healthy.
+  const source = readFileSync(
+    fileURLToPath(new URL("./fleet-status.mjs", import.meta.url)), "utf8");
+  assert.ok(!/\$\{status\.reachable\}\/\$\{status\.total\} reachable/.test(source),
+    "the summary claims bare 'reachable' again; name the channel, because a reader will infer 'usable'");
+  assert.match(source, /serving \/health/, "the summary must name the channel it actually probed");
+  assert.match(source, /whether you can DEPLOY/,
+    "it must say what it does NOT cover — deployability is a different channel with different access");
 });
