@@ -109,10 +109,15 @@
     #
     # The policy must define `tag:a11y-fleet` FIRST: a node cannot advertise a tag the tailnet has not
     # declared. See `packages/worker-fleet/tailscale-acl.hujson`.
+    # STOP then reset-failed, in that order. `--remain-after-exit` leaves the unit `active (exited)` after
+    # a successful run, and `reset-failed` only clears a FAILED one — so `systemd-run` refuses the name
+    # with "Unit tailscale-up.service was already ...". CLAUDE.md records this exact pair for lab jobs and
+    # I did not apply it here; a rule written down is not a rule applied.
     - name: Re-authenticate under the fleet tag
       when: tag | default(false) | bool
       ansible.builtin.shell:
         cmd: >-
+          systemctl stop tailscale-up 2>/dev/null;
           systemctl reset-failed tailscale-up 2>/dev/null;
           systemd-run --unit=tailscale-up --remain-after-exit
           tailscale up --advertise-routes={{ tailscale_routes }} --accept-dns=false
@@ -162,6 +167,7 @@
       when: (existing.stdout | from_json).BackendState | default('') != 'Running'
       ansible.builtin.shell:
         cmd: >-
+          systemctl stop tailscale-up 2>/dev/null;
           systemctl reset-failed tailscale-up 2>/dev/null;
           systemd-run --unit=tailscale-up --remain-after-exit
           tailscale up --advertise-routes={{ tailscale_routes }}
