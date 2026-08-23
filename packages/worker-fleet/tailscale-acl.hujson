@@ -1,91 +1,110 @@
 // Tailscale access policy for the a11y-witness fleet.
 //
-// PASTE THIS into the admin console under Access Controls. It lives here rather than only in the console
-// because it is infrastructure configuration, and this project's rule is that configuration nobody can
-// review or diff is configuration that drifts — the same argument that put the fleet in `inventory.yml`
-// and the lab jobs in a catalogue.
+// PASTE THIS into the admin console under Access Controls, replacing what is there. It lives in the repo
+// because it is infrastructure configuration, and configuration nobody can review or diff is configuration
+// that drifts — the same argument that put the fleet in `inventory.yml` and the lab jobs in a catalogue.
 //
-// ## Why this exists at all
+// ## Why this exists
 //
 // The four capture workers serve HTTP on :8765 with **no authentication of any kind**. That is deliberate
 // and documented (`packages/worker-fleet/ansible/README.md`): a mutating route on an unauthenticated
 // worker would be remote code execution on every box, which is why the fleet is managed over SSH instead.
 //
-// It was a safe design while "on the LAN" was the trust boundary. Since 2026-08-23 the boundary is "on the
-// tailnet", and Tailscale's DEFAULT policy is allow-all — every device reaching every port. So without
-// this file, adding a phone to the tailnet gives that phone the ability to drive a screen reader on four
-// machines. This narrows it back to what the work actually needs.
+// Safe while "on the LAN" was the trust boundary. Since 2026-08-23 the boundary is "on the tailnet", and
+// Tailscale's default policy is a single allow-all grant — so without this, a phone added to the tailnet
+// can drive a screen reader on four machines.
+//
+// ## `grants`, not `acls`
+//
+// Written in the grants syntax this tailnet was provisioned with. Tailscale REFUSES a policy containing
+// both `acls` and `grants`, so an older-style file cannot simply be added alongside the default.
 {
-  // Tag the subnet router. A tag is what `autoApprovers` and the rules below can refer to; an untagged
-  // device is identified by its owner, which changes if the machine is ever re-registered.
+  // Lets the subnet router hold a tag. A tag matters for more than tidiness: an untagged node is owned by
+  // a user and inherits that user's KEY EXPIRY — default 180 days — after which it silently drops off the
+  // tailnet. For a subnet router that everything else is reached through, that is an outage with a
+  // six-month fuse. A tagged node does not expire.
   "tagOwners": {
     "tag:a11y-fleet": ["autogroup:admin"],
   },
 
-  // Approve advertised routes automatically, INSIDE this prefix and no wider.
+  // Approve advertised routes automatically, inside this prefix and no wider.
   //
   // Without it, every machine added to `inventory.yml` needs a visit to the admin console before it is
-  // reachable — a manual step in a workflow that repeats, which is exactly the shape this project keeps
-  // removing. Scoped to REDACTED-INTERNAL-ADDRESS/24 so the router can only ever auto-approve routes on the home LAN;
-  // it cannot approve a route to something else and quietly become a path there.
+  // reachable — a manual step in a workflow that repeats. Scoped to REDACTED-INTERNAL-ADDRESS/24 so the router can only
+  // ever auto-approve routes on the home LAN, never become a path somewhere else.
+  //
+  // REQUIRES THE NODE TO ACTUALLY CARRY THE TAG. It is named here, and until
+  // `tailscale up --advertise-tags=tag:a11y-fleet` has been run this rule matches nothing and approves
+  // nothing — which looks exactly like being configured. See the sequence at the bottom of this file.
   "autoApprovers": {
     "routes": {
       "REDACTED-INTERNAL-ADDRESS/24": ["tag:a11y-fleet"],
     },
   },
 
-  // Default DENY. Everything not listed below is refused.
-  //
-  // Tailscale's starter policy is a single allow-all rule, and leaving it is the whole risk: it means the
-  // tailnet's security is "every device I ever add is trustworthy forever", which is a promise nobody can
-  // keep. Each rule below names what it is for, so a future reader can tell a deliberate hole from an
-  // accident.
-  "acls": [
-    // Your own devices reach the capture workers on the worker port only.
+  // Default DENY: anything not granted below is refused. The starter policy's `{"src":["*"],"dst":["*"]}`
+  // is gone, and that is the point — leaving it means the tailnet's security is "every device I ever add
+  // is trustworthy forever", a promise nobody can keep.
+  "grants": [
+    // Your devices reach the capture workers, on the worker port only.
     //
-    // Port-scoped rather than `*:*` on purpose: the workers also expose a diagnostics endpoint and a
-    // Windows box has plenty else listening. This is the port the tooling uses and the only one it needs.
+    // Port-scoped rather than everything: these are Windows boxes with plenty else listening, and :8765 is
+    // the only port the tooling uses.
     {
-      "action": "accept",
       "src": ["autogroup:member"],
-      "dst": [
-        "REDACTED-INTERNAL-ADDRESS:8765",
-        "REDACTED-INTERNAL-ADDRESS:8765",
-        "REDACTED-INTERNAL-ADDRESS:8765",
-        "REDACTED-INTERNAL-ADDRESS:8765",
-      ],
+      "dst": ["REDACTED-INTERNAL-ADDRESS", "REDACTED-INTERNAL-ADDRESS", "REDACTED-INTERNAL-ADDRESS", "REDACTED-INTERNAL-ADDRESS"],
+      "ip": ["tcp:8765"],
     },
 
-    // SSH to the lab, the control container, the hypervisor and the AI server.
+    // SSH to the lab, the control container, and the subnet router itself.
     //
-    // `lab:job`, `lab:fetch` and `lab:stop` are Ansible over SSH from a laptop, so this is the rule that
-    // makes working away from home possible at all. The control container holds the fleet key (ADR 0012),
-    // which is why this is deliberately narrow: SSH, and nothing else.
+    // This is the rule that makes working away from home possible at all: `lab:job`, `lab:fetch` and
+    // `lab:stop` are Ansible over SSH. The control container holds the fleet key (ADR 0012), so this stays
+    // narrow — SSH, nothing else.
+    //
+    // The router is named THREE ways on purpose. `tag:a11y-fleet` is what it will be; `autogroup:self`
+    // covers it while it is still owned by your account, before the tag is applied. Without the second,
+    // saving this policy would cut off SSH to the router until the tag existed — and the tag can only be
+    // applied over that same connection.
     {
-      "action": "accept",
       "src": ["autogroup:member"],
-      "dst": [
-        "REDACTED-INTERNAL-ADDRESS:22",
-        "REDACTED-INTERNAL-ADDRESS:22",
-        "REDACTED-INTERNAL-ADDRESS:22",
-        "tag:a11y-fleet:22",
-      ],
+      "dst": ["REDACTED-INTERNAL-ADDRESS", "REDACTED-INTERNAL-ADDRESS", "tag:a11y-fleet", "autogroup:self"],
+      "ip": ["tcp:22"],
     },
 
-    // The AI server, on whatever it serves. Left broad on purpose and flagged as such: it is not part of
-    // this project, its ports are not this file's business, and pretending to know them would be a rule
-    // that looks precise and is guesswork. Narrow it when its actual ports are known.
+    // The AI server, on whatever it serves.
+    //
+    // Deliberately broad and flagged as such: it is not part of this project, its ports are not this
+    // file's business, and inventing a port list would be a rule that looks precise and is guesswork.
+    // Narrow it when its actual ports are known.
     {
-      "action": "accept",
       "src": ["autogroup:member"],
-      "dst": ["REDACTED-INTERNAL-ADDRESS:*"],
+      "dst": ["REDACTED-INTERNAL-ADDRESS"],
+      "ip": ["*"],
     },
   ],
 
-  // WAKE-ON-LAN DOES NOT WORK THROUGH THIS, and no rule here can change that.
+  // KEPT FROM THE DEFAULT POLICY, unchanged.
   //
-  // `fleet:wake` sends a magic packet, which is a LAN broadcast — it does not cross a tailnet, because a
-  // subnet router forwards unicast to specific addresses. Waking a sleeping worker still needs something
-  // already on the LAN to send it, which the control container is. Recorded here because the symptom
-  // ("wake does nothing when I am away") looks like an ACL problem and is not one.
+  // This governs Tailscale SSH — where Tailscale itself brokers the connection — which this project does
+  // not use; the fleet runs ordinary sshd with the `a11y-pve` key. So it is inert for us, and dropping
+  // someone else's working configuration because it is unfamiliar is not a tidy-up.
+  "ssh": [
+    {
+      "action": "check",
+      "src":    ["autogroup:member"],
+      "dst":    ["autogroup:self"],
+      "users":  ["autogroup:nonroot", "root"],
+    },
+  ],
 }
+
+// ## The order matters, and only one sequence works
+//
+//   1. Save this policy. `tagOwners` must exist before any node can claim the tag.
+//   2. `npm run fleet:tailscale -- -e tag=true` — re-runs `tailscale up --advertise-tags=tag:a11y-fleet`.
+//      This RE-AUTHENTICATES: applying a tag transfers the node from your account to the tag, so it needs
+//      a fresh login.
+//   3. Routes then auto-approve. No console visit for this or any machine added later.
+//
+// Doing 2 before 1 fails: a node cannot advertise a tag the policy does not define.

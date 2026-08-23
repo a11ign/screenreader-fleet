@@ -102,6 +102,44 @@
         reload: true
       loop: [net.ipv4.ip_forward, net.ipv6.conf.all.forwarding]
 
+    # `-e tag=true` re-authenticates the node under `tag:a11y-fleet`, which is what makes `autoApprovers`
+    # work and what stops the node inheriting a user's 180-day key expiry — an outage with a six-month fuse
+    # on the one machine everything else is reached through. It re-authenticates because applying a tag
+    # transfers ownership from a user to the tag, so a fresh login is unavoidable.
+    #
+    # The policy must define `tag:a11y-fleet` FIRST: a node cannot advertise a tag the tailnet has not
+    # declared. See `packages/worker-fleet/tailscale-acl.hujson`.
+    - name: Re-authenticate under the fleet tag
+      when: tag | default(false) | bool
+      ansible.builtin.shell:
+        cmd: >-
+          systemctl reset-failed tailscale-up 2>/dev/null;
+          systemd-run --unit=tailscale-up --remain-after-exit
+          tailscale up --advertise-routes={{ tailscale_routes }} --accept-dns=false
+          --hostname=a11y-fleet --advertise-tags=tag:a11y-fleet
+      changed_when: true
+
+    - name: The login URL for the tagged node
+      when: tag | default(false) | bool
+      ansible.builtin.shell:
+        cmd: >-
+          sleep 8;
+          journalctl -u tailscale-up --no-pager -n 30
+          | grep -oE 'https://login\.tailscale\.com/[a-zA-Z0-9/]+' | head -1
+      register: tag_url
+      changed_when: false
+
+    - name: Sign in to complete tagging
+      when: tag | default(false) | bool
+      ansible.builtin.debug:
+        msg: >-
+          {{ ('Sign in at: ' ~ (tag_url.stdout | trim)) if (tag_url.stdout | trim | length) > 0
+             else 'Already tagged; nothing to sign in to.' }}
+
+    - name: Stop here when tagging
+      when: tag | default(false) | bool
+      ansible.builtin.meta: end_play
+
     # ALREADY UP? Then just re-point it. `tailscale set` applies the routes without re-authenticating, so
     # re-running this playbook after adding a machine to the inventory is a one-liner rather than a login.
     - name: Re-point an already-authenticated node at the current inventory
@@ -128,6 +166,7 @@
           systemd-run --unit=tailscale-up --remain-after-exit
           tailscale up --advertise-routes={{ tailscale_routes }}
           --accept-dns=false --hostname=a11y-fleet
+          {{ '--advertise-tags=tag:a11y-fleet' if (tag | default(false) | bool) else '' }}
       changed_when: true
 
     - name: Read back the login URL it is waiting on
