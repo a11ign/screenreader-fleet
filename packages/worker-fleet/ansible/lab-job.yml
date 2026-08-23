@@ -220,9 +220,9 @@
     - name: A train job names its scratch output from a fixed list
       when: job in ['train', 'acceptance', 'shortcuts', 'false-positives']
       ansible.builtin.assert:
-        that: out | default('candidate') in ['candidate', 'multidefect', 'scratch']
+        that: out | default('candidate') in ['candidate', 'multidefect', 'varied', 'scratch']
         fail_msg: >-
-          -e out=<name> must be one of: candidate, multidefect, scratch. It is a NAME, not a path — the
+          -e out=<name> must be one of: candidate, multidefect, varied, scratch. It is a NAME, not a path — the
           trainer writes weights into `runs/model-<name>`, so a path here would be an arbitrary write.
           Add a name to this list if you need another; do not pass a directory.
 

@@ -38,7 +38,7 @@
         that:
           - artifact is defined
           - artifact in lab_artifacts
-          - out | default('candidate') in ['candidate', 'multidefect', 'scratch']
+          - out | default('candidate') in ['candidate', 'multidefect', 'varied', 'scratch']
         fail_msg: >-
           Pass -e artifact=<name>, one of: {{ lab_artifacts.keys() | list | join(', ') }};
           optionally -e out=candidate|multidefect|scratch. Both are NAMES, never paths.
