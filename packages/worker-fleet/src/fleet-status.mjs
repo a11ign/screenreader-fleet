@@ -32,7 +32,7 @@
  *   ordinary churn rather than as a split fleet".
  */
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { requestJson } from "./worker-http.mjs";
 import { configuredWorkers, workersFromInventory, portFromGroupVars } from "./fleet-env.mjs";
@@ -213,4 +213,4 @@ async function main() {
   process.exit(status.reachable === 0 ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();

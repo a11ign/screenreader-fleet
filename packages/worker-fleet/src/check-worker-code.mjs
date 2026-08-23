@@ -10,12 +10,13 @@
 //
 // This asks each worker over HTTP, which is reachable exactly when the worker is usable and
 // involves no guest agent. Exit 0 when every worker matches, 1 otherwise.
+import { pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { codeVersion, workerSourceDir } from "@a11y-witness/nvda-worker";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
-import { configuredWorkers } from "./fleet-env.mjs";
+import { configuredWorkers, inventoryWorkerUrls } from "./fleet-env.mjs";
 
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.
@@ -88,6 +89,7 @@ async function main() {
   }
 
   let stale = 0;
+  const staleUrls = [];
   for (const url of urls) {
     let actual;
     try {
@@ -98,18 +100,54 @@ async function main() {
     }
     // "absent" means the worker predates /health.code, which is itself a stale deploy.
     const ok = actual === expected;
-    if (!ok) stale += 1;
+    if (!ok) { stale += 1; staleUrls.push(url); }
     console.log(`  ${url}  ${actual}  ${ok ? "matches" : "STALE — redeploy and REBOOT the guest"}`);
   }
   if (stale) {
-    console.log(`\n${stale} stale worker(s). A restart via \`utmctl exec\` silently does nothing on`);
-    console.log("some guests; rebooting the VM always picks up a pushed file:");
-    console.log("  utmctl stop <uuid> --request && utmctl start <uuid>");
-      console.log("  ...or simply: npm run worker:deploy");
-      const note = protocolBumpNote();
-      if (note) console.log(note);
+    for (const line of remedyLines(staleUrls, inventoryWorkerUrls())) console.log(line);
+    const note = protocolBumpNote();
+    if (note) console.log(note);
   }
   process.exit(stale ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+/**
+ * Name the deploy route that can actually reach these workers.
+ *
+ * There are two, they share no mechanism, and the wrong one wastes real time. `worker:deploy` is
+ * `utmctl file push` plus a `utmctl` reboot: it takes a VM UUID and fails immediately off macOS, so it
+ * cannot touch a physical box. Bare-metal workers are git-cloned and deploy by PULLING, through Ansible.
+ *
+ * This printed the utmctl advice unconditionally, including to a fleet of four mini PCs where none of it
+ * applies — a tool confidently prescribing a remedy for a different kind of machine. Which kind a worker is
+ * is not a guess: `inventory.yml` is the single source of truth for the bare-metal fleet (ADR 0012).
+ *
+ * PURE, and the bare-metal list is a parameter rather than a read, because a remedy that only appears when
+ * something is already broken is one nobody sees until it matters. This repo has shipped an inert remedy
+ * before (`refreshBrowseBuffer`, whose trigger was never set) and confirmed it by results it had no part in
+ * producing. Returning lines makes both branches assertable with nothing stale and no fleet.
+ *
+ * @param {string[]} staleUrls
+ * @param {string[]} bareMetalUrls
+ * @returns {string[]}
+ */
+export function remedyLines(staleUrls, bareMetalUrls) {
+  const bareMetal = new Set(bareMetalUrls);
+  const physical = staleUrls.filter((u) => bareMetal.has(u));
+  const vms = staleUrls.filter((u) => !bareMetal.has(u));
+  const lines = [`\n${staleUrls.length} stale worker(s).`];
+
+  if (physical.length) {
+    lines.push(`\n  ${physical.length} in inventory.yml — bare metal, so they deploy by PULLING:`,
+      "    cd packages/worker-fleet/ansible && ansible-playbook deploy.yml",
+      "  `npm run worker:deploy` cannot reach these: it is utmctl, keyed on a VM UUID.");
+  }
+  if (vms.length) {
+    lines.push(`\n  ${vms.length} not in inventory.yml — local VM(s). A restart via \`utmctl exec\``,
+      "  silently does nothing on some guests; rebooting always picks up a pushed file:",
+      "    npm run worker:deploy");
+  }
+  return lines;
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();

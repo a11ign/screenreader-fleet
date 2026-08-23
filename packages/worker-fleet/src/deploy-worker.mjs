@@ -20,6 +20,7 @@
 // Deploys the WORKING TREE, deliberately: that is what you are testing. Roll back by checking out the
 // ref you want and running this again — git is the source of truth for "the previous version", so there
 // is no bespoke backup to go stale.
+import { pathToFileURL } from "node:url";
 import { execFile, execFileSync } from "node:child_process";
 import { createReadStream, readFileSync } from "node:fs";
 import { promisify } from "node:util";
@@ -289,4 +290,4 @@ async function main() {
   process.exit(failed.length ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();

@@ -80,5 +80,17 @@ test("the guard is the exact comparison, never a path suffix", () => {
     const executable = src.split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
     assert.ok(!/process\.argv\[1\]\?\.endsWith\(/.test(executable),
       `${path} guards on a path suffix; use import.meta.url === pathToFileURL(process.argv[1] ?? "").href`);
+
+    // The second wrong idiom, and it silently DISABLES the entry point rather than mis-firing it.
+    // `import.meta.url === \`file://${process.argv[1]}\`` builds a URL by concatenation, so it does not
+    // percent-encode: check this repo out under a path containing a SPACE and the comparison is false, the
+    // guard never fires, and the script exits 0 having done nothing. Measured, not reasoned — a probe in a
+    // directory named "dir with space" reported `template form matches: false` while pathToFileURL matched.
+    // Seven entry points carried it, including fleet-status, check-worker-code, deploy-worker and
+    // fleet-wake: the whole fleet toolchain would have gone quiet for anyone with a space in their path,
+    // reporting success for work never done.
+    assert.ok(!/import\.meta\.url === `file:\/\//.test(executable),
+      `${path} builds its guard by string concatenation, which does not percent-encode — a path with a `
+      + "space makes it silently never run. Use pathToFileURL(process.argv[1] ?? \"\").href");
   }
 });

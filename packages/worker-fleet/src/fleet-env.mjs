@@ -29,7 +29,7 @@
 import { readFileSync } from "node:fs";
 
 import { assertWorkerUrl } from "./worker-http.mjs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const DEFAULT_WORKER_PORT = 8765;
 
@@ -196,6 +196,28 @@ export function portFromGroupVars(text) {
   return match ? Number(match[1]) : DEFAULT_WORKER_PORT;
 }
 
+/**
+ * The workers declared in `inventory.yml` — i.e. the BARE-METAL fleet.
+ *
+ * Exists so a caller can tell a physical box from a local UTM VM, which decides how it is deployed to and
+ * therefore what remedy to print. `worker:code` used to tell every stale worker to run `utmctl` and
+ * `npm run worker:deploy`, which CANNOT reach a bare-metal box — it is a `utmctl file push` keyed on a VM
+ * UUID and fails immediately off macOS. Following that advice on this fleet wastes the time it takes to
+ * discover the tool was describing a different kind of machine.
+ *
+ * Reads the same file through the same parser as `main()`, rather than a second copy of the knowledge.
+ */
+export function inventoryWorkerUrls() {
+  try {
+    const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
+    return workersFromInventory(readFileSync(INVENTORY, "utf8"), { port });
+  } catch {
+    // No inventory, or one that does not parse, means "no bare-metal fleet declared here" — a local-VM-only
+    // checkout is a supported setup. Rethrowing would make a hint fail the command it is only advising.
+    return [];
+  }
+}
+
 function main() {
   const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
   const workers = workersFromInventory(readFileSync(INVENTORY, "utf8"), { port });
@@ -208,4 +230,4 @@ function main() {
   process.stdout.write(`export A11Y_WORKERS='${workers.join(",")}'\n`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();

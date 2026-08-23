@@ -24,7 +24,7 @@
  */
 import { createSocket } from "node:dgram";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { inventoryHosts } from "./fleet-discover.mjs";
 import { requestJson } from "./worker-http.mjs";
@@ -143,4 +143,4 @@ async function main() {
   process.exit(results.some((r) => r.state === "timeout" || r.state === "no-mac") ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();

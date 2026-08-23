@@ -40,7 +40,7 @@
  * its comments — every one of them paid for by an incident — and a parse-and-dump deletes all of them.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
 
@@ -405,4 +405,4 @@ async function main() {
   process.exit(mismatched ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
