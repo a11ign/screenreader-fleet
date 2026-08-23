@@ -126,6 +126,30 @@
          and (lab_other_jobs.stdout | default('') | trim) == ''
          and (lab_dirty.stdout | default('') | trim) == '' }}
 
+- name: "Which ref this job runs at"
+  # `-e ref=<branch>` runs a job at something other than main, and it exists for one specific, recurring
+  # need: a change that CANNOT land on main by itself.
+  #
+  # A feature-schema change is the worked example. `scorer-artifact.test.ts` refuses a tree whose committed
+  # weights carry a different `FEATURE_SCHEMA_VERSION` from the shipped feature pipeline — correctly, since
+  # the scorer rejects that pairing at runtime and the default judge simply stops working. So the extractor
+  # fix and the weights it produces must land in ONE commit; but the weights can only be trained by a lab
+  # that already has the fix. Without this the only ways through are to break main for half an hour, or to
+  # copy a file onto the box by hand — which is how the lab checkout got dirtied on 2026-08-23, blocking
+  # every subsequent pull.
+  #
+  # Validated against a strict pattern rather than trusted: `command` with `argv:` never invokes a shell, so
+  # this is not about injection, but `origin/$(anything)` should not be expressible from a `-e` var.
+  ansible.builtin.set_fact:
+    lab_ref: "{{ ref | default('main') }}"
+
+- name: "A ref must look like a ref"
+  ansible.builtin.assert:
+    that:
+      - lab_ref is match('^[A-Za-z0-9._/-]{1,100}$')
+      - "'..' not in lab_ref"
+    fail_msg: "ref must be a plain branch or tag name, got: {{ lab_ref }}"
+
 - name: "Fetch origin"
   # THE STEP THAT WAS DONE BY HAND BEFORE EVERY JOB, which means it was done by hand or not at all. The lab
   # was once 23 commits behind `main` when a retrain was started on it, so the artefact named a commit that
@@ -161,30 +185,6 @@
 - name: "Settle how the drift should be described"
   ansible.builtin.set_fact:
     lab_behind_count: "{{ (lab_behind.stdout | default('0') | trim | int) }}"
-
-- name: "Which ref this job runs at"
-  # `-e ref=<branch>` runs a job at something other than main, and it exists for one specific, recurring
-  # need: a change that CANNOT land on main by itself.
-  #
-  # A feature-schema change is the worked example. `scorer-artifact.test.ts` refuses a tree whose committed
-  # weights carry a different `FEATURE_SCHEMA_VERSION` from the shipped feature pipeline — correctly, since
-  # the scorer rejects that pairing at runtime and the default judge simply stops working. So the extractor
-  # fix and the weights it produces must land in ONE commit; but the weights can only be trained by a lab
-  # that already has the fix. Without this the only ways through are to break main for half an hour, or to
-  # copy a file onto the box by hand — which is how the lab checkout got dirtied on 2026-08-23, blocking
-  # every subsequent pull.
-  #
-  # Validated against a strict pattern rather than trusted: `command` with `argv:` never invokes a shell, so
-  # this is not about injection, but `origin/$(anything)` should not be expressible from a `-e` var.
-  ansible.builtin.set_fact:
-    lab_ref: "{{ ref | default('main') }}"
-
-- name: "A ref must look like a ref"
-  ansible.builtin.assert:
-    that:
-      - lab_ref is match('^[A-Za-z0-9._/-]{1,100}$')
-      - "'..' not in lab_ref"
-    fail_msg: "ref must be a plain branch or tag name, got: {{ lab_ref }}"
 
 - name: "Fast-forward to origin/{{ lab_ref }}"
   # `--ff-only`, never merge or rebase: a diverged lab checkout is a fact somebody needs to look at, not

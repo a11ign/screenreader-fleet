@@ -321,4 +321,16 @@ test("a job can run at a named ref, and the ref is validated rather than trusted
   // And the stamp must say which ref, or an artefact trained on a branch is indistinguishable from one
   // trained on main — provenance that is wrong being worse than provenance that is absent.
   assert.match(RUN_JOB, /pulled ' ~ lab_ref/, "the run stamp does not record which ref it ran at");
+
+  // ORDER, not just presence. Every assertion above passed while the playbook could not run at all:
+  // `lab_ref` was set in the pull section, below the drift count that reads it, so the first real
+  // invocation died with "'lab_ref' is undefined". A guard that checks a fact exists somewhere in a file
+  // cannot see that it exists too late — the same shape as a test that greps source text instead of
+  // exercising behaviour, which this file already had to fix once.
+  const defined = RUN_JOB.indexOf("lab_ref: \"{{ ref");
+  const firstUse = Math.min(...[/HEAD\.\.origin\/\{\{ lab_ref \}\}/, /origin\/\{\{ lab_ref \}\}"\]/]
+    .map((rx) => { const m = rx.exec(RUN_JOB); return m ? m.index : Number.MAX_SAFE_INTEGER; }));
+  assert.ok(defined >= 0 && defined < firstUse,
+    "lab_ref is used before it is set, so every job fails with \"'lab_ref' is undefined\" — Ansible "
+    + "resolves facts in task order, and this file's tasks are a sequence, not a set");
 });
