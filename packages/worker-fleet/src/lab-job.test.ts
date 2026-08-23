@@ -250,3 +250,45 @@ test("a job that pulled rebuilds, or a gate scores compiled code that is not the
   assert.ok(merge < build && build < start,
     "the build must follow the pull and precede the job, or it rebuilds the wrong tree or none at all");
 });
+
+test("a checkout that cannot pull reports HOW FAR behind it is, not just that it did not pull", () => {
+  // The lab sat 17 commits behind origin for days. A training run left an artefact in the tracked tree, so
+  // every job hit the dirty-checkout branch, said "Not pulling: the checkout is dirty", and ran old code.
+  // The sentence was true and carried no consequence — which is this repo's own rule about a number beating
+  // a word, and the SECOND time this exact drift has cost something (the task's comment records the first,
+  // at 23 commits behind).
+  //
+  // The fetch must be unconditional for the count to exist at all: a fetch writes only to `.git`, so it is
+  // safe on a dirty checkout, and gating it left the one case that needed measuring unmeasured.
+  const fetchTask = RUN_JOB.slice(RUN_JOB.indexOf("- name: \"Fetch origin\""),
+    RUN_JOB.indexOf("- name: \"How far behind"));
+  assert.ok(!/^\s*when:/m.test(fetchTask),
+    "the fetch is gated again, so a checkout that cannot pull has no way to know how stale it is");
+
+  assert.match(RUN_JOB, /rev-list, --count, HEAD\.\.origin\/main/,
+    "nothing measures the drift");
+  assert.match(RUN_JOB, /COMMIT\(S\) BEHIND origin\/main/,
+    "the drift is measured and never said out loud");
+
+  // The stamp is what a reader sees after the fact. "(checkout unchanged)" reads as reassurance; it has to
+  // distinguish up-to-date from stale, or the artefact's provenance line hides the thing that matters.
+  assert.ok(!/'\(checkout unchanged\)'/.test(RUN_JOB),
+    "the run stamp still says a bare '(checkout unchanged)', which reads identically whether the checkout "
+    + "is current or 17 commits stale");
+});
+
+test("a job that leaves the checkout dirty is named, and compared against the state before it ran", () => {
+  // The general form of today's defect. One script wrote into `packages/`, the checkout went dirty, and
+  // every later job refused to pull — correctly, since it cannot tell a stray artefact from work in
+  // progress — so the lab ran 17 commits behind for days. Fixing that one script fixes one script; this
+  // catches the next one.
+  assert.match(RUN_JOB, /register: lab_dirty_after/, "nothing checks the tree after the job runs");
+  assert.match(RUN_JOB, /LEFT THE CHECKOUT DIRTY/, "the check exists and never says anything");
+
+  // Compared against the BEFORE state, not against clean. A checkout that was already dirty must not make
+  // every subsequent job report a problem it did not cause — "it was already like that" and "you did this"
+  // are different answers, and a warning that fires for someone else's mess is one people learn to ignore.
+  assert.match(RUN_JOB, /lab_dirty_after\.stdout \| trim\) != \(lab_dirty\.stdout/,
+    "the after-state is compared against clean rather than against the before-state, so an already-dirty "
+    + "checkout blames whichever job ran next");
+});

@@ -133,11 +133,34 @@
   #
   # `command` with `argv:`, never `shell`, because this file's own test forbids a shell here and is right to:
   # the quoting class it removes is what sent four capture shards at `--worker=http://:8765` for 29 minutes.
-  when: "{{ lab_should_pull }}"
+  #
+  # UNCONDITIONAL, unlike the fast-forward below. A fetch writes only to `.git`, so it is safe on a dirty
+  # checkout and while another job runs — and it is the only way to know how far behind a checkout that
+  # cannot pull actually is. Gated, it left the one case that needed measuring unmeasured.
   ansible.builtin.command:
     argv: [git, fetch, --quiet, origin]
     chdir: "{{ lab_repo_path }}"
   changed_when: false
+
+- name: "How far behind origin this checkout is"
+  # A NUMBER, not a word, and this repo has the rule written down: "Examination was INCOMPLETE cannot tell
+  # you whether two links were missed or two hundred."
+  #
+  # `Not pulling: the checkout is dirty` is true and useless. The lab sat 17 commits behind for days because
+  # a training run left an artefact in the tracked tree, every job dutifully reported that one sentence, and
+  # nothing said the consequence. The task above already carries the scar from the FIRST time this happened
+  # ("the lab was once 23 commits behind"); the auto-pull fixed the case where pulling was possible and left
+  # this one exactly as it was.
+  ansible.builtin.command:
+    argv: [git, rev-list, --count, HEAD..origin/main]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: false
+  failed_when: false
+  register: lab_behind
+
+- name: "Settle how the drift should be described"
+  ansible.builtin.set_fact:
+    lab_behind_count: "{{ (lab_behind.stdout | default('0') | trim | int) }}"
 
 - name: "Fast-forward to origin/main"
   # `--ff-only`, never merge or rebase: a diverged lab checkout is a fact somebody needs to look at, not
@@ -158,8 +181,11 @@
       {{ 'pull=false was passed' if not (pull | default(true) | bool)
          else ('another job is running (' ~ (lab_other_jobs.stdout | trim | replace('\n', '; ')) ~ ')'
                if (lab_other_jobs.stdout | default('') | trim) != ''
-               else 'the checkout is dirty — somebody is working in it') }}.
-      This job runs at whatever is checked out, which the next task records.
+               else 'the checkout is dirty — somebody is working in it (' ~ (lab_dirty.stdout | trim | replace('\n', '; ')) ~ ')') }}.
+      {{ 'This checkout is UP TO DATE with origin/main, so running it is the same as pulling.'
+         if lab_behind_count | int == 0
+         else 'This job therefore runs ' ~ lab_behind_count ~ ' COMMIT(S) BEHIND origin/main. Whatever it
+               produces is stamped with that commit, not with the code you just pushed.' }}
 
 - name: "Rebuild the compiled packages"
   # THE GATE SCORED CODE THAT WAS NOT THE CODE. `@a11y-witness/judge/rules` resolves to `dist/rules.js`,
@@ -193,7 +219,9 @@
   ansible.builtin.debug:
     msg: >-
       {{ job_name }} runs at {{ lab_commit.stdout | trim }}
-      {{ '(pulled)' if (lab_pull is defined and lab_pull is changed) else '(checkout unchanged)' }}
+      {{ '(pulled)' if (lab_pull is defined and lab_pull is changed)
+         else ('(checkout unchanged, up to date)' if lab_behind_count | int == 0
+               else '(checkout unchanged and ' ~ lab_behind_count ~ ' COMMIT(S) BEHIND origin/main)') }}
 
 - name: "Start it: {{ job_name }}"
   ansible.builtin.command:
@@ -273,6 +301,33 @@
     argv: [systemctl, stop, "{{ job_unit }}"]
   changed_when: false
   failed_when: false
+
+- name: "Did this job write into the source tree"
+  # THE GENERAL FORM of the defect that cost today, rather than a fix for the one script that caused it.
+  #
+  # A job's output belongs in `runs/`, which is gitignored, so a well-behaved job leaves the checkout
+  # exactly as it found it. Anything appearing here is a run writing into tracked source — and the cost is
+  # not the stray file, it is that `run-job.yml` then REFUSES to pull into it (correctly, it cannot tell a
+  # stray artefact from somebody's work in progress). The lab silently ran 17 commits behind for days that
+  # way, and the only symptom was one true, useless sentence per job.
+  #
+  # Compared against the state BEFORE the job, so a checkout that was already dirty is not blamed on the
+  # job that happened to run next — "it was already like that" and "you did this" are different answers,
+  # and reporting one as the other is how a warning gets ignored.
+  ansible.builtin.command:
+    argv: [git, status, --porcelain]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: false
+  register: lab_dirty_after
+
+- name: "Say so, loudly, if it did"
+  when: (lab_dirty_after.stdout | trim) != (lab_dirty.stdout | default('') | trim)
+  ansible.builtin.debug:
+    msg: >-
+      {{ job_name }} LEFT THE CHECKOUT DIRTY. A job's output belongs in runs/, which is gitignored; these
+      paths are tracked source, so until they are reverted or committed every later job will refuse to pull
+      and will run at stale code —
+      {{ (lab_dirty_after.stdout | trim | replace('\n', '; ')) }}
 
 - name: "Fail if it did not succeed: {{ job_name }}"
   ansible.builtin.assert:
