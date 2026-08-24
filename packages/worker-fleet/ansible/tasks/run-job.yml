@@ -166,6 +166,47 @@
     chdir: "{{ lab_repo_path }}"
   changed_when: false
 
+- name: "Resolve the ref, whether it names a branch, a tag or a commit"
+  # `origin/{{ lab_ref }}` works for a BRANCH and for nothing else. `A ref must look like a ref` accepts a
+  # 40-character SHA -- it looks exactly like a ref -- and every use of it below then built `origin/<sha>`,
+  # which resolves to nothing. So pinning a job to a commit, the most precise thing anyone would want to do
+  # here, silently addressed a ref that does not exist.
+  #
+  # Resolved ONCE, to a commit, and everything downstream uses that. A branch name and a SHA then differ only
+  # in how they are spelled, which is the property the caller expects.
+  ansible.builtin.command:
+    argv: [git, rev-parse, --verify, --quiet, "refs/remotes/origin/{{ lab_ref }}^{commit}"]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: false
+  failed_when: false
+  register: lab_ref_as_branch
+
+- name: "Failing that, resolve it as a tag or a commit this checkout already has"
+  when: lab_ref_as_branch.rc != 0
+  ansible.builtin.command:
+    argv: [git, rev-parse, --verify, --quiet, "{{ lab_ref }}^{commit}"]
+    chdir: "{{ lab_repo_path }}"
+  changed_when: false
+  failed_when: false
+  register: lab_ref_as_object
+
+- name: "Settle the commit this job runs at"
+  ansible.builtin.set_fact:
+    lab_ref_commit: >-
+      {{ (lab_ref_as_branch.stdout | trim) if lab_ref_as_branch.rc == 0
+         else (lab_ref_as_object.stdout | default('') | trim) }}
+
+- name: "A ref must resolve to something, and say so when it does not"
+  # An unresolvable ref must STOP the job. It previously produced `origin/<sha>` in three places, two of them
+  # `failed_when: false`, so the drift count came back empty and read as zero -- a checkout reported up to
+  # date with a ref that does not exist.
+  ansible.builtin.assert:
+    that:
+      - lab_ref_commit | length == 40
+    fail_msg: >-
+      ref '{{ lab_ref }}' names no branch on origin, no tag, and no commit this checkout has after fetching.
+      Push it first, or name a branch.
+
 - name: "How far behind origin this checkout is"
   # A NUMBER, not a word, and this repo has the rule written down: "Examination was INCOMPLETE cannot tell
   # you whether two links were missed or two hundred."
@@ -176,7 +217,7 @@
   # ("the lab was once 23 commits behind"); the auto-pull fixed the case where pulling was possible and left
   # this one exactly as it was.
   ansible.builtin.command:
-    argv: [git, rev-list, --count, "HEAD..origin/{{ lab_ref }}"]
+    argv: [git, rev-list, --count, "HEAD..{{ lab_ref_commit }}"]
     chdir: "{{ lab_repo_path }}"
   changed_when: false
   failed_when: false
@@ -195,7 +236,7 @@
     # `--ff-only` still, for the same reason: a diverged checkout is a fact somebody must look at, not
     # something a job launcher resolves at 2am. Moving BETWEEN refs is a checkout, not a merge, so a run at
     # a branch and the run back at main are both explicit acts the stamp below records.
-    argv: [git, checkout, --detach, "origin/{{ lab_ref }}"]
+    argv: [git, checkout, --detach, "{{ lab_ref_commit }}"]
     chdir: "{{ lab_repo_path }}"
   register: lab_pull
   changed_when: "'Already up to date' not in (lab_pull.stdout | default(''))"

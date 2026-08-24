@@ -188,8 +188,8 @@ test("a job pulls the lab checkout, and records the commit it actually ran at", 
   // property that mattered is unchanged and is what this asserts: the launcher moves the checkout to
   // exactly what origin says and never RESOLVES anything. A merge or rebase here would let a diverged lab
   // be silently reconciled at 2am, which is a fact for a human to look at.
-  assert.match(RUN_JOB, /argv: \[git, checkout, --detach, "origin\/\{\{ lab_ref \}\}"\]/,
-    "the launcher must move to origin's ref verbatim, never merge or rebase toward it");
+  assert.match(RUN_JOB, /argv: \[git, checkout, --detach, "\{\{ lab_ref_commit \}\}"\]/,
+    "the launcher must move to the RESOLVED commit, never merge or rebase toward it");
   assert.ok(!/git, (merge|rebase|pull)(?!.*--ff-only)/.test(RUN_JOB),
     "a launcher that can merge or rebase can resolve a divergence nobody looked at");
   assert.match(RUN_JOB, /argv: \[git, rev-parse, --short, HEAD\]/,
@@ -266,12 +266,14 @@ test("a checkout that cannot pull reports HOW FAR behind it is, not just that it
   //
   // The fetch must be unconditional for the count to exist at all: a fetch writes only to `.git`, so it is
   // safe on a dirty checkout, and gating it left the one case that needed measuring unmeasured.
-  const fetchTask = RUN_JOB.slice(RUN_JOB.indexOf("- name: \"Fetch origin\""),
-    RUN_JOB.indexOf("- name: \"How far behind"));
+  // Sliced to the fetch TASK, not to everything up to the drift count: tasks were added between the two and
+  // their `when:` made this read as the fetch being gated. A guard whose scope drifts reports the wrong file.
+  const fetchStart = RUN_JOB.indexOf("- name: \"Fetch origin\"");
+  const fetchTask = RUN_JOB.slice(fetchStart, RUN_JOB.indexOf("\n- name:", fetchStart + 1));
   assert.ok(!/^\s*when:/m.test(fetchTask),
     "the fetch is gated again, so a checkout that cannot pull has no way to know how stale it is");
 
-  assert.match(RUN_JOB, /rev-list, --count, "HEAD\.\.origin\/\{\{ lab_ref \}\}"/,
+  assert.match(RUN_JOB, /rev-list, --count, "HEAD\.\.\{\{ lab_ref_commit \}\}"/,
     "nothing measures the drift");
   assert.match(RUN_JOB, /COMMIT\(S\) BEHIND origin\//,
     "the drift is measured and never said out loud");
@@ -310,8 +312,22 @@ test("a job can run at a named ref, and the ref is validated rather than trusted
   // The second is what dirtied the lab checkout on 2026-08-23 and blocked every subsequent pull.
   assert.match(RUN_JOB, /lab_ref: "\{\{ ref \| default\('main'\) \}\}"/,
     "no way to name a ref, so a coupled change has no CLI path");
-  assert.match(RUN_JOB, /origin\/\{\{ lab_ref \}\}/,
-    "the ref is accepted and then ignored — the checkout still hardcodes a branch");
+  // The PROPERTY, not the spelling. This used to assert `origin/{{ lab_ref }}` appeared, which pinned the
+  // defect rather than the requirement: `origin/<sha>` resolves to nothing, so a job pinned to a commit --
+  // the most precise thing a caller can ask for, and the reason `-e ref=` exists -- addressed a ref that
+  // does not exist, in three places, two of them `failed_when: false`.
+  assert.match(RUN_JOB, /refs\/remotes\/origin\/\{\{ lab_ref \}\}\^\{commit\}/,
+    "a ref that names a branch must still resolve through origin");
+  assert.match(RUN_JOB, /rev-parse, --verify, --quiet, "\{\{ lab_ref \}\}\^\{commit\}"/,
+    "a ref that names a tag or a commit has no fallback, so `-e ref=<sha>` cannot work");
+  assert.match(RUN_JOB, /lab_ref_commit \| length == 40/,
+    "an unresolvable ref must STOP the job; it previously produced an empty drift count that read as zero");
+  // Scoped to `argv:` lines. A task NAME may still read "Fast-forward to origin/<ref>" — that is what a
+  // human called it — but nothing may PASS `origin/<ref>` to git, because it resolves to nothing for a SHA.
+  const argvLines = RUN_JOB.split("\n").filter((line) => line.includes("argv:"));
+  assert.ok(argvLines.length > 0, "no argv: lines found — this guard is examining an empty set");
+  assert.ok(!argvLines.some((line) => /origin\/\{\{ lab_ref \}\}(?!\^\{commit\})/.test(line)),
+    "something still passes origin/<ref> to git, which is unresolvable when the ref is a SHA");
 
   // Validated, not trusted. `argv:` never invokes a shell so this is not injection, but `origin/..` and
   // friends should be inexpressible rather than merely unlikely — the same shape as isValidCaptureId.
