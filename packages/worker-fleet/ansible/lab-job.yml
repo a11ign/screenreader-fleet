@@ -201,14 +201,19 @@
         argv: ["/usr/bin/npm", "run", "training:capture-acceptance"]
         setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}", "REPEAT=repeat-2"]
         timeout: 14400
+      # EVERY repeat, in one job, because the acceptance evaluator reads every repeat.
+      #
+      # It was two jobs -- `export-acceptance` (repeat-1) and `export-acceptance-2` (repeat-2) -- with
+      # nothing relating them, feeding one consumer that reads both. On 2026-08-24 that produced exactly the
+      # drift it invites: repeat-1 rebuilt under the current contract, repeat-2 left from the previous day,
+      # and a held-out score computed half on each. A number like that looks authoritative and is not,
+      # which defeats the only purpose a held-out gate has.
+      #
+      # A job whose output is a SUBSET of what its consumer reads is a drift generator. The fix is not to
+      # remember the second command.
       export-acceptance:
-        argv: ["/usr/bin/npm", "run", "training:export-acceptance"]
-        setenv: ["REPEAT=repeat-1"]
-        timeout: 900
-      export-acceptance-2:
-        argv: ["/usr/bin/npm", "run", "training:export-acceptance"]
-        setenv: ["REPEAT=repeat-2"]
-        timeout: 900
+        argv: ["/usr/bin/npm", "run", "training:export-acceptance:all"]
+        timeout: 1800
       # Cheap, and here because it is a STEP rather than a check: it rewrites the labels every later stage
       # reads, and it silently used a stale manifest twice in one session before the drift guard existed.
       export:
