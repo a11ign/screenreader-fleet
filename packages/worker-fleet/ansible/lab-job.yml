@@ -211,6 +211,32 @@
       #
       # A job whose output is a SUBSET of what its consumer reads is a drift generator. The fix is not to
       # remember the second command.
+      # PROMOTION RUNS WHERE THE CANDIDATE IS, which is here and not on a laptop.
+      #
+      # `promote:model` copies the trained weights into `packages/scorer/models/` and writes the changeset.
+      # It could only ever run in a checkout that HAS the candidate -- and the candidate is trained on this
+      # box, under `runs/`, which is gitignored. So the only routes were copying the weights to a laptop by
+      # hand, or promoting without having tested the pair. Both were the reason nothing had been promoted.
+      #
+      # This runs the candidate gate FIRST, on the machine where the v14 code and the v14 weights both
+      # exist, and promotes only if it passes. That is the thing that was impossible before: testing both
+      # halves TOGETHER before shipping either.
+      #
+      # It stops at an uncommitted working tree, exactly as `promote-model.mjs` does. Committing and pushing
+      # is deliberately NOT here: promoting is a MAJOR release of `@a11y-witness/scorer` (ADR 0007), and a
+      # job that can push a release is a job that can release by accident. `lab:job -e job=promote-diff`
+      # shows what it produced; a human commits it.
+      # NO SHELL. `argv:` with npm, never `/bin/sh -c`, because this repo's own rule is that a shell here
+      # reintroduces the quoting class that sent four capture shards at `--worker=http://:8765` for 29
+      # minutes. The gate-then-promote chain lives in an npm script where it can be read and tested.
+      promote:
+        argv: ["/usr/bin/npm", "run", "--silent", "promote:gated", "--",
+               "--from={{ out | default('candidate') }}"]
+        timeout: 3600
+      # What the promotion actually changed, so it can be reviewed before anyone commits it.
+      promote-diff:
+        argv: ["/usr/bin/git", "status", "--short", "--", "packages/scorer/models", ".changeset"]
+        timeout: 300
       export-acceptance:
         argv: ["/usr/bin/npm", "run", "training:export-acceptance:all"]
         timeout: 1800
