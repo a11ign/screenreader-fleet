@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { validRef } from "./deploy-fleet.mjs";
+import { validRef, PLAYBOOKS } from "./fleet-playbook.mjs";
 
 test("commits and ordinary branch names are accepted", () => {
   for (const ref of ["afec73d", "65ead9b1c2d3e4f5", "main", "v8-feature-schema", "origin/main", "v1.2.3"]) {
@@ -37,4 +37,21 @@ test("path traversal is refused even though slashes are legal in a ref", () => {
 test("an over-long ref is refused, so the bound is real rather than assumed", () => {
   assert.equal(validRef("a".repeat(64)), true);
   assert.equal(validRef("a".repeat(65)), false);
+});
+
+test("only the named playbooks are runnable, and they are names rather than paths", () => {
+  // The same containment as `-e out=<name>` in lab-job.yml. This value reaches a shell on the box that
+  // holds the fleet SSH key, so an arbitrary path here is an arbitrary playbook run against twelve
+  // Windows machines.
+  assert.deepEqual(PLAYBOOKS, ["deploy.yml", "sleep.yml"]);
+  for (const bad of ["../../../etc/evil.yml", "provision.yml", "/tmp/x.yml", "deploy.yml; id"]) {
+    assert.equal(PLAYBOOKS.includes(bad), false, bad);
+  }
+});
+
+test("fleet:wake is deliberately NOT one of these", () => {
+  // Wake sends Wake-on-LAN magic packets — UDP broadcasts on the LAN, no SSH — so it runs fine from a
+  // laptop and routing it through the control plane would add a hop for nothing. Everything that has to
+  // talk TO a worker needs the key, and that is the line this list draws.
+  assert.equal(PLAYBOOKS.includes("wake.yml"), false);
 });
