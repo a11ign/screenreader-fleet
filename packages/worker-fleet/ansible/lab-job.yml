@@ -63,8 +63,13 @@
         argv: ["/usr/bin/node", "packages/lab/scripts/build-realism-tier.mjs",
                "--out=runs/screenreader-dataset/with-realism.jsonl"]
         timeout: 900
+      # The one check that scores REAL pages through the PRODUCT path. It measured the shipped model and
+      # only the shipped model, so the question it exists to answer -- "is this CANDIDATE safe to ship?" --
+      # could be asked only after promoting, which is the wrong order and the same shape as `npm run eval`
+      # resolving the shipped artefact always.
       sweep:
         argv: ["/usr/bin/node", "packages/lab/scripts/calibrate-abstention.mjs"]
+        setenv: ["A11Y_SCORER_MODEL={{ ('/opt/a11y/runs/model-' ~ model) if model is defined else '' }}"]
         timeout: 1800
       # WHICH records does a head fire on wrongly, and what do they have in common? A report says "36 false
       # positives" and cannot distinguish "the head lost a veto that was doing real work" from "something
@@ -345,6 +350,16 @@
           -e out=<name> must be one of: candidate, multidefect, varied, scratch. It is a NAME, not a path — the
           trainer writes weights into `runs/model-<name>`, so a path here would be an arbitrary write.
           Add a name to this list if you need another; do not pass a directory.
+
+    # Same containment, same reason: a NAME from a fixed list, never a path. This one becomes an env var
+    # rather than an argv entry, and an env var reaching a child process is the `A11Y_PYTHON` hazard.
+    - name: A sweep names the model it measures from a fixed list
+      when: job == 'sweep' and model is defined
+      ansible.builtin.assert:
+        that: model in ['candidate', 'multidefect', 'varied', 'scratch']
+        fail_msg: >-
+          -e model=<name> must be one of: candidate, multidefect, varied, scratch. It is a NAME, not a path —
+          it becomes `runs/model-<name>`. Omit it entirely to measure the SHIPPED model, which is the default.
 
     - name: A stability gate names one worker from the inventory
       when: job == 'stability'
