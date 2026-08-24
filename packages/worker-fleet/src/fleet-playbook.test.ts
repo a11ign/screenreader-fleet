@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { validRef, PLAYBOOKS } from "./fleet-playbook.mjs";
+import { validRef, PLAYBOOKS, LIMIT_PATTERN } from "./fleet-playbook.mjs";
 
 test("commits and ordinary branch names are accepted", () => {
   for (const ref of ["afec73d", "65ead9b1c2d3e4f5", "main", "v8-feature-schema", "origin/main", "v1.2.3"]) {
@@ -54,4 +54,16 @@ test("fleet:wake is deliberately NOT one of these", () => {
   // laptop and routing it through the control plane would add a hop for nothing. Everything that has to
   // talk TO a worker needs the key, and that is the line this list draws.
   assert.equal(PLAYBOOKS.includes("wake.yml"), false);
+});
+
+test("--limit takes worker names, and nothing that could reach a shell", () => {
+  for (const ok of ["a11y-worker-3", "a11y-worker-3,a11y-worker-4,a11y-worker-5", "a11y_workers"]) {
+    assert.equal(LIMIT_PATTERN.test(ok), true, ok);
+  }
+  for (const bad of [
+    "a11y-worker-3; id", "*", "!a11y-worker-2", "a11y-worker-3 a11y-worker-4", "$(id)",
+    "../etc", "a11y-worker-3,", "", "all",
+  ]) {
+    assert.equal(LIMIT_PATTERN.test(bad), false, JSON.stringify(bad));
+  }
 });

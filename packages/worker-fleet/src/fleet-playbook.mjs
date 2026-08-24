@@ -38,6 +38,13 @@ const CHECKOUT = "a11y-witness";
 const PLAYBOOKS = ["deploy.yml", "sleep.yml"];
 
 /**
+ * Ansible host patterns this may target, by SHAPE. Same containment as the playbook list, and needed for
+ * the same reason: `--limit` reaches a shell on the box holding the fleet key. Worker names and the group
+ * name, nothing else — `all` is not special-cased because omitting the flag already means all.
+ */
+const LIMIT_PATTERN = /^(a11y-worker-[0-9]{1,3})(,a11y-worker-[0-9]{1,3})*$|^a11y_workers$/;
+
+/**
  * A commit or a simple branch name, and nothing else.
  *
  * This value is interpolated into a command a remote shell interprets — ssh joins its arguments into one
@@ -74,6 +81,12 @@ function main() {
     ?? "deploy.yml";
   if (!PLAYBOOKS.includes(chosen)) {
     process.stderr.write(`refusing --playbook=${chosen}: one of ${PLAYBOOKS.join(", ")}.\n`);
+    process.exit(2);
+  }
+  const limitFlag = process.argv.find((a) => a.startsWith("--limit="))?.slice("--limit=".length);
+  if (limitFlag !== undefined && !LIMIT_PATTERN.test(limitFlag)) {
+    process.stderr.write(`refusing --limit=${limitFlag}: worker names only, e.g. `
+      + "a11y-worker-3,a11y-worker-4.\n");
     process.exit(2);
   }
   const flag = process.argv.find((a) => a.startsWith("--ref="));
@@ -117,7 +130,8 @@ function main() {
     // corrupted guest checkout. Measured 2026-08-24: all four workers held 1f7cb7e88070235d against an
     // expected c6e66caa481b76c0, having faithfully fetched a branch nobody had changed.
     ssh(`cd ${CHECKOUT}/packages/worker-fleet/ansible && ANSIBLE_CONFIG=ansible.cfg `
-      + `ansible-playbook -i inventory.yml ${chosen} -e a11y_git_ref=${ref}`);
+      + `ansible-playbook -i inventory.yml ${chosen} -e a11y_git_ref=${ref}`
+      + (limitFlag ? ` -l ${limitFlag}` : ""));
   } catch (cause) {
     process.stderr.write(`\n  ${chosen} FAILED (ansible exit ${cause.status ?? "?"}). The PLAY RECAP above `
       + "names which hosts; nothing was rolled back, so re-running is safe.\n");
@@ -128,4 +142,4 @@ function main() {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
 
-export { validRef, PLAYBOOKS };
+export { validRef, PLAYBOOKS, LIMIT_PATTERN };
