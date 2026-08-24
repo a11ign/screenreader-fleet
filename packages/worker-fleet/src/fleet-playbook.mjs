@@ -83,20 +83,28 @@ function main() {
     process.exit(2);
   }
 
-  process.stdout.write(`\n  control plane: ${CONTROL_PLANE}   playbook: ${chosen}   ref: ${ref}\n\n`);
-  ssh(`cd ${CHECKOUT} && git fetch --quiet --all && git checkout --quiet ${ref}`);
+  // What that ref means HERE, resolved before anything is asked of the control plane. Comparing a commit
+  // to a commit is the only comparison that settles "is it running my code?" — the first version compared
+  // the remote's resolved SHA against the branch NAME, which can never match, and refused a control plane
+  // that was already correct.
+  const expected = execFileSync("git", ["rev-parse", ref], { encoding: "utf8" }).trim();
 
-  // READ BACK, never infer. `git checkout` of a ref the remote does not have yet fails in ways that a
-  // subsequent playbook run would happily paper over by deploying the previous commit and reporting
-  // success — this project's most expensive recurring shape, and the reason `deploy.yml` verifies over
-  // HTTP rather than trusting the push.
+  process.stdout.write(`\n  control plane: ${CONTROL_PLANE}   playbook: ${chosen}\n`
+    + `  ref: ${ref} (${expected.slice(0, 12)})\n\n`);
+  // `--ff-only` against origin, exactly as `deploy.yml` does to each guest: a checkout of an existing
+  // local branch sits at whatever that branch already pointed at, so fetching alone moves nothing.
+  ssh(`cd ${CHECKOUT} && git fetch --quiet --all && git checkout --quiet ${ref} `
+    + `&& git merge --ff-only --quiet origin/${ref}`);
+
+  // READ BACK, never infer. A control plane left on an older commit would deploy that commit and report
+  // success — this project's most expensive recurring shape, and the reason `deploy.yml` verifies each
+  // worker over HTTP rather than trusting the push.
   const landed = ssh(`cd ${CHECKOUT} && git rev-parse HEAD`, { capture: true }).trim();
-  const SHORT_SHA = 7;
-  if (!landed.startsWith(ref) && !ref.startsWith(landed.slice(0, SHORT_SHA))) {
-    process.stderr.write(`the control plane is on ${landed.slice(0, 12)}, not ${ref}. Not deploying.\n`);
+  if (landed !== expected) {
+    process.stderr.write(`the control plane is on ${landed.slice(0, 12)}, not ${expected.slice(0, 12)}. `
+      + "Not deploying.\n");
     process.exit(1);
   }
-  process.stdout.write(`  control plane now at ${landed.slice(0, 12)}\n\n`);
 
   // A failed deploy must READ like a failed deploy. `execFileSync` throws an Error whose message is the
   // whole command line and whose stack is node's internals, which buries "which box failed" under twelve
