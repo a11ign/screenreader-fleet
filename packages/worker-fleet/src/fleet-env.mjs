@@ -166,7 +166,29 @@ export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group =
   if (!hosts.length) {
     throw new Error(`no hosts found under ${group}.hosts in inventory.yml. Add one before running.`);
   }
-  return hosts.map((host) => `http://${host}:${port}`);
+  return hosts.map(({ host }) => `http://${host}:${port}`);
+}
+
+/**
+ * The inventory as `{ url -> name }`, so a report can say which machine a command would act on.
+ *
+ * Same parser, same group rules — deliberately not a second reader of the same file, which this repo
+ * calls its most expensive recurring shape and has already paid for once in `fleet-discover.mjs`.
+ *
+ * @param {string} text
+ * @param {{ port?: number, group?: string }} [options]
+ * @returns {Record<string, string>}
+ */
+export function workerNamesFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
+  const hosts = [];
+  const stack = [];
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (!line.trim() || line.trimStart().startsWith("#")) return;
+    const match = line.match(HOST_LINE);
+    if (match) return collectHost(hosts, { match, index, stack, group });
+    descend(stack, line);
+  });
+  return Object.fromEntries(hosts.map(({ name, host }) => [`http://${host}:${port}`, name]));
 }
 
 /**
@@ -179,7 +201,14 @@ export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group =
 function collectHost(hosts, { match, index, stack, group }) {
   const found = groupOf(stack.map((frame) => frame.key));
   if (found === group) {
-    hosts.push(match[1].replace(/^["']|["']$/g, ""));
+    // The inventory NAME comes along with the address. Ansible nests the host as
+    // `...hosts.<name>.ansible_host`, so the name is the innermost frame the stack is still holding.
+    //
+    // Carried because every tool that ACTS on a worker takes the name (`-l a11y-worker-4`) while every
+    // tool that REPORTS on one printed only the address — and nothing mapped them. On 2026-08-24 that
+    // sent `fleet:sleep` at the wrong machine: `fleet:status` named .224 as the Edge-drifted box, and
+    // .224 is a11y-worker-FIVE. Two commands, one fleet, no shared vocabulary.
+    hosts.push({ name: stack[stack.length - 1]?.key, host: match[1].replace(/^["']|["']$/g, "") });
     return;
   }
   if (found === undefined) {

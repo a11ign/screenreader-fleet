@@ -35,7 +35,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { requestJson } from "./worker-http.mjs";
-import { configuredWorkers, workersFromInventory, portFromGroupVars } from "./fleet-env.mjs";
+import { configuredWorkers, workersFromInventory, workerNamesFromInventory, portFromGroupVars }
+  from "./fleet-env.mjs";
 import { assessWorker } from "./worker-health.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 
@@ -59,8 +60,19 @@ export function fleetToProbe() {
     const inventory = readFileSync(fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url)), "utf8");
     const groupVars = readFileSync(
       fileURLToPath(new URL("../ansible/group_vars/a11y_workers.yml", import.meta.url)), "utf8");
-    return workersFromInventory(inventory, { port: portFromGroupVars(groupVars) })
-      .map((url) => ({ name: url.replace(/^https?:\/\//, ""), url }));
+    const port = portFromGroupVars(groupVars);
+    // The INVENTORY NAME beside the address, because every command that acts on a worker takes the name
+    // (`fleet:deploy --limit=a11y-worker-4`, `fleet:sleep`, `lab:job -e worker=`) while this report showed
+    // only the address. On 2026-08-24 that cost a wrong action: this table named .224 as the box whose Edge
+    // had drifted, and .224 is a11y-worker-FIVE — so `fleet:sleep --limit=a11y-worker-4` put a healthy
+    // machine to sleep and left the drifted one serving. A report and a command that cannot be matched up
+    // is a report you have to translate, and translation is where the mistake goes.
+    const names = workerNamesFromInventory(inventory, { port });
+    return workersFromInventory(inventory, { port })
+      .map((url) => ({
+        name: names[url] ? `${names[url]}  ${url.replace(/^https?:\/\//, "")}` : url.replace(/^https?:\/\//, ""),
+        url,
+      }));
   } catch (error) {
     throw new Error(
       "No fleet to report on: A11Y_WORKERS is unset and the inventory could not be read "
