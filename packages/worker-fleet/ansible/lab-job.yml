@@ -276,6 +276,12 @@
         timeout: 5400
       # No worker: it scores the rule layer against captures already on disk. Seconds, and here because it
       # is what says whether the corpus still supports every boundary `rule-ownership.json` declares.
+      # "Which rules have never fired?" — the general form of the defect that let 2.1.1 accuse 23 of 35
+      # conformant pages. It needs the AUTHORITATIVE corpus: a partial copy means fewer fires, which reads
+      # as less coverage, so a laptop cannot answer this and says so rather than guessing.
+      rules-coverage:
+        argv: ["/usr/bin/npm", "run", "--silent", "rules:coverage"]
+        timeout: 900
       rules-gate:
         argv: ["{{ lab_tsx }}", "packages/lab/scripts/score-rules.ts", "--gate"]
         timeout: 900
