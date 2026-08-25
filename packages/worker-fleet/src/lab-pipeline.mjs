@@ -75,6 +75,26 @@ export const PIPELINES = {
     what: "recapture the synthetic corpus, then score the rule layer against it",
     jobs: ["capture", "check-signals", "rules-gate", "rules-coverage", "rules-real-pages"],
   },
+  // CLOSING A SCHEMA MIGRATION, which is the sequence release:gate refuses until it is done.
+  //
+  // The order is not obvious and getting it wrong is silent. `lab:retrain` stops after `build-realism` --
+  // it produces a DATASET and never trains -- so a retrain followed by a promote would promote the
+  // previous candidate against a fresh corpus and report success.
+  //
+  // `export-acceptance` is here, and it is the step that is easy to miss. The featurizer reads a `parsed`
+  // block that `annotateCapture` bakes into the records at EXPORT time, so any change to the announcement
+  // grammar in `packages/evidence` changes the model input without changing a line of Python. Measured
+  // 2026-08-25: six commits to `announcement.ts` landed after the 24 August export, so the v15 candidate
+  // on disk was stamped with the right schema STRING and fitted to a parse that no longer exists.
+  // `FEATURE_SCHEMA_VERSION` cannot see that -- it is a version, not a content hash -- so re-exporting
+  // both corpora before training is the only thing standing between here and weights fitted to a
+  // vanished input space. Acceptance is re-EXPORTED and never re-captured: the captures on disk are raw
+  // evidence and unaffected; it is the parse over them that moved.
+  candidate: {
+    fleet: true,
+    what: "re-export both corpora under the current parse, train, audit and promote a candidate",
+    jobs: ["retrain", "export-acceptance", "train", "shortcuts", "acceptance", "promote"],
+  },
   // No capture, so no fleet, so it can run while the boxes are doing something else. This is the cheap
   // pipeline to run after a rule change: everything reads from disk and the venv.
   gates: {
