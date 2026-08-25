@@ -124,3 +124,36 @@ test("stages are run with their status READ, never piped", () => {
   assert.ok(!/stdio: "pipe"/.test(source),
     "a piped stage hides the output the operator needs and invites reading the wrong status");
 });
+
+test("the lab stages are pinned to a COMMIT, not to a branch that can move under them", () => {
+  // A branch is a moving target and each stage resolves it independently, at the moment it runs. A push
+  // landing mid-pipeline therefore puts later stages on different code from earlier ones — a `train`
+  // fitted to a corpus that a `capture` at another commit produced, every stage reporting success.
+  // Nothing downstream could say so: run-job.yml refuses a commit other than the one ASKED FOR, and each
+  // stage would have asked for a different one and got it.
+  //
+  // Twice on 2026-08-25 a push had to be held by hand for exactly this — through provisioning, where each
+  // box stamps the SHA it fast-forwarded to, and through this pipeline. "Do not push for six hours" is a
+  // rule that depends on somebody remembering it, which is what this file exists to remove.
+  const source = readFileSync(fileURLToPath(new URL("./lab-pipeline.mjs", import.meta.url)), "utf8");
+  const code = source.split("\n").filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join("\n");
+
+  assert.match(code, /labJob\(job, pinned\)/,
+    "lab stages must be given the resolved commit, never the branch name");
+  assert.ok(!/labJob\(job, ref\)/.test(code), "a lab stage still takes the moving branch");
+  // The fleet stage keeps the BRANCH, and that asymmetry is forced: deploy.yml fast-forwards each guest
+  // with `git merge --ff-only origin/<ref>`, and `origin/<sha>` resolves to nothing — a mistake this repo
+  // has already spent a run on.
+  assert.match(code, /fleetDeploy\(ref\)/,
+    "the fleet stage must keep the branch; origin/<sha> is not a thing git can merge");
+});
+
+test("the pin comes from ORIGIN, so it cannot be a stale local ref", () => {
+  // `git ls-remote` asks the remote, so it needs no fetch and cannot answer with whatever this checkout
+  // last happened to fetch. Resolving `origin/<branch>` locally would reintroduce exactly the staleness
+  // the pin exists to remove.
+  const source = readFileSync(fileURLToPath(new URL("./lab-pipeline.mjs", import.meta.url)), "utf8");
+  assert.match(source, /ls-remote/, "the pin must ask origin directly");
+  assert.match(source, /\^\[0-9a-f\]\{40\}\$|\[0-9a-f\]\{40\}/,
+    "and must verify origin answered a commit rather than trusting the string");
+});

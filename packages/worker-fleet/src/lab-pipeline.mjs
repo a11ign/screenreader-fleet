@@ -60,6 +60,8 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
  * pinned by the same test: a pipeline containing a job that reads `A11Y_WORKER(S)` must have `fleet: true`,
  * or it would capture with whatever the boxes happen to be running.
  */
+export { resolveOnOrigin };
+
 export const PIPELINES = {
   // The chain that was run by hand all of 2026-08-25.
   "real-pages": {
@@ -132,13 +134,43 @@ const localBranch = () =>
  * remote already had — and `run-job.yml`'s commit refusal then fires at the far end, after the fleet has
  * been deployed and rebooted. Measured today: four boxes rebooted for a ref nobody had pushed.
  */
-function assertPushed(ref) {
+function resolveOnOrigin(ref) {
   const remote = execFileSync("git", ["ls-remote", "--heads", "--tags", "origin", ref],
     { encoding: "utf8" }).trim();
-  if (remote) return;
-  throw new Error(`'${ref}' is not on origin. Both halves of this pipeline fetch from origin, so nothing `
-    + "would run at the code you are looking at. Push it first.");
+  if (!remote) {
+    throw new Error(`'${ref}' is not on origin. Both halves of this pipeline fetch from origin, so nothing `
+      + "would run at the code you are looking at. Push it first.");
+  }
+  // `ls-remote` answers `<sha>\t<refname>`, and asks the REMOTE — so it needs no fetch and cannot be stale
+  // the way a local `origin/<branch>` can.
+  const sha = remote.split("\n")[0].split("\t")[0].trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`origin answered something that is not a commit: ${sha}`);
+  return sha;
 }
+
+/**
+ * PIN THE COMMIT ONCE, and give every lab stage that SHA rather than the branch name.
+ *
+ * A branch is a moving target and each stage resolves it independently, at the moment that stage runs. So
+ * a push landing mid-pipeline puts later stages on different code from earlier ones — a `train` fitted to
+ * a corpus that a `capture` at another commit produced, with every stage reporting success. Nothing would
+ * say so: `run-job.yml` refuses a commit other than the one ASKED FOR, and each stage would have asked for
+ * a different one and got it.
+ *
+ * Not hypothetical. Twice today a push had to be held by hand for exactly this reason — once through
+ * provisioning, where each box stamps the SHA it fast-forwarded to, and once through this pipeline. "Do
+ * not push for the next six hours" is a rule that depends on somebody remembering it, which this file's
+ * own header calls the thing it exists to remove.
+ *
+ * `run-job.yml` already resolves a SHA correctly — it tries `refs/remotes/origin/<ref>` first and falls
+ * back to `<ref>^{commit}` — so the lab side needs no change to accept one.
+ *
+ * The FLEET stage still takes the branch, and that asymmetry is forced rather than sloppy: `deploy.yml`
+ * fast-forwards each guest with `git merge --ff-only origin/{{ ref }}`, and `origin/<sha>` resolves to
+ * nothing. This repo has already spent a run on that exact mistake. It is safe because the deploy is
+ * stage ONE, seconds after the pin, and `fleet-playbook.mjs` reads back the control plane's HEAD and
+ * refuses a mismatch — so a race there fails loudly instead of silently splitting the run.
+ */
 
 /** One stage, run to completion, with its exit status READ rather than piped away. */
 function stage(label, command, args) {
@@ -200,8 +232,9 @@ async function main() {
     process.stderr.write(`refusing --ref=${ref}: a commit or simple branch name only.\n`);
     process.exit(2);
   }
+  let pinned;
   try {
-    assertPushed(ref);
+    pinned = resolveOnOrigin(ref);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exit(2);
@@ -209,12 +242,18 @@ async function main() {
 
   const stages = [
     ...(pipeline.fleet ? [["fleet:deploy", () => fleetDeploy(ref)]] : []),
-    ...pipeline.jobs.map((job) => [job, () => labJob(job, ref)]),
+    // PINNED, not `ref`. Every lab stage runs at the same commit no matter what lands on the branch while
+    // the pipeline is going.
+    ...pipeline.jobs.map((job) => [job, () => labJob(job, pinned)]),
   ];
 
-  process.stdout.write(`\n  pipeline: ${name} at ref ${ref}\n  ${stages.length} stage(s): `
-    + `${stages.map(([label]) => label).join(" -> ")}\n`
-    + (pipeline.fleet ? "" : "  no fleet stage: nothing here captures, so the workers are left alone.\n"));
+  process.stdout.write(`\n  pipeline: ${name} at ${ref} -> PINNED ${pinned.slice(0, 12)}\n`
+    + `  ${stages.length} stage(s): ${stages.map(([label]) => label).join(" -> ")}\n`
+    + "  Every lab stage runs at that commit, so a push landing mid-run cannot split them.\n"
+    + (pipeline.fleet
+      ? `  The fleet stage takes the BRANCH (${ref}): deploy.yml fast-forwards each guest with\n`
+        + "  `git merge --ff-only origin/<ref>`, and origin/<sha> resolves to nothing.\n"
+      : "  no fleet stage: nothing here captures, so the workers are left alone.\n"));
 
   const started = Date.now();
   for (const [index, [label, run]] of stages.entries()) {
@@ -232,7 +271,8 @@ async function main() {
     process.exit(status);
   }
   const minutes = ((Date.now() - started) / 60_000).toFixed(1);
-  process.stdout.write(`\n  pipeline ${name} PASSED — ${stages.length} stage(s) in ${minutes} min, at ${ref}.\n`);
+  process.stdout.write(`\n  pipeline ${name} PASSED — ${stages.length} stage(s) in ${minutes} min, `
+    + `every one at ${pinned.slice(0, 12)}.\n`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
