@@ -22,6 +22,7 @@
  *   npm run fleet:deploy -- --ref=<commit>     # default: the commit this checkout is on
  *   npm run fleet:sleep                        # power the fleet down, REFUSING any box mid-capture
  *   npm run fleet:provision                    # the ROLE: NVDA, Edge pin, policies, and the stamp
+ *   npm run fleet:provision -- --serial=0      # all boxes at once; 1 (default) is fail-fast on a role change
  *
  * `provision-role.yml` is here because adding a box makes it necessary, and it was reachable only by
  * typing `ansible-playbook` on the control plane — the hand-crank this file exists to remove. It runs
@@ -55,6 +56,16 @@ const PLAYBOOKS = ["deploy.yml", "sleep.yml", "provision-role.yml"];
  * name, nothing else — `all` is not special-cased because omitting the flag already means all.
  */
 const LIMIT_PATTERN = /^(a11y-worker-[0-9]{1,3})(,a11y-worker-[0-9]{1,3})*$|^a11y_workers$/;
+
+/**
+ * How many boxes a provisioning run touches at once. `0` means all of them.
+ *
+ * A plain small integer, contained by SHAPE like everything else that reaches a shell on the box holding
+ * the fleet key. `serial: 1` is the default and its only remaining justification is fail-fast on a role
+ * you have just changed — the availability argument died when `provision-role.yml` gained a refusal for a
+ * worker mid-capture, which is the thing serialising was standing in for.
+ */
+const SERIAL_PATTERN = /^(0|[1-9][0-9]?)$/;
 
 /**
  * A commit or a simple branch name, and nothing else.
@@ -107,25 +118,50 @@ function localBranch() {
   return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
 }
 
-function main() {
-  const chosen = process.argv.find((a) => a.startsWith("--playbook="))?.slice("--playbook=".length)
-    ?? "deploy.yml";
-  if (!PLAYBOOKS.includes(chosen)) {
-    process.stderr.write(`refusing --playbook=${chosen}: one of ${PLAYBOOKS.join(", ")}.\n`);
+const argOf = (name) =>
+  process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+
+/**
+ * Every argument, validated, or a refusal that names which one and what shape it wanted.
+ *
+ * Extracted from `main` because it grew past the complexity gate as flags were added — and the gate was
+ * right: dispatching a playbook and deciding whether the arguments are safe are two things, and each of
+ * these refusals exists because the value reaches a shell on the box holding the fleet SSH key.
+ *
+ * @returns {{chosen: string, limitFlag: string|undefined, serialFlag: string|undefined, ref: string}}
+ */
+function parseArgs() {
+  const refuse = (message) => {
+    process.stderr.write(`${message}\n`);
     process.exit(2);
-  }
-  const limitFlag = process.argv.find((a) => a.startsWith("--limit="))?.slice("--limit=".length);
+  };
+
+  const chosen = argOf("playbook") ?? "deploy.yml";
+  if (!PLAYBOOKS.includes(chosen)) refuse(`refusing --playbook=${chosen}: one of ${PLAYBOOKS.join(", ")}.`);
+
+  const limitFlag = argOf("limit");
   if (limitFlag !== undefined && !LIMIT_PATTERN.test(limitFlag)) {
-    process.stderr.write(`refusing --limit=${limitFlag}: worker names only, e.g. `
-      + "a11y-worker-3,a11y-worker-4.\n");
-    process.exit(2);
+    refuse(`refusing --limit=${limitFlag}: worker names only, e.g. a11y-worker-3,a11y-worker-4.`);
   }
-  const flag = process.argv.find((a) => a.startsWith("--ref="));
-  const ref = flag ? flag.slice("--ref=".length) : localBranch();
-  if (!validRef(ref)) {
-    process.stderr.write(`refusing --ref=${ref}: a commit or simple branch name only.\n`);
-    process.exit(2);
+
+  const serialFlag = argOf("serial");
+  if (serialFlag !== undefined && !SERIAL_PATTERN.test(serialFlag)) {
+    refuse(`refusing --serial=${serialFlag}: 0 (all at once) or 1-99.`);
   }
+  // Silently ignoring it would be worse than refusing: the operator asked for a batch size, watched
+  // something else happen, and nothing said so.
+  if (serialFlag !== undefined && chosen !== "provision-role.yml") {
+    refuse(`refusing --serial with --playbook=${chosen}: only provision-role.yml batches.`);
+  }
+
+  const ref = argOf("ref") ?? localBranch();
+  if (!validRef(ref)) refuse(`refusing --ref=${ref}: a commit or simple branch name only.`);
+
+  return { chosen, limitFlag, serialFlag, ref };
+}
+
+function main() {
+  const { chosen, limitFlag, serialFlag, ref } = parseArgs();
 
   // What that ref means HERE, resolved before anything is asked of the control plane. Comparing a commit
   // to a commit is the only comparison that settles "is it running my code?" — the first version compared
@@ -162,7 +198,8 @@ function main() {
     // expected c6e66caa481b76c0, having faithfully fetched a branch nobody had changed.
     ssh(`cd ${CHECKOUT}/packages/worker-fleet/ansible && ANSIBLE_CONFIG=ansible.cfg `
       + `ansible-playbook -i inventory.yml ${chosen} -e a11y_git_ref=${ref}`
-      + (limitFlag ? ` -l ${limitFlag}` : ""),
+      + (limitFlag ? ` -l ${limitFlag}` : "")
+      + (serialFlag !== undefined ? ` -e worker_provision_serial=${serialFlag}` : ""),
     { timeoutMs: PLAYBOOK_TIMEOUT_MS[chosen] ?? DEFAULT_PLAYBOOK_TIMEOUT_MS });
   } catch (cause) {
     process.stderr.write(`\n  ${chosen} FAILED (ansible exit ${cause.status ?? "?"}). The PLAY RECAP above `
@@ -174,4 +211,5 @@ function main() {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
 
-export { validRef, PLAYBOOKS, LIMIT_PATTERN, PLAYBOOK_TIMEOUT_MS, DEFAULT_PLAYBOOK_TIMEOUT_MS };
+export { validRef, PLAYBOOKS, LIMIT_PATTERN, SERIAL_PATTERN, PLAYBOOK_TIMEOUT_MS,
+  DEFAULT_PLAYBOOK_TIMEOUT_MS };

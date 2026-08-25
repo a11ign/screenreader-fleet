@@ -40,12 +40,61 @@
 - name: Provision the capture workers (role)
   hosts: a11y_workers
   gather_facts: false
-  # One at a time. This installs NVDA and can restart the worker, and a fleet-wide simultaneous restart
-  # means every machine is unavailable at once rather than one at a time — which matters if a run is in
-  # flight against the others.
-  serial: 1
+  # ONE AT A TIME BY DEFAULT — and the reason is NOT the one this line used to give.
+  #
+  # It said: "a fleet-wide simultaneous restart means every machine is unavailable at once rather than one
+  # at a time — which matters if a run is in flight against the others." That defends a situation that must
+  # never be allowed to happen. Provisioning during a run does not merely make boxes unavailable: it
+  # restarts a worker mid-capture, destroying 12–520 s of screen-reader work that cannot be resumed, and it
+  # moves `provisionRevision` on some boxes and not others — which is a CAPTURE CACHE KEY and a
+  # `fleet-consistency` MUST_MATCH field, so the run's own evidence ends up split across two populations.
+  # `serial: 1` made that survivable instead of impossible, which is the wrong shape: it is a mitigation
+  # standing in for a refusal.
+  #
+  # `sleep.yml` already had the refusal — twenty lines away, in a sibling playbook — and its comment states
+  # the rule: "a run must never shut down a worker somebody else is using". The pre_task below is that
+  # check, and with it the availability argument for serialising is simply gone.
+  #
+  # What remains is FAIL-FAST ON A CHANGED ROLE: with `serial: 1` a role that breaks a box breaks one box
+  # and stops. That is worth having the first time you run a modified role, and worth nothing on a routine
+  # converge — so it is a choice now rather than a constant. `-e worker_provision_serial=0` runs the whole
+  # fleet at once (`ansible.cfg` already sets `forks = 20`), which is what converging a fleet after adding
+  # a box actually wants.
+  serial: "{{ worker_provision_serial | default(1) }}"
 
   pre_tasks:
+    - name: Is any worker mid-capture
+      # Asked over HTTP from the control plane, deliberately NOT over the SSH connection — the same
+      # question the dispatcher asks, answered the same way, so the two cannot disagree about "busy".
+      # Copied in shape from `sleep.yml`, which learned it first.
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ a11y_port }}/health"
+        method: GET
+        timeout: 5
+      delegate_to: localhost
+      register: provision_busy_check
+      failed_when: false
+      changed_when: false
+
+    - name: REFUSE to provision underneath a capture
+      # A HARD FAIL for the whole play, where `sleep.yml` merely SKIPS the busy box — and the difference is
+      # the point rather than an inconsistency. A partially-slept fleet is harmless: some boxes are off,
+      # some are on, and nothing about the evidence changes. A partially-PROVISIONED fleet is the exact
+      # INCONSISTENT state that stops every capture run, because `provisionRevision` would then differ
+      # across boxes. Skipping the busy one is the worst available option here.
+      #
+      # A box that is not answering is NOT a refusal: it is asleep or being rebuilt, and provisioning is
+      # how you would fix it. Only a live worker reporting `busy` blocks.
+      when: provision_busy_check.json.busy | default(false) | bool
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} is CAPTURING right now. Provisioning it would restart the worker
+          mid-capture — 12–520 s of screen-reader work with no way to resume it — and would move
+          provisionRevision on this box and not the others, which is a capture cache key and a
+          fleet-consistency field. The fleet would then read INCONSISTENT and every capture run would
+          refuse to start. Nothing has been changed. Stop the run first (`npm run lab:stop -- -e job=<name>`,
+          or `npm run lab:status` to see what is going), then provision the WHOLE fleet together.
+
     - name: Fast-forward the guest checkout so the role acts on THIS version
       # The role installs from the repo on the box: npm, guidepup and the scheduled-task command lines
       # all point into it. Provisioning from a stale checkout would configure a worker to run code

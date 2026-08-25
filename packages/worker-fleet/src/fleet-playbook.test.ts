@@ -9,7 +9,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { validRef, PLAYBOOKS, LIMIT_PATTERN, PLAYBOOK_TIMEOUT_MS, DEFAULT_PLAYBOOK_TIMEOUT_MS }
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { validRef, PLAYBOOKS, LIMIT_PATTERN, SERIAL_PATTERN, PLAYBOOK_TIMEOUT_MS, DEFAULT_PLAYBOOK_TIMEOUT_MS }
   from "./fleet-playbook.mjs";
 
 test("commits and ordinary branch names are accepted", () => {
@@ -82,4 +85,35 @@ test("a playbook that installs software gets a budget bigger than the default", 
   for (const name of Object.keys(PLAYBOOK_TIMEOUT_MS)) {
     assert.ok(PLAYBOOKS.includes(name), `${name} has a timeout but is not a runnable playbook`);
   }
+});
+
+test("provisioning REFUSES a worker mid-capture, rather than serialising around it", () => {
+  // The design error this replaced: `serial: 1` carried the comment "matters if a run is in flight
+  // against the others", which defends a situation that must never be allowed. Provisioning during a run
+  // restarts a worker mid-capture (12–520 s of unresumable work) AND moves provisionRevision on some
+  // boxes and not others — a capture cache key and a fleet-consistency MUST_MATCH field. That is a
+  // mitigation standing in for a refusal, and `sleep.yml` already had the refusal twenty lines away.
+  const play = readFileSync(
+    fileURLToPath(new URL("../ansible/provision-role.yml", import.meta.url)), "utf8");
+  const executable = play.split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
+
+  assert.match(executable, /provision_busy_check\.json\.busy/,
+    "provision-role.yml must ask each worker whether it is capturing before touching it");
+  assert.match(executable, /ansible\.builtin\.fail:/,
+    "a busy worker must FAIL the play, not be skipped: a partially-provisioned fleet is the INCONSISTENT "
+    + "state that stops every capture run, so skipping the busy box is the worst option here");
+  // Asked over HTTP from the control plane — the same channel the dispatcher uses — so the two cannot
+  // disagree about "busy". Over SSH it would be a different question answered a different way.
+  assert.match(executable, /url: "http:\/\/\{\{ ansible_host \}\}:\{\{ a11y_port \}\}\/health"/);
+});
+
+test("the provisioning batch size is a choice, contained by shape", () => {
+  for (const ok of ["0", "1", "6", "99"]) assert.equal(SERIAL_PATTERN.test(ok), true, ok);
+  for (const bad of ["", "-1", "1;id", "$(id)", "100", "01", "1.5", " 1"]) {
+    assert.equal(SERIAL_PATTERN.test(bad), false, JSON.stringify(bad));
+  }
+  const play = readFileSync(
+    fileURLToPath(new URL("../ansible/provision-role.yml", import.meta.url)), "utf8");
+  assert.match(play, /serial: "\{\{ worker_provision_serial \| default\(1\) \}\}"/,
+    "serial must be overridable, and must still default to 1 — fail-fast on a role you just changed");
 });
