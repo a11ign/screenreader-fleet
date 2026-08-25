@@ -170,6 +170,16 @@
     $tasks = Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdate*' -ErrorAction SilentlyContinue
     if (-not $tasks) { "none found"; exit 0 }
     foreach ($t in $tasks) {
+      # STOP BEFORE DISABLE, and this is the step that was missing. `Disable-ScheduledTask` marks a task
+      # so it will not START again; it does not terminate an instance already RUNNING. Measured on
+      # a11y-worker-5, 2026-08-25: the final verify refused with "scheduled task
+      # MicrosoftEdgeUpdateTaskMachineCore is Running, expected Disabled" — on the one guest in the fleet
+      # that had updated itself past the pin.
+      #
+      # So this is not a tidy-up, it is the mechanism. A run that disables a live updater and walks away
+      # leaves it to finish the update it was already performing, which is precisely the drift the pin
+      # exists to prevent, arriving in the window between disabling and believing it.
+      if ($t.State -eq 'Running') { Stop-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath | Out-Null }
       if ($t.State -ne 'Disabled') { Disable-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath | Out-Null }
       "$($t.TaskName) -> $((Get-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath).State)"
     }
