@@ -72,9 +72,23 @@ worker_edge_policy:
 # The URL and hash come from Microsoft's enterprise catalogue, https://edgeupdates.microsoft.com/api/products?view=enterprise.
 # Pinned by CHECKSUM, not just by URL: the point is a build we can name, and an unverified download would
 # make the version claim rest on a hostname.
-worker_edge_version: "151.0.4129.101"
-worker_edge_msi_url: "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d209ad46-3748-45ee-9a0f-826275ced29c/MicrosoftEdgeEnterpriseX64.msi"
-worker_edge_msi_sha256: "46dcccee1669f746dd527561cbd25e5b049333117a6996ba0ed9c14275656cef"
+# MOVED FORWARD 2026-08-25, .101 -> .107, and the direction is forced rather than chosen.
+#
+# a11y-worker-5 auto-updated to .107 against a pin of .101 and CANNOT BE BROUGHT BACK: Chromium's
+# installer declines to install over a newer build, and Windows blocks uninstalling Edge outside the EEA.
+# Both were established by running them, not inferred. So a fleet that drifts forward has exactly two
+# ways back — reimage the guest, or follow it — and following it is one download against a reimage.
+#
+# It cost no cache. `environmentKey` keys on `browser/browserVersion` and all 3,210 corpus captures
+# record that field as ABSENT, so their key already reads `.../unknown` and already fails to match any
+# live guest. The corpus was cache-invalid before this change and is no more invalid after it.
+#
+# URL and hash come from Microsoft's own enterprise release API
+# (https://edgeupdates.microsoft.com/api/products?view=enterprise), which publishes the SHA256 — so the
+# pin is a fact about the bytes rather than a claim about a hostname.
+worker_edge_version: "151.0.4129.107"
+worker_edge_msi_url: "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/998bcf3d-e044-426d-9e9b-61da81399306/MicrosoftEdgeEnterpriseX64.msi"
+worker_edge_msi_sha256: "b75f03b87dfb0cbc85ba2c0858c632511b17355f42563a43fca5368100ffe0fe"
 # The binary is the source of truth for "which Edge is installed", not the registry's recorded version.
 # Same rule the worker itself now follows: it reported a version it was not running for five days because
 # the value was read once and cached, and the file on disk had moved underneath it.
