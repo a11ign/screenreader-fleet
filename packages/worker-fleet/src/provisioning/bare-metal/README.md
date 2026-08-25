@@ -138,9 +138,27 @@ want on a fleet whose screens you cannot see.
 That is what makes it hands-off, and it is why the PXE entry serving this must be aimed at machines you
 have set aside — not set as a default-for-everything boot option.
 
-## Untested end to end
+## The media is VERSIONED — refresh `autounattend.xml` before every install
 
-The chain (`autounattend` → `first-boot.cmd` → `bootstrap` → provisioning) is proven on the arm64 UTM
-guests. This x64 adaptation has **not** been PXE-booted yet. The first run is worth watching, and the
-place to look when it stalls is `C:\a11y-first-boot.log` on the box, which is written before anything
-else can fail.
+This file is copied onto the boot media (iVentoy's auto-install script, or a Ventoy USB stick), so a
+stick prepared once carries whatever this file said that day. It has been fixed **three times since the
+fleet was built**, and each fix came from a real install that failed:
+
+| | |
+|---|---|
+| `279e161` 15 Aug | aims the payload fetch at fleet-control (`REDACTED-INTERNAL-ADDRESS:8099`) rather than the PXE host |
+| `5d4b877` 15 Aug | the install asked for a locale the media does not carry |
+| `4fff4c6` 23 Aug | the product key stopped matching the edition once `install.wim` was split |
+
+So **the answer to "is there anything to update on the stick?" is yes, always check.** Nothing about the
+box is remotely managed until sshd is up, and every one of those three failures happens before that —
+which is precisely the window where you have no remote diagnosis and are standing next to the machine.
+Copy this directory's current `autounattend.xml` onto the media each time.
+
+`serve-bootstrap.sh` must be RUNNING on the control plane while the box installs: the media fetches three
+files over HTTP and is not self-contained (see *Why the files are fetched rather than injected*).
+
+This section previously read "Untested end to end — this x64 adaptation has not been PXE-booted yet."
+That is stale: the three fixes above are what a real install produces, and the fleet is four boxes. It is
+not a claim of a clean unattended run start to finish, which nobody has recorded. The place to look when
+it stalls is still `C:\a11y-first-boot.log` on the box, written before anything else can fail.
