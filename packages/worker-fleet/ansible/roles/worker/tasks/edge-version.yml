@@ -83,6 +83,35 @@
   failed_when: false   # "not found" is success here; the verify at the end is the judge
   changed_when: true
 
+- name: Remove a NEWER Edge first, because Chromium's installer will not downgrade over one
+  # THE PIN COULD NOT PIN, and this is what that looked like. Measured on a11y-worker-5, 2026-08-25:
+  # Edge had auto-updated to 151.0.4129.107 against a pin of .101, the MSI ran, `win_package` reported
+  # ok — and no `151.0.4129.101` directory appeared, because Chromium's installer silently declines to
+  # install over a newer build. The rename step then threw "the MSI did not lay down 151.0.4129.101",
+  # which is true and does not say why.
+  #
+  # So a fleet could drift FORWARD and never be brought back, and `worker_edge_version` is a capture
+  # cache key: moving the pin to the newer build instead would invalidate every cached corpus capture to
+  # accommodate one guest that updated itself. Downgrading the guest is the cheaper direction by far.
+  #
+  # Scoped to a genuine downgrade — `is version(..., '>')` — so an ordinary upgrade still goes through
+  # the MSI untouched and nothing is uninstalled that did not need to be.
+  when:
+    - (edge_installed.output | default([]) | first | default('', true)) != worker_edge_version
+    - (edge_installed.output | default([]) | first | default('0', true)) is version(worker_edge_version, '>')
+  become: true
+  ansible.windows.win_shell: |
+    $have = "{{ edge_installed.output | default([]) | first | default('', true) }}"
+    $setup = "{{ worker_edge_dir }}\$have\Installer\setup.exe"
+    if (-not (Test-Path -LiteralPath $setup)) { throw "no installer at $setup to uninstall $have with" }
+    taskkill /im msedge.exe /f 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+    # `--force-uninstall` is what makes it non-interactive; without it setup.exe waits on a prompt no
+    # one will ever answer, and the task hangs until its timeout rather than failing.
+    $p = Start-Process -FilePath $setup -ArgumentList "--uninstall","--system-level","--force-uninstall" -Wait -PassThru -NoNewWindow
+    "uninstalled $have (exit $($p.ExitCode))"
+  changed_when: true
+
 - name: Install it
   when: (edge_installed.output | default([]) | first | default('', true)) != worker_edge_version
   become: true
