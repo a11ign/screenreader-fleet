@@ -326,6 +326,15 @@
          else (('(checkout unchanged, up to date with ' ~ lab_ref ~ ')') if lab_behind_count | int == 0
                else '(checkout unchanged and ' ~ lab_behind_count ~ ' COMMIT(S) BEHIND origin/' ~ lab_ref ~ ')') }}
 
+# NO BYTECODE CACHE. A stale `__pycache__/*.pyc` makes a job execute code that is not in the checkout,
+# which is what `REFUSE to run at a commit other than the one asked for` exists to prevent, one layer
+# below where that guard can see it: it compares git SHAs, and the SHA is correct while the bytecode is
+# not.
+#
+# The setting must go in the argv LIST and its explanation must not. Putting this comment inside the
+# Jinja expression cost a pipeline run on 2026-08-25 — `#` is a syntax error there, and Ansible reported
+# `unexpected char '#' at 245`, which names the character and not the file. `lab-job.test.ts` asserted
+# only that the string was present, so it passed against a playbook that could not template.
 - name: "Start it: {{ job_name }}"
   ansible.builtin.command:
     argv: >-
@@ -335,17 +344,6 @@
         "--property=RuntimeMaxSec=" ~ (job_timeout | int),
         "--property=ReadWritePaths=" ~ lab_runs_path,
         "--setenv=PYTHONUNBUFFERED=1",
-        # NO BYTECODE CACHE. A stale `__pycache__/*.pyc` makes a job execute code that is not in the
-        # checkout — which is exactly what `REFUSE to run at a commit other than the one asked for`
-        # exists to prevent, arriving one layer below where that guard can see it.
-        #
-        # Measured 2026-08-25: a fix to `audit_applicability.py` was committed, pushed, pulled by the job
-        # (which reported `runs at f74aa362b0c8 (pulled v8-feature-schema)`) and the run still raised the
-        # NameError the fix removed — at a line number one off from the file on disk, which is the only
-        # reason it was noticed rather than treated as a fix that did not work.
-        #
-        # `-B` is not enough on its own: it stops WRITING new bytecode and Python still READS an existing
-        # `.pyc` whose timestamp looks current. The env var is checked on every import.
         "--setenv=PYTHONDONTWRITEBYTECODE=1",
       ] + (job_setenv | default([]) | map('regex_replace', '^', '--setenv=') | list) + [
         "--"

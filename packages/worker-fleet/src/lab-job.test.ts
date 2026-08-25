@@ -379,3 +379,26 @@ test("a lab job never runs from a stale bytecode cache", () => {
   assert.match(RUN_JOB, /PYTHONDONTWRITEBYTECODE=1/,
     "lab jobs must not read or write bytecode caches; a stale .pyc runs code that is not in the checkout");
 });
+
+test("every Jinja expression in run-job.yml can actually be TEMPLATED", () => {
+  // The first version of the test above asserted only that `PYTHONDONTWRITEBYTECODE=1` was PRESENT, and
+  // passed against a playbook Ansible could not template: the setting had been added inside the `argv:`
+  // Jinja expression along with its explanation, and `#` is a syntax error there. A pipeline run died at
+  // stage 1 with `unexpected char '#' at 245` — which names the character and not the file.
+  //
+  // A guard that checks presence and not VALIDITY is this repo's recurring shape, one layer over from the
+  // count-based check that cannot see content rot. My second attempt at this test was that same defect
+  // again: a regex for `{{ … #` on ONE line, against an `argv:` block that spans fifteen. Mutation
+  // testing caught it, and the lesson is to assert the property rather than a pattern that implies it.
+  //
+  // So: extract each Jinja block and refuse a `#` anywhere inside it, however many lines it spans.
+  const raw = read("tasks/run-job.yml");
+  const expressions = [...raw.matchAll(/\{\{[\s\S]*?\}\}/g)].map((match) => match[0]);
+  assert.ok(expressions.length > 10,
+    `only ${expressions.length} Jinja expressions found; the file's shape changed and this is blind`);
+  for (const expression of expressions) {
+    assert.ok(!expression.includes("#"),
+      "a '#' inside a Jinja expression cannot be templated — Ansible fails the whole task with "
+      + `\`unexpected char '#'\`. Move the comment above the task:\n${expression.slice(0, 200)}`);
+  }
+});
