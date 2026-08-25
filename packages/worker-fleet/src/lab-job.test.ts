@@ -199,11 +199,24 @@ test("a job pulls the lab checkout, and records the commit it actually ran at", 
   const stamp = RUN_JOB.indexOf("Record the commit this job actually runs at");
   const start = RUN_JOB.indexOf('- name: "Start it:');
   assert.ok(stamp > 0 && stamp < start, "the commit must be resolved before the job starts, or it describes nothing");
-  const stampBlock = RUN_JOB.slice(stamp, start);
+  // THE STAMP TASK ITSELF, not everything between it and the start. The region form was right until a
+  // task was added after the stamp that MUST be conditional — the refusal below, which fires only when
+  // the checkout did not land on the requested commit. Widening the region to catch that would have
+  // meant deleting a guard to add a guard.
+  //
   // `^\s*when:` and not `when:` — `changed_when:` contains the substring, so the loose form failed on a
   // correct file. A guard a correct file can break gets weakened rather than fixed, which is the same
   // reasoning as `executable()` stripping comments above.
+  const nextTask = RUN_JOB.indexOf('\n- name: "', stamp + 1);
+  const stampBlock = RUN_JOB.slice(stamp, nextTask > 0 ? nextTask : start);
   assert.ok(!/^\s*when:/m.test(stampBlock), "the stamp must never be conditional — that is the whole point");
+
+  // And the stamp must be ACTED ON, which is what it was not. Recorded, printed, never compared to the
+  // ref that was asked for — so three jobs ran four commits behind and each reported success.
+  assert.match(RUN_JOB, /REFUSE to run at a commit other than the one asked for/,
+    "a stamp nothing compares is a comment; the launcher must refuse a commit it was not asked for");
+  assert.match(RUN_JOB, /lab_commit\.stdout \| trim != lab_ref_commit/,
+    "and the refusal must compare the READ-BACK commit against the RESOLVED ref");
 });
 
 test("a pull never runs into a checkout somebody or something else is using", () => {

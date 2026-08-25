@@ -283,6 +283,34 @@
   changed_when: false
   register: lab_commit
 
+- name: "REFUSE to run at a commit other than the one asked for"
+  # THE STAMP WAS RECORDED AND NEVER COMPARED, which is this repo's most-named defect wearing job
+  # control: the value was right there, printed, and nothing acted on it.
+  #
+  # Measured 2026-08-25. `lab_should_pull` is false when the checkout is DIRTY — and an earlier
+  # `rules:real-pages --update` had left a modified baseline file. So the checkout was skipped, three
+  # consecutive jobs ran at a commit ~4 behind the one requested, and each reported success: two capture
+  # runs produced "no pages for role 'fixture'" (the role did not exist at that commit) and I read them
+  # as a corpus problem. The run says which code produced it; nobody was checking it was the code asked
+  # for.
+  #
+  # A HARD REFUSAL rather than a warning, and rather than pulling anyway. A dirty checkout is somebody
+  # else's uncommitted work — `run-job.yml` cannot tell a stray artefact from an edit in progress, which
+  # is why it declines to pull in the first place — so the safe move is to stop and say what is in the
+  # way, not to run stale code or to discard the work.
+  when: lab_commit.stdout | trim != lab_ref_commit[:7]
+  ansible.builtin.fail:
+    msg: >-
+      {{ job_name }} would run at {{ lab_commit.stdout | trim }}, NOT the requested
+      {{ lab_ref }} ({{ lab_ref_commit[:7] }}).
+      {{ 'The checkout is dirty, so it was left alone: ' ~ (lab_dirty.stdout | trim | replace('\n', '; '))
+         if (lab_dirty.stdout | default('') | trim) != ''
+         else ('Another job is running: ' ~ (lab_other_jobs.stdout | trim)
+               if (lab_other_jobs.stdout | default('') | trim) != ''
+               else 'pull=false was passed.') }}
+      Nothing has run. Clear what is in the way on the lab and dispatch again — a job that quietly runs
+      four commits behind reports success for code you did not ask for.
+
 - name: "Running {{ job_name }} at {{ lab_commit.stdout | trim }}"
   ansible.builtin.debug:
     msg: >-
