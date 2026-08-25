@@ -21,6 +21,18 @@
  *   npm run fleet:deploy                       # ship this checkout's worker code
  *   npm run fleet:deploy -- --ref=<commit>     # default: the commit this checkout is on
  *   npm run fleet:sleep                        # power the fleet down, REFUSING any box mid-capture
+ *   npm run fleet:provision                    # the ROLE: NVDA, Edge pin, policies, and the stamp
+ *
+ * `provision-role.yml` is here because adding a box makes it necessary, and it was reachable only by
+ * typing `ansible-playbook` on the control plane — the hand-crank this file exists to remove. It runs
+ * `serial: 1`, so the fleet is never all-unavailable at once.
+ *
+ * **Run it across the WHOLE fleet, never `--limit` to the new box.** `provisionRevision` is
+ * `<git-sha>-<hash of four environment files>` and it is a CAPTURE CACHE KEY that `fleet-consistency`
+ * also treats as MUST_MATCH. A box stamped at a different commit from its peers makes the fleet read
+ * INCONSISTENT and capture runs refuse to start — `stamp-provision-revision.ps1` records exactly that
+ * happening, four boxes reporting four revisions "purely because each first-booted at a different commit
+ * during one afternoon".
  */
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -35,7 +47,7 @@ const CHECKOUT = "a11y-witness";
  * command a remote shell interprets, on the box holding the fleet SSH key. Same containment as
  * `-e out=<name>` in `lab-job.yml`, for the same reason.
  */
-const PLAYBOOKS = ["deploy.yml", "sleep.yml"];
+const PLAYBOOKS = ["deploy.yml", "sleep.yml", "provision-role.yml"];
 
 /**
  * Ansible host patterns this may target, by SHAPE. Same containment as the playbook list, and needed for
@@ -56,11 +68,30 @@ function validRef(ref) {
   return /^[0-9a-zA-Z._/-]{1,64}$/.test(ref) && !ref.includes("..");
 }
 
-function ssh(command, { capture = false } = {}) {
+/**
+ * How long each playbook may take, because 30 minutes is not one number that fits all of them.
+ *
+ * `deploy.yml` is a pull and a restart per box. `provision-role.yml` INSTALLS NVDA and an Edge MSI, one
+ * box at a time (`serial: 1`), so six boxes is six sequential installs — comfortably past 30 minutes, and
+ * a killed SSH mid-provision leaves a box half-configured with a stamp that may or may not have been
+ * written. That is the worst state to be in, because `fleet:status` would then report INCONSISTENT and
+ * the cause would look like a provisioning bug rather than a timeout.
+ *
+ * The budget is a CEILING, not a cost: a deadline that expires early turns "still working" into "failed",
+ * which is the rule `run-interactive.yml` and `run-job.yml` already state.
+ */
+const PLAYBOOK_TIMEOUT_MS = { "provision-role.yml": 4 * 60 * 60 * 1000 };
+const DEFAULT_PLAYBOOK_TIMEOUT_MS = 30 * 60 * 1000;
+
+function ssh(command, { capture = false, timeoutMs = DEFAULT_PLAYBOOK_TIMEOUT_MS } = {}) {
   const args = ["-i", CONTROL_KEY, "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+    // The connection must survive a long silent stretch: an NVDA install prints nothing for minutes and a
+    // dropped SSH would read as a failed provision. Keepalives are cheap and the alternative is a
+    // diagnosis of the wrong thing.
+    "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=20",
     `root@${CONTROL_PLANE}`, command];
   return execFileSync("ssh", args, {
-    encoding: "utf8", stdio: capture ? "pipe" : ["ignore", "inherit", "inherit"], timeout: 1_800_000,
+    encoding: "utf8", stdio: capture ? "pipe" : ["ignore", "inherit", "inherit"], timeout: timeoutMs,
   });
 }
 
@@ -131,7 +162,8 @@ function main() {
     // expected c6e66caa481b76c0, having faithfully fetched a branch nobody had changed.
     ssh(`cd ${CHECKOUT}/packages/worker-fleet/ansible && ANSIBLE_CONFIG=ansible.cfg `
       + `ansible-playbook -i inventory.yml ${chosen} -e a11y_git_ref=${ref}`
-      + (limitFlag ? ` -l ${limitFlag}` : ""));
+      + (limitFlag ? ` -l ${limitFlag}` : ""),
+    { timeoutMs: PLAYBOOK_TIMEOUT_MS[chosen] ?? DEFAULT_PLAYBOOK_TIMEOUT_MS });
   } catch (cause) {
     process.stderr.write(`\n  ${chosen} FAILED (ansible exit ${cause.status ?? "?"}). The PLAY RECAP above `
       + "names which hosts; nothing was rolled back, so re-running is safe.\n");
@@ -142,4 +174,4 @@ function main() {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
 
-export { validRef, PLAYBOOKS, LIMIT_PATTERN };
+export { validRef, PLAYBOOKS, LIMIT_PATTERN, PLAYBOOK_TIMEOUT_MS, DEFAULT_PLAYBOOK_TIMEOUT_MS };

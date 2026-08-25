@@ -75,6 +75,11 @@ all:
           ansible_host: REDACTED-INTERNAL-ADDRESS
           mac: "6c:4b:90:70:1a:3d"
 
+        a11y-worker-6:
+          # Enrolled by `fleet:discover --enroll` on 2026-08-25: NVDA 2026.1.1, Microsoft Windows 11 Pro 10.0.22631/x64
+          ansible_host: REDACTED-INTERNAL-ADDRESS
+          mac: "e8:6a:64:fe:0f:02"
+
     ## The control plane — in the inventory because it EXISTS, not because it captures
     #
     # Added 2026-08-21, and it could not have been added before that date: `fleet-env.mjs` read every

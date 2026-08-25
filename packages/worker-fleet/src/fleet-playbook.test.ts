@@ -9,7 +9,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { validRef, PLAYBOOKS, LIMIT_PATTERN } from "./fleet-playbook.mjs";
+import { validRef, PLAYBOOKS, LIMIT_PATTERN, PLAYBOOK_TIMEOUT_MS, DEFAULT_PLAYBOOK_TIMEOUT_MS }
+  from "./fleet-playbook.mjs";
 
 test("commits and ordinary branch names are accepted", () => {
   for (const ref of ["afec73d", "65ead9b1c2d3e4f5", "main", "v8-feature-schema", "origin/main", "v1.2.3"]) {
@@ -43,7 +44,10 @@ test("only the named playbooks are runnable, and they are names rather than path
   // The same containment as `-e out=<name>` in lab-job.yml. This value reaches a shell on the box that
   // holds the fleet SSH key, so an arbitrary path here is an arbitrary playbook run against twelve
   // Windows machines.
-  assert.deepEqual(PLAYBOOKS, ["deploy.yml", "sleep.yml"]);
+  assert.deepEqual(PLAYBOOKS, ["deploy.yml", "sleep.yml", "provision-role.yml"]);
+  // `provision.yml` stays REFUSED and that is not an oversight: it is the UTM/PowerShell provisioning
+  // playbook, a different file from `provision-role.yml`, and only the role one should be reachable from
+  // a laptop. Two files one character apart, one allowed and one not, is exactly what an allowlist is for.
   for (const bad of ["../../../etc/evil.yml", "provision.yml", "/tmp/x.yml", "deploy.yml; id"]) {
     assert.equal(PLAYBOOKS.includes(bad), false, bad);
   }
@@ -65,5 +69,17 @@ test("--limit takes worker names, and nothing that could reach a shell", () => {
     "../etc", "a11y-worker-3,", "", "all",
   ]) {
     assert.equal(LIMIT_PATTERN.test(bad), false, JSON.stringify(bad));
+  }
+});
+
+test("a playbook that installs software gets a budget bigger than the default", () => {
+  // `provision-role.yml` installs NVDA and an Edge MSI with `serial: 1`, so six boxes is six sequential
+  // installs. At the 30-minute default the SSH is killed mid-provision, which leaves a box half
+  // configured and a stamp that may or may not have been written — and `fleet:status` then reports
+  // INCONSISTENT, which reads like a provisioning bug rather than a timeout.
+  assert.ok(PLAYBOOK_TIMEOUT_MS["provision-role.yml"] > DEFAULT_PLAYBOOK_TIMEOUT_MS,
+    "provisioning needs longer than a deploy; a ceiling that expires early turns still-working into failed");
+  for (const name of Object.keys(PLAYBOOK_TIMEOUT_MS)) {
+    assert.ok(PLAYBOOKS.includes(name), `${name} has a timeout but is not a runnable playbook`);
   }
 });
