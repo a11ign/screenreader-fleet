@@ -318,6 +318,17 @@
       # reports "SKIPPED: no .venv/bin/pytest" and exits 0. Measured 2026-08-25 — an honest skip, and an
       # unverified precondition either way. A guard that can only run where the data is absent is not a
       # guard, and this one deletes evidence when it is wrong.
+      # DOES A MULTI-DEFECT PAGE CARRY THE EVIDENCE ITS LABELS CLAIM?
+      #
+      # Every accompanying defect declares a `grants` feature and nothing read it -- eight declarations,
+      # zero consumers. `check-signals` verifies the primary `badSignal` only, and `alsoFails` adds a label
+      # with no signal, so a label for a defect whose evidence was never captured passed every gate.
+      #
+      # Emits the JS-side map first. The audit REFUSES without it rather than examining an empty set,
+      # which is the failure it exists to catch.
+      grants-audit:
+        argv: ["/usr/bin/npm", "run", "--silent", "corpus:grants-audit"]
+        timeout: 900
       applicability-audit:
         argv: ["{{ lab_python }}", "packages/scorer/python/audit_applicability.py"]
         timeout: 900
