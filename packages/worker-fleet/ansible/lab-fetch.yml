@@ -32,8 +32,23 @@
       false-positives: "runs/model-{{ out | default('candidate') }}/false-positives.json"
       abstention-sweep: "runs/real-page-corpus/abstention-sweep.json"
       capture-progress: "runs/screenreader-dataset/capture-progress.json"
+      # THE HELD-OUT RECORDS THEMSELVES. Added 2026-08-25, when an acceptance false positive named a page
+      # and nothing could show what the model SAW on it -- which is this file's own reason for existing,
+      # one artifact further in: "a job interface that can start a 4-hour training run and cannot return
+      # its report leaves you diagnosing from log fragments". A report that names a failing page and
+      # cannot produce that page's evidence has the same hole.
+      #
+      # Read-only and enumerated like every other entry; the repeat is a NAME from a fixed list, never a
+      # path, so `runs/../../etc/passwd` is inexpressible rather than rejected.
+      acceptance-records: "runs/screenreader-acceptance/{{ repeat | default('repeat-1') }}.jsonl"
 
   tasks:
+    - name: A repeat is a NAME from a fixed list, never a path
+      when: repeat is defined
+      ansible.builtin.assert:
+        that: repeat in ['repeat-1', 'repeat-2']
+        fail_msg: "-e repeat= must be repeat-1 or repeat-2. It is a name, not a path."
+
     - name: The artifact must be one we have, and the model directory a name
       ansible.builtin.assert:
         that:
