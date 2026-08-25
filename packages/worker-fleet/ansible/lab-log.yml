@@ -1,0 +1,81 @@
+---
+# What did a job actually SAY? Its own output, unwrapped.
+#
+#     npm run lab:log -- -e job=grants-audit
+#     npm run lab:log -- -e job=train -e lines=800
+#
+# ## Why this exists
+#
+# `lab-status.yml` already shows the journal, and it shows it through Ansible's `debug`, which wraps every
+# line at ~90 characters, re-indents it, and quotes it as YAML. A report designed to be read — a table of
+# per-defect counts, a transcript, a threshold sweep — arrives as fragments:
+#
+#     - 'Aug 25 21:04:11 a11y-lab python[1007311]:     "1.3.1: 2 acceptance false positive(s):
+#         acceptance-link-permits/bad, acceptance-link-permits/bad",'
+#
+# Measured 2026-08-25: reading one audit's output took eleven separate `awk | sed | grep` pipelines across
+# the session, each hand-written, one of which silently matched nothing. That is the defect CLAUDE.md
+# names about journals — "improvising around a tool the repo already has is itself a defect source" — with
+# the twist that the tool was the thing producing the fragments.
+#
+# So the journal is written to a file on the lab and FETCHED, exactly as `lab-fetch.yml` does for reports.
+# Bytes, not YAML.
+#
+# Bounded to ONE INVOCATION, for the reason `lab-status.yml` already carries a task about: `journalctl -u`
+# returns every run of that unit since boot, oldest first, so a job that has run before hands back its
+# predecessor's output above its own. Three separate misdiagnoses came from exactly that.
+- name: Fetch a job's own output
+  hosts: a11y_lab
+  gather_facts: false
+
+  tasks:
+    - name: A job must be named
+      ansible.builtin.assert:
+        that:
+          - job is defined
+          - job is match('^[a-z][a-z0-9-]{0,40}$')
+        fail_msg: "Pass -e job=<name>, the same name you dispatched with."
+
+    - name: How many lines
+      # Contained by shape like every other value that reaches a command on this box.
+      ansible.builtin.assert:
+        that: (lines | default(400)) | int > 0 and (lines | default(400)) | int <= 5000
+        fail_msg: "-e lines= must be 1..5000."
+
+    - name: Which invocation was the last one
+      ansible.builtin.command:
+        argv: [systemctl, show, "-p", InvocationID, "--value", "a11y-job-{{ job }}"]
+      register: invocation
+      changed_when: false
+      failed_when: false
+
+    - name: Say if that job has never run
+      # A unit systemd has never heard of answers with an empty InvocationID, and filtering the journal on
+      # an empty one returns the WHOLE journal — other units' output, presented as this job's. Refuse.
+      when: (invocation.stdout | default('') | trim) == ''
+      ansible.builtin.fail:
+        msg: >-
+          a11y-job-{{ job }} has no invocation on {{ inventory_hostname }} — it has not run, or the unit
+          was reaped. `npm run lab:status -- -e job={{ job }}` reports which.
+
+    - name: Write this invocation's output to a file
+      ansible.builtin.shell:
+        cmd: >-
+          journalctl _SYSTEMD_INVOCATION_ID={{ invocation.stdout | trim }} --no-pager --output=cat
+          -n {{ (lines | default(400)) | int }} > /tmp/a11y-job-{{ job }}.log
+      changed_when: false
+
+    - name: Bring it back
+      ansible.builtin.fetch:
+        src: "/tmp/a11y-job-{{ job }}.log"
+        # ANCHORED to the repo root, not relative. A bare `runs/fetched/...` resolves against the
+        # PLAYBOOK directory, so the first version landed the file in
+        # `packages/worker-fleet/ansible/runs/fetched/` and reported success. `lab-fetch.yml` had the
+        # correct form twelve lines away; I wrote a second path convention rather than reading it.
+        dest: "{{ playbook_dir }}/../../../runs/fetched/{{ job }}.log"
+        flat: true
+      register: fetched
+
+    - name: Where it landed
+      ansible.builtin.debug:
+        msg: "runs/fetched/{{ job }}.log ({{ fetched.dest | default('?') }})"
