@@ -150,10 +150,23 @@ fleet was built**, and each fix came from a real install that failed:
 | `5d4b877` 15 Aug | the install asked for a locale the media does not carry |
 | `4fff4c6` 23 Aug | the product key stopped matching the edition once `install.wim` was split |
 
-So **the answer to "is there anything to update on the stick?" is yes, always check.** Nothing about the
-box is remotely managed until sshd is up, and every one of those three failures happens before that —
-which is precisely the window where you have no remote diagnosis and are standing next to the machine.
-Copy this directory's current `autounattend.xml` onto the media each time.
+**But do NOT reflash a stick that has installed boxes successfully, and the third row is why.**
+
+The product-key fix is conditional on the MEDIA, not on the box. The generic KMS key worked while the ISO
+shipped a single `install.wim`, and only began failing once `install.wim` was SPLIT into `install.swm`
+parts to fit a file-size limit — Setup then validates the key against the edition it resolved from the
+split image and the two disagree. A stick whose ISO is unsplit never meets that.
+
+Measured on this fleet: all four workers first-booted between 15 and 16 August, at commits that are
+ancestors of the 23 August fix. So they were installed WITH the KMS key and they installed fine, which is
+positive evidence that stick's ISO is unsplit. The two 15 August fixes (locale, payload address) are
+already in it.
+
+So the honest rule is **check what changed and why, rather than refreshing on principle**. The current
+file is the more portable one — no key at all works on split and unsplit media alike — but that
+combination has been proven zero times on unsplit media, and the stick's has been proven four times.
+Swapping a proven combination for an untested one, in the one phase of the process with no remote
+diagnosis, is the wrong trade. Refresh when a fix applies to your media, or when you change the ISO.
 
 `serve-bootstrap.sh` must be RUNNING on the control plane while the box installs: the media fetches three
 files over HTTP and is not self-contained (see *Why the files are fetched rather than injected*).
