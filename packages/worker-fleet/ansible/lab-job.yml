@@ -350,7 +350,7 @@
       ansible.builtin.assert:
         that:
           - worker is not defined
-          - role | default('training') in ['training', 'calibration']
+          - role | default('training') in ['training', 'calibration', 'fixture']
           - shard | default('0/1') is match('^[0-9]+/[0-9]+$')
         fail_msg: >-
           capture-real-pages now runs across the whole fleet ({{ groups['a11y_workers'] | join(', ') }})
