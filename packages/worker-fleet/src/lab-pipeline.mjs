@@ -97,6 +97,21 @@ export const PIPELINES = {
     what: "re-export both corpora under the current parse, train, audit and promote a candidate",
     jobs: ["retrain", "export-acceptance", "train", "shortcuts", "acceptance", "promote"],
   },
+  // THE MODEL CODE CHANGED AND THE EVIDENCE DID NOT — so re-derive the model and nothing else.
+  //
+  // `candidate` re-captures and re-exports first, which is right when the corpus or the announcement
+  // grammar has moved and pure waste when only the trainer has. A threshold-selection fix or a
+  // calibration rule changes what the weights ARE, not what they were fitted to, so the dataset on disk
+  // is still the right input and re-verifying it costs a capture sweep for no information.
+  //
+  // Deliberately still ends at `promote`, which gates itself: `promote:gated` runs the candidate gate
+  // first and writes nothing on a failure. A pipeline that trains and stops leaves the interesting
+  // question — is it shippable? — to a separate command somebody has to remember.
+  recalibrate: {
+    fleet: false,
+    what: "re-derive and re-gate the model from the dataset already on disk — no capture, no export",
+    jobs: ["train", "shortcuts", "acceptance", "promote"],
+  },
   // No capture, so no fleet, so it can run while the boxes are doing something else. This is the cheap
   // pipeline to run after a rule change: everything reads from disk and the venv.
   gates: {
