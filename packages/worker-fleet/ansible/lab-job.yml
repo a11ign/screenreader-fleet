@@ -291,6 +291,16 @@
       rules-real-pages-update:
         argv: ["/usr/bin/npm", "run", "--silent", "rules:real-pages", "--", "--update"]
         timeout: 900
+      # WHAT STATE IS THE CORPUS IN? The question that had no command, so it was answered by opening an
+      # SSH shell on this box and running ad-hoc Python -- about eight times on 2026-08-25, one of which
+      # read the wrong field and reported `captured: 0` while `lab:status` correctly said 85.
+      #
+      # Reads files already on disk; no worker, seconds. It needs the AUTHORITATIVE corpus, which is why
+      # it is a job at all: a laptop's `runs/` is gitignored and only as fresh as its last sync, and it
+      # carries no `runs/model-*` -- so run there it answers a different question and says so.
+      inventory:
+        argv: ["/usr/bin/node", "packages/lab/scripts/lab-inventory.mjs"]
+        timeout: 900
       rules-coverage:
         argv: ["/usr/bin/npm", "run", "--silent", "rules:coverage"]
         timeout: 900
