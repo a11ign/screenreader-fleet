@@ -312,6 +312,15 @@
       python-tests:
         argv: ["/usr/bin/npm", "run", "test:python"]
         timeout: 1800
+      # THE APPLICABILITY AUDIT, with the interpreter the lab ACTUALLY HAS.
+      #
+      # `python-tests` above is the right job and it cannot do this one: the lab has no pytest, so it
+      # reports "SKIPPED: no .venv/bin/pytest" and exits 0. Measured 2026-08-25 — an honest skip, and an
+      # unverified precondition either way. A guard that can only run where the data is absent is not a
+      # guard, and this one deletes evidence when it is wrong.
+      applicability-audit:
+        argv: ["{{ lab_python }}", "packages/scorer/python/audit_applicability.py"]
+        timeout: 900
       rules-coverage:
         argv: ["/usr/bin/npm", "run", "--silent", "rules:coverage"]
         timeout: 900
