@@ -192,8 +192,11 @@ test("a job pulls the lab checkout, and records the commit it actually ran at", 
     "the launcher must move to the RESOLVED commit, never merge or rebase toward it");
   assert.ok(!/git, (merge|rebase|pull)(?!.*--ff-only)/.test(RUN_JOB),
     "a launcher that can merge or rebase can resolve a divergence nobody looked at");
-  assert.match(RUN_JOB, /argv: \[git, rev-parse, --short, HEAD\]/,
-    "and the commit must be READ BACK, not assumed from what we asked for");
+  // The FULL sha, not `--short`. `git rev-parse --short` returns 7 characters or MORE — git lengthens it
+  // when 7 would be ambiguous — so a comparison against a fixed prefix is right until the day the repo
+  // grows enough objects, and then it refuses correct runs. Shortened at the point of DISPLAY instead.
+  assert.match(RUN_JOB, /argv: \[git, rev-parse, HEAD\]/,
+    "and the commit must be READ BACK in full, not assumed and not truncated before comparison");
 
   // The stamp is unconditional; the pull is not. A job that skips the pull must still say what it ran.
   const stamp = RUN_JOB.indexOf("Record the commit this job actually runs at");

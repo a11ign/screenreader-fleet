@@ -278,7 +278,7 @@
   # Recorded rather than assumed, and AFTER the pull, so it describes what will run. The stamp is the
   # difference between "the run says which code produced it" and "we know which code we asked for".
   ansible.builtin.command:
-    argv: [git, rev-parse, --short, HEAD]
+    argv: [git, rev-parse, HEAD]
     chdir: "{{ lab_repo_path }}"
   changed_when: false
   register: lab_commit
@@ -298,11 +298,11 @@
   # else's uncommitted work — `run-job.yml` cannot tell a stray artefact from an edit in progress, which
   # is why it declines to pull in the first place — so the safe move is to stop and say what is in the
   # way, not to run stale code or to discard the work.
-  when: lab_commit.stdout | trim != lab_ref_commit[:7]
+  when: lab_commit.stdout | trim != lab_ref_commit
   ansible.builtin.fail:
     msg: >-
-      {{ job_name }} would run at {{ lab_commit.stdout | trim }}, NOT the requested
-      {{ lab_ref }} ({{ lab_ref_commit[:7] }}).
+      {{ job_name }} would run at {{ lab_commit.stdout | trim | truncate(12, true, "") }}, NOT the requested
+      {{ lab_ref }} ({{ lab_ref_commit | truncate(12, true, "") }}).
       {{ 'The checkout is dirty, so it was left alone: ' ~ (lab_dirty.stdout | trim | replace('\n', '; '))
          if (lab_dirty.stdout | default('') | trim) != ''
          else ('Another job is running: ' ~ (lab_other_jobs.stdout | trim)
@@ -311,10 +311,10 @@
       Nothing has run. Clear what is in the way on the lab and dispatch again — a job that quietly runs
       four commits behind reports success for code you did not ask for.
 
-- name: "Running {{ job_name }} at {{ lab_commit.stdout | trim }}"
+- name: "Running {{ job_name }} at {{ lab_commit.stdout | trim | truncate(12, true, '') }}"
   ansible.builtin.debug:
     msg: >-
-      {{ job_name }} runs at {{ lab_commit.stdout | trim }}
+      {{ job_name }} runs at {{ lab_commit.stdout | trim | truncate(12, true, "") }}
       {{ ('(pulled ' ~ lab_ref ~ ')') if (lab_pull is defined and lab_pull is changed)
          else (('(checkout unchanged, up to date with ' ~ lab_ref ~ ')') if lab_behind_count | int == 0
                else '(checkout unchanged and ' ~ lab_behind_count ~ ' COMMIT(S) BEHIND origin/' ~ lab_ref ~ ')') }}
