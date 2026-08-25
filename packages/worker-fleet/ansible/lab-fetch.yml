@@ -40,6 +40,7 @@
       #
       # Read-only and enumerated like every other entry; the repeat is a NAME from a fixed list, never a
       # path, so `runs/../../etc/passwd` is inexpressible rather than rejected.
+      grants-audit: "runs/grants-audit.json"
       acceptance-records: "runs/screenreader-acceptance/{{ repeat | default('repeat-1') }}.jsonl"
 
   tasks:
