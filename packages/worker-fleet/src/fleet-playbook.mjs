@@ -83,7 +83,7 @@ function validRef(ref) {
  * How long each playbook may take, because 30 minutes is not one number that fits all of them.
  *
  * `deploy.yml` is a pull and a restart per box. `provision-role.yml` INSTALLS NVDA and an Edge MSI, one
- * box at a time (`serial: 1`), so six boxes is six sequential installs — comfortably past 30 minutes, and
+ * box at a time (`serial: 1`), so five boxes is five sequential installs — comfortably past 30 minutes, and
  * a killed SSH mid-provision leaves a box half-configured with a stamp that may or may not have been
  * written. That is the worst state to be in, because `fleet:status` would then report INCONSISTENT and
  * the cause would look like a provisioning bug rather than a timeout.

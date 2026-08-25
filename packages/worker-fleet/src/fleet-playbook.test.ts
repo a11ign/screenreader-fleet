@@ -76,7 +76,7 @@ test("--limit takes worker names, and nothing that could reach a shell", () => {
 });
 
 test("a playbook that installs software gets a budget bigger than the default", () => {
-  // `provision-role.yml` installs NVDA and an Edge MSI with `serial: 1`, so six boxes is six sequential
+  // `provision-role.yml` installs NVDA and an Edge MSI with `serial: 1`, so five boxes is five sequential
   // installs. At the 30-minute default the SSH is killed mid-provision, which leaves a box half
   // configured and a stamp that may or may not have been written — and `fleet:status` then reports
   // INCONSISTENT, which reads like a provisioning bug rather than a timeout.
@@ -116,4 +116,26 @@ test("the provisioning batch size is a choice, contained by shape", () => {
     fileURLToPath(new URL("../ansible/provision-role.yml", import.meta.url)), "utf8");
   assert.match(play, /serial: "\{\{ worker_provision_serial \| default\(1\) \}\}"/,
     "serial must be overridable, and must still default to 1 — fail-fast on a role you just changed");
+});
+
+test("the provision stamp is the ENVIRONMENT, not the moment it was applied", () => {
+  // `provisionRevision` is a capture cache key AND a fleet-consistency MUST_MATCH field. While it carried
+  // a git SHA, any commit — including one touching nothing a capture can observe — changed it, so:
+  // re-provisioning after a docs change invalidated every cached capture, and a box provisioned minutes
+  // after its peers read INCONSISTENT and blocked every run. Measured 2026-08-25 when a11y-worker-6 failed
+  // and could not be re-run alone, because HEAD had moved and four healthy boxes faced re-provisioning.
+  //
+  // This repo already made the same call one field over: workerCode is deliberately OUTSIDE the cache key
+  // because "it changes when a comment changes". A git SHA changes for strictly more reasons.
+  const script = readFileSync(fileURLToPath(
+    new URL("../src/provisioning/stamp-provision-revision.ps1", import.meta.url)), "utf8");
+  const code = script.split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
+
+  assert.match(code, /^\$stamp = \$combined$/m,
+    "the stamp must be the content hash alone — no SHA, no date, nothing that moves on its own");
+  assert.ok(!/\$stamp = "\$\(if \(\$gitSha\)/.test(code),
+    "the SHA-prefixed stamp is back; it churns a capture cache key for commits that change nothing");
+  // Still RECORDED, because losing it would trade one problem for a diagnostic gap.
+  assert.match(code, /provision-commit\.txt/,
+    "the commit must still be written somewhere for diagnosis, just not into the key");
 });

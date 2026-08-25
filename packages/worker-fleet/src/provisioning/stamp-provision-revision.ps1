@@ -69,8 +69,37 @@ $bytes = [Text.Encoding]::UTF8.GetBytes(($hashes -join ''))
 $combined = ([BitConverter]::ToString(
     [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)) -replace '-', '').Substring(0, 16).ToLower()
 
+# THE COMMIT IS RECORDED, AND IS DELIBERATELY NOT PART OF THE STAMP.
+#
+# It used to be: the stamp read `<short sha>-<content hash>`. That made an ordinary commit -- one touching
+# none of the four files above, none of provisioning, nothing a capture can observe -- change a CAPTURE
+# CACHE KEY and a `fleet-consistency` MUST_MATCH field. The consequences are not theoretical:
+#
+#   - re-provisioning a fleet after any commit invalidates every cached capture, so a full recapture
+#     (~6 h) is the price of a documentation change that happened to land first;
+#   - a box provisioned even minutes after its peers reads INCONSISTENT and blocks every capture run;
+#   - measured 2026-08-25: a11y-worker-6 failed provisioning and could not simply be re-run, because by
+#     then HEAD had moved and re-running would have stamped it differently from the four boxes that had
+#     just succeeded. Four healthy machines faced re-provisioning for a SHA.
+#
+# This repo already made exactly this decision one field over, and wrote down why: `workerCode` is
+# deliberately OUTSIDE the capture cache key because "it changes when a comment changes, and invalidating
+# 1,061 pairs over a reworded comment is how a cache gets switched off". A git SHA changes for strictly
+# more reasons than a code hash does.
+#
+# The content hash already answers the question the stamp exists to answer -- do two guests have different
+# NVDA/Edge configuration? -- and it answers it by describing the configuration rather than by naming a
+# moment. That is also why task files are excluded above: "batching four registry writes into one call is a
+# refactor, not an environment change". The SHA contradicted that reasoning; removing it restores it.
+#
+# The commit is still worth having, for diagnosis rather than for keying, so it goes in its own file next
+# to the stamp. `provisionRevision` is compared for EQUALITY and never parsed (capture-cache.mjs,
+# fleet-consistency.mjs), so nothing downstream reads the two halves apart.
 $gitSha = try { (git -C $RepoPath rev-parse --short HEAD 2>$null) } catch { $null }
-$stamp = "$(if ($gitSha) { $gitSha } else { 'nogit' })-$combined"
+$commitPath = Join-Path $RepoPath 'provision-commit.txt'
+$(if ($gitSha) { $gitSha } else { 'nogit' }) | Out-File -LiteralPath $commitPath -Encoding ascii -NoNewline
+
+$stamp = $combined
 
 $stampPath = Join-Path $RepoPath 'provision-revision.txt'
 $stamp | Out-File -LiteralPath $stampPath -Encoding ascii -NoNewline
