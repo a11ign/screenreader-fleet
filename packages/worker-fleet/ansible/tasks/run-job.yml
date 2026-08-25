@@ -335,6 +335,18 @@
         "--property=RuntimeMaxSec=" ~ (job_timeout | int),
         "--property=ReadWritePaths=" ~ lab_runs_path,
         "--setenv=PYTHONUNBUFFERED=1",
+        # NO BYTECODE CACHE. A stale `__pycache__/*.pyc` makes a job execute code that is not in the
+        # checkout — which is exactly what `REFUSE to run at a commit other than the one asked for`
+        # exists to prevent, arriving one layer below where that guard can see it.
+        #
+        # Measured 2026-08-25: a fix to `audit_applicability.py` was committed, pushed, pulled by the job
+        # (which reported `runs at f74aa362b0c8 (pulled v8-feature-schema)`) and the run still raised the
+        # NameError the fix removed — at a line number one off from the file on disk, which is the only
+        # reason it was noticed rather than treated as a fix that did not work.
+        #
+        # `-B` is not enough on its own: it stops WRITING new bytecode and Python still READS an existing
+        # `.pyc` whose timestamp looks current. The env var is checked on every import.
+        "--setenv=PYTHONDONTWRITEBYTECODE=1",
       ] + (job_setenv | default([]) | map('regex_replace', '^', '--setenv=') | list) + [
         "--"
       ] + job_argv }}

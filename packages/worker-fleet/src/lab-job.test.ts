@@ -366,3 +366,16 @@ test("a job can run at a named ref, and the ref is validated rather than trusted
     "lab_ref is used before it is set, so every job fails with \"'lab_ref' is undefined\" — Ansible "
     + "resolves facts in task order, and this file's tasks are a sequence, not a set");
 });
+
+test("a lab job never runs from a stale bytecode cache", () => {
+  // A `__pycache__/*.pyc` left by a previous commit makes a job execute code that is not in the checkout,
+  // and `REFUSE to run at a commit other than the one asked for` cannot see it — that guard compares git
+  // SHAs, and the SHA is correct while the executed bytecode is not.
+  //
+  // Measured 2026-08-25: a committed and pushed fix was pulled by the job, which reported the right
+  // commit, and the run still raised the NameError the fix removed. It surfaced only because the
+  // traceback's line number was one off from the file on disk. That is the same failure mode as the
+  // memoised `browserVersion` — a correct check fed a value that cannot express the fault.
+  assert.match(RUN_JOB, /PYTHONDONTWRITEBYTECODE=1/,
+    "lab jobs must not read or write bytecode caches; a stale .pyc runs code that is not in the checkout");
+});
