@@ -49,10 +49,39 @@
       changed_when: false
       failed_when: false
 
+    - name: Failing that, find its LAST invocation in the journal
+      # `run-job.yml` ends with `systemctl stop`, which releases the unit name AND clears its
+      # InvocationID -- so by the time a job finishes, `systemctl show` reports nothing and this playbook
+      # refused with "it has not run". Measured 2026-08-25: I re-read a stale log file four times and
+      # concluded a fix was not landing, when the log had simply never been refreshed.
+      #
+      # The journal still holds every invocation, so the last one is recoverable by asking it directly.
+      # `-o json` then the field, rather than parsing free text.
+      when: (invocation.stdout | default('') | trim) == ''
+      # `--output=verbose`, which is the only mode that emits the systemd metadata. Two earlier attempts
+      # failed differently and are worth naming: `--output=json` piped into python inside a `>-` folding
+      # scalar had its lines joined and its quoting broken, and `--output=cat --output-fields=` printed
+      # NOTHING, because cat emits the message and not the trusted fields. Checked on the box rather than
+      # inferred, after the second one looked like "the job has never run".
+      ansible.builtin.shell:
+        # ONE command, no pipeline to fold and no quoting to lose. `--output=verbose` is the only mode
+        # that emits systemd metadata; two earlier attempts failed differently and are worth naming so
+        # nobody repeats them: `--output=json` piped into python inside a `>-` folding scalar had its
+        # lines joined and its quoting broken, and `--output=cat --output-fields=` printed NOTHING,
+        # because cat emits the message and not the trusted fields. Both looked like "the job never ran".
+        cmd: journalctl -u a11y-job-{{ job }} -n 1 --output=verbose --no-pager | sed -n 's/^ *INVOCATION_ID=//p' | head -1
+      register: from_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Settle which invocation to read
+      ansible.builtin.set_fact:
+        lab_invocation: "{{ (invocation.stdout | default('') | trim) or (from_journal.stdout | default('') | trim) }}"
+
     - name: Say if that job has never run
       # A unit systemd has never heard of answers with an empty InvocationID, and filtering the journal on
       # an empty one returns the WHOLE journal — other units' output, presented as this job's. Refuse.
-      when: (invocation.stdout | default('') | trim) == ''
+      when: lab_invocation == ''
       ansible.builtin.fail:
         msg: >-
           a11y-job-{{ job }} has no invocation on {{ inventory_hostname }} — it has not run, or the unit
@@ -61,7 +90,7 @@
     - name: Write this invocation's output to a file
       ansible.builtin.shell:
         cmd: >-
-          journalctl _SYSTEMD_INVOCATION_ID={{ invocation.stdout | trim }} --no-pager --output=cat
+          journalctl _SYSTEMD_INVOCATION_ID={{ lab_invocation }} --no-pager --output=cat
           -n {{ (lines | default(400)) | int }} > /tmp/a11y-job-{{ job }}.log
       changed_when: false
 
