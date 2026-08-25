@@ -41,7 +41,24 @@
  */
 import { execFileSync } from "node:child_process";
 
-import { codeVersion, workerSourceDir } from "@a11y-witness/nvda-worker";
+// BY PATH, never `@a11y-witness/nvda-worker`. The package index re-exports `capture-core.mjs`, which
+// imports `@guidepup/guidepup`, which CONSTRUCTS A ScreenReader AT MODULE SCOPE and throws
+// `No available supported screen readers` on any host without one. So importing the package name here put
+// the win32-only capture driver on the import path of every capture CLIENT — and the lab is Linux, so both
+// corpus runs died at import with a guidepup stack trace and no mention of this file.
+//
+// It passed every local check because macOS resolves VoiceOver and the throw never happens: `npm test`,
+// `node -e "import(...)"` and `entry-points.test.ts` are all blind to it by platform. `worker-http.mjs`
+// already states the rule — *"Deliberately NOT imported from @a11y-witness/nvda-worker: this package runs
+// on macOS and Linux and must not depend on a win32-only one"* — and `no-win32-imports.test.ts` now
+// enforces it instead of stating it.
+//
+// A SUBPATH export, not a deep relative path: `../../nvda-worker/src/...` drags those .mjs files into
+// worker-fleet's tsc project and the build dies with TS5055 "would overwrite input file". The subpath is
+// also the shape already in use for the same reason -- `@a11y-witness/worker-fleet/worker-http`.
+// `code-version.mjs` imports nothing but node stdlib and `worker-files.mjs`, which is why it is safe and
+// why it is its own module. Still the ONE hasher: the subpath is the same function.
+import { codeVersion, workerSourceDir } from "@a11y-witness/nvda-worker/code-version";
 
 /** How long a worker gets to answer `/health`. Matches `check-worker-code.mjs`: a cold Windows box needs it. */
 const HEALTH_TIMEOUT_MS = 15_000;

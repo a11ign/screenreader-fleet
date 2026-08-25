@@ -14,7 +14,9 @@ import { pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { workerSourceDir } from "@a11y-witness/nvda-worker";
+// By PATH, for the reason worker-code-check.mjs gives at length: the package index reaches guidepup,
+// which throws at import on any host without a screen reader.
+import { workerSourceDir } from "@a11y-witness/nvda-worker/code-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, inventoryWorkerUrls } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask

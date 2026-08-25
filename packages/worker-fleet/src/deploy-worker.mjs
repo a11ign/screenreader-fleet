@@ -25,7 +25,12 @@ import { execFile, execFileSync } from "node:child_process";
 import { createReadStream, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
-import { WORKER_FILES, workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker";
+// By SUBPATH, never the package ROOT: the index re-exports `capture-core.mjs`, which imports guidepup and
+// throws `No available supported screen readers` at import on any host without one. This file only
+// runs on a Mac, where VoiceOver makes that throw invisible — which is exactly why it went unnoticed.
+// `no-win32-imports.test.ts` found it.
+import { WORKER_FILES } from "@a11y-witness/nvda-worker/worker-files";
+import { workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker/code-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 
 const run = promisify(execFile);
