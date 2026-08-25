@@ -301,6 +301,17 @@
       inventory:
         argv: ["/usr/bin/node", "packages/lab/scripts/lab-inventory.mjs"]
         timeout: 900
+      # THE PYTHON TESTS, WHERE THE CORPUS IS. Several of them read `runs/` and SKIP HONESTLY without it,
+      # so on a laptop and in CI they pass having examined a fraction of the data or none at all — the
+      # same limitation `verify.corpus.test.ts` carries, and for the same reason.
+      #
+      # `test_applicability.py` is why this exists. A precondition that silences a true positive deletes
+      # evidence outright, and it is invisible in every score: a finding never made cannot be counted as
+      # missed. Verifying that against 104 held-out records and shipping would be the "validated on six
+      # hand-picked cases" mistake exactly — it failed 44 cases in a live run last time.
+      python-tests:
+        argv: ["/usr/bin/npm", "run", "test:python"]
+        timeout: 1800
       rules-coverage:
         argv: ["/usr/bin/npm", "run", "--silent", "rules:coverage"]
         timeout: 900
