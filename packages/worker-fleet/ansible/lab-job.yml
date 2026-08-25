@@ -279,6 +279,18 @@
       # "Which rules have never fired?" — the general form of the defect that let 2.1.1 accuse 23 of 35
       # conformant pages. It needs the AUTHORITATIVE corpus: a partial copy means fewer fires, which reads
       # as less coverage, so a laptop cannot answer this and says so rather than guessing.
+      # "Did this change make the tool accuse a conformant real page of something NEW?" rules:gate scores
+      # the corpus and catches a rule going quiet; nothing caught the opposite until 2026-08-25, when
+      # eleven separate defects had done exactly that with every gate green. Needs the AUTHORITATIVE
+      # real-page corpus, which only the lab has.
+      rules-real-pages:
+        argv: ["/usr/bin/npm", "run", "--silent", "rules:real-pages"]
+        timeout: 900
+      # Same, with --update: rewrites the baseline. Separate job because it WRITES a claim that every
+      # finding it records is correct, and that is a deliberate act, not a side effect of checking.
+      rules-real-pages-update:
+        argv: ["/usr/bin/npm", "run", "--silent", "rules:real-pages", "--", "--update"]
+        timeout: 900
       rules-coverage:
         argv: ["/usr/bin/npm", "run", "--silent", "rules:coverage"]
         timeout: 900
