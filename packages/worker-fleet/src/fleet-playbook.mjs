@@ -208,6 +208,10 @@ function main() {
     // expected c6e66caa481b76c0, having faithfully fetched a branch nobody had changed.
     ssh(`cd ${CHECKOUT}/packages/worker-fleet/ansible && ANSIBLE_CONFIG=ansible.cfg `
       + `ansible-playbook -i inventory.yml ${chosen} -e a11y_git_ref=${ref}`
+      // The COMMIT that ref resolves to here, so each guest can assert it landed on it rather than the
+      // deploy inferring success from a shell that exited 0. The 2026-08-24 note above fixed WHICH ref
+      // the guests fetch; this catches the fetch silently not taking.
+      + ` -e a11y_expected_commit=${expected}`
       + (limitFlag ? ` -l ${limitFlag}` : "")
       + (serialFlag !== undefined ? ` -e worker_provision_serial=${serialFlag}` : ""),
     { timeoutMs: PLAYBOOK_TIMEOUT_MS[chosen] ?? DEFAULT_PLAYBOOK_TIMEOUT_MS });

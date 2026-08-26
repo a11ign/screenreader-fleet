@@ -67,15 +67,41 @@
     - name: Fetch and fast-forward the guest checkout
       # --ff-only, so a guest that somebody committed on fails loudly here instead of silently diverging
       # from the fleet and producing evidence under a code version nothing else has.
+      #
+      # IT DID NOT FAIL LOUDLY, AND THAT COMMENT WAS THE ONLY PLACE THE GUARANTEE EXISTED. PowerShell does
+      # not abort on a failed NATIVE command, so a `checkout` that cannot find the branch and a `merge`
+      # that cannot fast-forward both carried on to `git rev-parse`, which succeeded — and
+      # `changed_when: true` then reported "changed" whatever had happened. Measured 2026-08-26: five
+      # guests reported `changed` on every deploy while sitting on `main`, serving 0e91c290cc1f1ea0
+      # against a checkout of 1204c829ff371a12, through a restart AND a reboot. The verify step caught
+      # the SYMPTOM every time and named the wrong cause — "the files on the box are not the ones you
+      # think" — because the step that was supposed to put them there had already reported success.
+      #
+      # `$LASTEXITCODE` after each git call is what makes the intent real: PowerShell's own
+      # `$ErrorActionPreference` does not cover native executables, which is exactly the trap here.
       ansible.windows.win_shell: |
-        git fetch --quiet origin
-        git -c advice.detachedHead=false checkout --quiet {{ a11y_git_ref | default('main') }}
-        git merge --ff-only --quiet origin/{{ a11y_git_ref | default('main') }}
-        git rev-parse --short HEAD
+        $ErrorActionPreference = "Stop"
+        function Run($what) { & git @args; if ($LASTEXITCODE -ne 0) { throw "git $what failed with $LASTEXITCODE" } }
+        Run "fetch" fetch --quiet origin
+        Run "checkout" -c advice.detachedHead=false checkout --quiet {{ a11y_git_ref | default('main') }}
+        Run "merge" merge --ff-only --quiet origin/{{ a11y_git_ref | default('main') }}
+        git rev-parse HEAD
       args:
         chdir: "{{ a11y_repo_path }}"
       register: guest_head
       changed_when: true
+
+    - name: The guest is ON the commit it was told to be on
+      # ASSERTED, not assumed from the step above having exited 0. Verification that shares a failure mode
+      # with the action verifies nothing, and this repo has paid for that rule twice already — reading a
+      # guest's hash through the same `exec` that was broken returned EMPTY rather than MISMATCHED.
+      ansible.builtin.assert:
+        that: guest_head.stdout_lines | last | trim == a11y_expected_commit
+        fail_msg: >-
+          {{ inventory_hostname }} is on {{ guest_head.stdout_lines | last | trim }}, not
+          {{ a11y_expected_commit }}. The fetch reported success, so this is the checkout or the
+          fast-forward being refused — usually a guest committed on locally, or the branch does not
+          exist there. `git -C {{ a11y_repo_path }} status` on the box says which.
 
     - name: Install dependencies
       # Unconditional and idempotent. Skipping it when package-lock.json looks unchanged is the
