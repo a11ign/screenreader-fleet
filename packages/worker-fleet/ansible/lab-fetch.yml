@@ -41,6 +41,11 @@
       # Read-only and enumerated like every other entry; the repeat is a NAME from a fixed list, never a
       # path, so `runs/../../etc/passwd` is inexpressible rather than rejected.
       grants-audit: "runs/grants-audit.json"
+      # THE REAL-PAGE BASELINE, which `rules-real-pages-update` writes and which is TRACKED — so accepting
+      # a finding on the lab dirties the checkout and blocks every later job until it is committed here.
+      # It was not fetchable, so the only route back was to re-derive it locally from a `runs/` copy that
+      # is only ever as fresh as its last sync. Same gap the promoted changeset had, same fix.
+      real-page-baseline: "packages/lab/baselines/real-page-findings.json"
       # EVERY STAGE'S FULL OUTPUT from the whole-chain run. The runner prints a six-line tail per stage to
       # keep nine stages legible, and captures the child's stdout to do it — so without this the detail
       # reaches nobody. The first green run fetched at 63 lines against the previous 400, with `RULES:
