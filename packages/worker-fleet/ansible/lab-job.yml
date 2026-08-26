@@ -90,6 +90,14 @@
                "--data", "runs/screenreader-dataset/with-realism.jsonl",
                "--no-baseline"]
         timeout: 900
+      # RECORD the veto baseline, against the SHIPPED weights. A separate job from `shortcuts` because it
+      # WRITES a claim that every veto it records is understood and accepted -- the same reason
+      # `rules-real-pages-update` is separate from `rules-real-pages`. Never a side effect of auditing.
+      shortcuts-baseline:
+        argv: ["{{ lab_python }}", "packages/lab/scripts/audit-scorer-shortcuts.py",
+               "--data", "runs/screenreader-dataset/with-realism.jsonl",
+               "--update-baseline"]
+        timeout: 900
       acceptance:
         argv: ["{{ lab_python }}", "packages/lab/scripts/evaluate-screenreader-acceptance.py",
                "--data", "runs/screenreader-acceptance/repeat-1.jsonl",
