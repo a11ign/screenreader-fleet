@@ -54,6 +54,16 @@ const GUARDED: Record<string, string> = {
     + "evidence, and a canary that cannot express the fault is worthless",
   "packages/lab/scripts/everything-pipeline.mjs":
     "hours long and unattended — a mistyped `--dry-run` would run the real thing",
+  "packages/lab/scripts/build-realism-tier.mjs":
+    "run by the `build-realism` job and by `training:train`; a mistyped `--out=` writes the realism tier somewhere the trainer will not read, and the train",
+  "packages/lab/scripts/calibrate-abstention.mjs":
+    "takes NO flags — it is configured entirely by environment, so any flag passed to it today is discarded in silence. The `--model` in its output is `-e ",
+  "packages/lab/scripts/evidence-check.mjs":
+    "the check that decides whether 2,122 cached captures survive a change. It also takes worker URLs POSITIONALLY, which this guard does not touch",
+  "packages/lab/scripts/stability-gate.mjs":
+    "the canaries that must pass before a corpus run. `--probe-forms`, `--task` and `--url` appear in this file because it PASSES them to repeat-capture; t",
+  "packages/lab/src/training/export-screenreader-dataset.mjs":
+    "a mistyped `--out=` exports to a path nothing downstream reads, and the trainer then fits on the PREVIOUS export — which looks exactly like a successf",
   "packages/lab/src/training/wait-for-capture.mjs":
     "its EXIT CODE is the contract — 0 clean, 1 failures, 2 no run, 3 wedged — so a caller reading it "
     + "has already committed to an output shape, and a mistyped `--json` gives it the other one",
@@ -73,19 +83,17 @@ const GUARDED: Record<string, string> = {
  */
 const UNGUARDED = new Set([
   "packages/lab/scripts/audit-corpus-starvation.mjs", "packages/lab/scripts/audit-size-sensitivity.mjs",
-  "packages/lab/scripts/bench-capture.mjs", "packages/lab/scripts/build-realism-tier.mjs", "packages/lab/scripts/calibrate-abstention.mjs",
-  "packages/lab/scripts/compare-layers.mjs", "packages/lab/scripts/corpus-backup.mjs", "packages/lab/scripts/corpus-snapshot.mjs",
-  "packages/lab/scripts/emit-grants-map.mjs", "packages/lab/scripts/evidence-check.mjs", "packages/lab/scripts/explain-scorer.mjs",
-  "packages/lab/scripts/retrain-pipeline.mjs", "packages/lab/scripts/stability-gate.mjs", "packages/lab/scripts/verify-safetensors.mjs",
+  "packages/lab/scripts/bench-capture.mjs", "packages/lab/scripts/compare-layers.mjs", "packages/lab/scripts/corpus-backup.mjs",
+  "packages/lab/scripts/corpus-snapshot.mjs", "packages/lab/scripts/emit-grants-map.mjs", "packages/lab/scripts/explain-scorer.mjs",
+  "packages/lab/scripts/retrain-pipeline.mjs", "packages/lab/scripts/verify-safetensors.mjs",
   "packages/lab/src/harnesses/assert-action-report.mjs", "packages/lab/src/harnesses/capture-check.mjs",
   "packages/lab/src/harnesses/capture-fixtures.mjs", "packages/lab/src/harnesses/occurrence-verdict-stability.mjs",
-  "packages/lab/src/harnesses/page-identity-rate.mjs", "packages/lab/src/training/export-screenreader-dataset.mjs",
-  "packages/lab/src/training/generate-screenreader-acceptance.mjs", "packages/lab/src/training/generate-screenreader-dataset.mjs",
-  "packages/lab/src/training/preflight-screenreader-dataset.mjs", "packages/worker-fleet/src/check-worker-code.mjs",
-  "packages/worker-fleet/src/compare-workers.mjs", "packages/worker-fleet/src/deploy-worker.mjs",
-  "packages/worker-fleet/src/fleet-discover.mjs", "packages/worker-fleet/src/fleet-env.mjs",
-  "packages/worker-fleet/src/fleet-playbook.mjs", "packages/worker-fleet/src/fleet-wake.mjs",
-  "packages/worker-fleet/src/guest-run.mjs", "packages/worker-fleet/src/normalise-fleet.mjs",
+  "packages/lab/src/harnesses/page-identity-rate.mjs", "packages/lab/src/training/generate-screenreader-acceptance.mjs",
+  "packages/lab/src/training/generate-screenreader-dataset.mjs", "packages/lab/src/training/preflight-screenreader-dataset.mjs",
+  "packages/worker-fleet/src/check-worker-code.mjs", "packages/worker-fleet/src/compare-workers.mjs",
+  "packages/worker-fleet/src/deploy-worker.mjs", "packages/worker-fleet/src/fleet-discover.mjs",
+  "packages/worker-fleet/src/fleet-env.mjs", "packages/worker-fleet/src/fleet-playbook.mjs",
+  "packages/worker-fleet/src/fleet-wake.mjs", "packages/worker-fleet/src/guest-run.mjs", "packages/worker-fleet/src/normalise-fleet.mjs",
 ]);
 
 /** Does this file take a command line? The guard itself reads argv, and is the implementation. */
