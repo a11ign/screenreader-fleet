@@ -41,6 +41,17 @@
       # Read-only and enumerated like every other entry; the repeat is a NAME from a fixed list, never a
       # path, so `runs/../../etc/passwd` is inexpressible rather than rejected.
       grants-audit: "runs/grants-audit.json"
+      # THE PROMOTED WEIGHTS THEMSELVES. `promote:gated` runs on the lab, because that is the only place
+      # the candidate and the code both exist -- and it deliberately does not commit, since promoting is a
+      # MAJOR release of @a11y-witness/scorer and a job that can push is a job that can release by
+      # accident. So the artefacts sit uncommitted on a box a human cannot reach without ssh, which is the
+      # hand-crank this whole interface exists to remove.
+      #
+      # Read-only and enumerated like every other entry. Binary, so `fetch` handles it; the checksum is
+      # verified by Ansible on arrival, which matters more here than for a report.
+      promoted-weights: "packages/scorer/models/screenreader-scorer/model.safetensors"
+      promoted-training-report: "packages/scorer/models/screenreader-scorer/training-report.json"
+      promoted-acceptance-report: "packages/scorer/models/screenreader-scorer/acceptance-report.json"
       acceptance-records: "runs/screenreader-acceptance/{{ repeat | default('repeat-1') }}.jsonl"
 
   tasks:
@@ -68,13 +79,22 @@
     # To a fixed local directory, named for the artifact and the model it describes — so two fetches of
     # different candidates cannot overwrite each other and leave you reading the wrong one, which is the
     # failure this whole exercise is about.
+    # The extension comes from the SOURCE, not from a hardcoded `.json`. Every artifact was JSON until
+    # `promoted-weights` (a safetensors binary), and writing that as `.json` would name a file after a
+    # format it is not — the sort of quiet wrongness that survives until somebody parses it.
+    - name: Name it after what it actually is
+      ansible.builtin.set_fact:
+        lab_fetch_dest: >-
+          {{ playbook_dir }}/../../../runs/fetched/{{ out | default('candidate') }}.{{ artifact }}{{
+             '.safetensors' if lab_artifacts[artifact].endswith('.safetensors') else '.json' }}
+
     - name: Write it locally
       ansible.builtin.copy:
         content: "{{ fetched.content | b64decode }}"
-        dest: "{{ playbook_dir }}/../../../runs/fetched/{{ out | default('candidate') }}.{{ artifact }}.json"
+        dest: "{{ lab_fetch_dest }}"
         mode: "0644"
       delegate_to: localhost
 
     - name: Where it landed
       ansible.builtin.debug:
-        msg: "runs/fetched/{{ out | default('candidate') }}.{{ artifact }}.json"
+        msg: "{{ lab_fetch_dest | regex_replace('^.*/runs/', 'runs/') }}"
