@@ -529,3 +529,30 @@ test("asking about a job that does not exist is refused, not answered", () => {
       `${playbook} must read the catalogue from lab-job.yml rather than carrying its own copy`);
   }
 });
+
+test("no task name appears twice, and no task reads a fact nothing sets", () => {
+  // A DUPLICATED TASK, shipped and caught only by the fleet refusing a correct command. Rewriting the
+  // parameter gate to read declared data left the previous pair of refusals behind, still referencing
+  // `job_reads`/`job_needs` — facts the rewrite deleted. `| default([])` then made them EMPTY rather than
+  // an error, so the second copy asserted "only" was in an empty list and refused `-e only=` on the one
+  // job that requires it, while `-e describe=1` (which ends the play before the refusals) reported it
+  // correctly. Two answers from one playbook.
+  //
+  // Neither the params tests nor `tsc` could see it: they assert the DATA, and this was execution order.
+  const tasks = (RAW_LAB_JOB[0] as unknown as { tasks: Array<{ name?: string }> }).tasks ?? [];
+  const names = tasks.map((task) => task.name).filter((name): name is string => Boolean(name));
+  const twice = names.filter((name, index) => names.indexOf(name) !== index);
+  assert.deepEqual([...new Set(twice)], [],
+    "a duplicated task runs twice with the same name, so its second copy is invisible in the output — "
+    + "and if it survived a refactor it is reading whatever facts that refactor left behind");
+
+  // Every `{{ fact }}` a task reads must be set by an earlier task, be a play var, or be a caller
+  // parameter. A leftover reference is silent precisely because Ansible's `default()` turns it into a
+  // plausible empty value rather than a failure.
+  const body = executable(read("lab-job.yml"));
+  for (const stale of ["job_reads", "job_needs", "job_text", "job_templates"]) {
+    assert.ok(!body.includes(stale),
+      `${stale} was removed when the parameter gate became declared data; a task still reads it, and `
+      + `will get an empty value rather than an error`);
+  }
+});

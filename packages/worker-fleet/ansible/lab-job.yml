@@ -578,34 +578,6 @@
       loop_control:
         label: "{{ item.key }}"
 
-    - name: Refuse a parameter this job does not read
-      # The dangerous half. `-e out=varied` on a job that never reads `out` looks like it worked: Ansible
-      # discards the value, the job runs its default, and the operator believes their value was applied.
-      ansible.builtin.assert:
-        that: item in (job_reads | default([]))
-        fail_msg: >-
-          -e {{ item }}= was passed and job '{{ job }}' never reads it — it reads
-          {{ job_reads | default([]) | join(', ') or 'no caller parameters at all' }}. Ansible would
-          discard the value silently and run the default, so this refuses instead. Drop the parameter, or
-          name a job that takes it: `npm run lab:job -- -e job={{ job }} -e describe=1`.
-      loop: "{{ lab_caller_params }}"
-      when: vars[item] is defined
-      loop_control:
-        label: "{{ item }}"
-
-    - name: Refuse a MISSING parameter this job cannot run without
-      # Without it Ansible renders an empty string, and `capture-only` with an empty `--only=` captures
-      # the WHOLE corpus — the four hours that job exists to avoid.
-      ansible.builtin.assert:
-        that: vars[item] is defined
-        fail_msg: >-
-          job '{{ job }}' needs -e {{ item }}=. Its command reads that parameter with no default, so
-          without it the job runs against an empty value rather than refusing.
-          `npm run lab:job -- -e job={{ job }} -e describe=1` lists what it takes.
-      loop: "{{ job_needs | default([]) }}"
-      loop_control:
-        label: "{{ item }}"
-
     - name: A real-page capture names a role and, if it shards, a well-formed shard
       # `worker` is no longer required, and no longer accepted: the run uses the whole fleet from
       # `A11Y_WORKERS`. It USED to be mandatory and named rather than addressed, so a malformed URL could
