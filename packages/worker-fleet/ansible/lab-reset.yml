@@ -87,13 +87,33 @@
              if (unpushed.stdout | trim) == ''
              else 'REFUSING: these carry work origin does not have — ' ~ (unpushed.stdout | trim) }}
 
+    # What is left to refuse over, once the operator has NAMED something deliberately.
+    #
+    # `-e remove=` is this play's escape hatch and it was UNREACHABLE for the only file that ever needs
+    # it: the refusal below runs first, so naming the very path causing the refusal still aborted before
+    # the removal task. Measured 2026-08-26 on a stale changeset the lab had written with older code —
+    # the correct version was already committed and pushed, and there was no CLI route to drop the copy.
+    #
+    # Naming a path IS the deliberate decision the refusal asks for ("look at them before deciding"), so
+    # it is excluded here and nowhere else: everything unnamed is still refused, and `remove` still has to
+    # be a plain in-checkout path.
+    - name: What remains unaccounted for
+      ansible.builtin.set_fact:
+        # `| default('')` because the task that registers `unpushed` is itself conditional: on a clean
+        # tree it never runs, and a skipped register is a dict with no `stdout`. Written without it first,
+        # which made this play fail on the one state it should say least about — a lab with nothing wrong.
+        lab_unpushed_unnamed: >-
+          {{ (unpushed.stdout | default('')) | trim | split('\n') | reject('equalto', '')
+             | reject('equalto', remove | default('')) | list }}
+
     - name: Refuse to discard work origin does not have
-      when: (dirty.stdout | trim) != '' and (unpushed.stdout | trim) != ''
+      when: (dirty.stdout | trim) != '' and lab_unpushed_unnamed | length > 0
       ansible.builtin.fail:
         msg: >-
           {{ lab_repo_path }} has modified file(s) whose content is NOT on origin/{{ ref | default('main') }}:
-          {{ unpushed.stdout | trim }}. Nothing has been discarded. Commit and push them from the lab, or
-          look at them before deciding — this play will not throw away work that exists nowhere else.
+          {{ lab_unpushed_unnamed | join(', ') }}. Nothing has been discarded. Commit and push them from
+          the lab, or look at them before deciding — this play will not throw away work that exists
+          nowhere else. To drop ONE of them deliberately: -e remove=<path> -e apply=true.
 
     - name: Report only, unless asked to apply
       when: (dirty.stdout | trim) != '' and not (apply | default(false) | bool)
