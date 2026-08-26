@@ -41,6 +41,17 @@
     # The same containment `lab-job.yml` applies: a name from a fixed list, never a command and never a
     # unit spelled out by the caller. `systemctl stop` takes a pattern, so an unvalidated name here could
     # stop every a11y unit at once.
+    - name: That is a job this lab has
+      # A TYPO and a job that has not run are different facts, and both used to arrive as "is 'dead', not running, so there is nothing to stop" — which reads as a job that already finished. The
+      # catalogue is read from `lab-job.yml`, the file that defines it, so this cannot come to name a job
+      # that no longer exists.
+      ansible.builtin.assert:
+        that: job in (lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs
+        fail_msg: >-
+          '{{ job }}' is not a job this lab has. Nothing was stopped, and nothing had finished either.
+          `npm run lab:job` lists every job that can be started.
+      when: job is defined
+
     - name: A job must be named, and it must be one the catalogue has
       ansible.builtin.assert:
         that:

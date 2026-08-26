@@ -501,3 +501,23 @@ test("a job requires a parameter exactly when its command has no fallback for it
   assert.deepEqual(required("sweep"), [], "`model is defined` is this job saying the model is optional");
   assert.deepEqual(required("train"), [], "`out` falls back to `candidate`");
 });
+
+test("asking about a job that does not exist is refused, not answered", () => {
+  // `lab:status -e job=<typo>` reported `SubState=dead` and exit 0 — which is exactly what a FINISHED job
+  // reports. So a script polling a mistyped name read it as fine, and a human read "it is not running".
+  // `lab:log` blamed a rotated journal and `lab:stop` said there was nothing to stop, both of which send
+  // the reader somewhere the fault is not. Three commands, one collapsed answer.
+  //
+  // This is the worker's `404 vs 202` rule — "never heard of it" and "already finished" are different
+  // answers and must stay that way — applied to the job interface rather than to a capture.
+  for (const playbook of ["lab-status.yml", "lab-log.yml", "lab-stop.yml"]) {
+    const source = executable(read(playbook));
+    assert.match(source, /is not a job this lab has/,
+      `${playbook} must refuse a job name it does not have, rather than reporting on a unit that `
+      + `never existed`);
+    // Read from the file that DEFINES the catalogue, never copied. A second list of job names is how one
+    // comes to name a job that no longer exists — the duplication defect these playbooks exist to avoid.
+    assert.match(source, /lookup\('file', playbook_dir ~ '\/lab-job\.yml'\)[^\n]*lab_jobs/,
+      `${playbook} must read the catalogue from lab-job.yml rather than carrying its own copy`);
+  }
+});

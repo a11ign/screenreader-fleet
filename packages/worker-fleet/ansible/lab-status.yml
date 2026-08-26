@@ -45,6 +45,23 @@
     # SubState first and separately, for the reason `run-job.yml` documents: with `--remain-after-exit` an
     # exited unit reads `active` forever, so `is-active` cannot tell finished from running, and `Result`
     # is populated while a job is still going.
+    - name: That is a job this lab has
+      # "The job finished" and "there is no job by that name" both produced `SubState=dead` and exit 0, so
+      # asking about a TYPO reported success — and a script polling this would read that as fine. It is the
+      # same rule as the worker's `404 vs 202`: producing one answer where the other is true is this
+      # repo's most expensive recurring shape.
+      #
+      # The catalogue is read from `lab-job.yml`, the file that defines it, rather than copied here: a
+      # second list of job names is exactly how one comes to name a job that no longer exists.
+      ansible.builtin.assert:
+        that: job in (lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs
+        fail_msg: >-
+          '{{ job }}' is not a job this lab has, so there is no unit to report on — asking about it used
+          to answer SubState=dead and exit 0, which is what a FINISHED job answers.
+          Run `npm run lab:status` with no -e job= to see every unit that exists, or
+          `npm run lab:job` to see every job that can be started.
+      when: job is defined
+
     - name: "Detail for {{ job | default('(no job named)') }}"
       when: job is defined
       ansible.builtin.command:

@@ -29,6 +29,17 @@
   gather_facts: false
 
   tasks:
+    - name: That is a job this lab has
+      # A TYPO and a job that has not run are different facts, and both used to arrive as "it has not run, or the journal was rotated" — which sends the reader to the journal. The
+      # catalogue is read from `lab-job.yml`, the file that defines it, so this cannot come to name a job
+      # that no longer exists.
+      ansible.builtin.assert:
+        that: job in (lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs
+        fail_msg: >-
+          '{{ job }}' is not a job this lab has. Nothing was lost and no journal rotated; the name is not one.
+          `npm run lab:job` lists every job that can be started.
+      when: job is defined
+
     - name: A job must be named
       ansible.builtin.assert:
         that:
