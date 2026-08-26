@@ -129,6 +129,24 @@ export const PIPELINES = {
     what: "capture one subtype (-e only=<ids>) and re-run the audits that would see the change",
     jobs: ["capture-only", "grants-audit", "check-signals"],
   },
+  // EVERYTHING, IN ORDER — corpus, model, gates. The one command that demonstrates the whole thing passes
+  // together rather than in three runs somebody has to sequence and remember the order of.
+  //
+  // It exists because "each defect verified individually" is not the same claim as "they all pass", and
+  // the second is the one that matters: a fix can clear its own audit and break a gate three stages later.
+  // Proving that meant running `corpus`, then `candidate`, then `gates`, reading each result and starting
+  // the next — the hand-crank `lab:pipeline` was built to remove, left in place at the top level.
+  //
+  // `retrain` re-captures, and that is not waste: it hits cache for everything `capture` just did, and
+  // the ONE thing it adds is regenerating pages from the checkout — which is how a corpus run comes to
+  // test the previous commit. Idempotent stages are what make a long chain restartable.
+  full: {
+    fleet: true,
+    what: "corpus, model and gates in one run — the whole thing, proven together",
+    jobs: ["capture", "retrain", "export-acceptance", "train", "shortcuts", "acceptance", "promote",
+           "grants-audit", "applicability-audit", "rules-gate", "rules-coverage", "rules-real-pages",
+           "release-gate"],
+  },
   // No capture, so no fleet, so it can run while the boxes are doing something else. This is the cheap
   // pipeline to run after a rule change: everything reads from disk and the venv.
   gates: {
