@@ -351,6 +351,11 @@
       grants-audit:
         argv: ["/usr/bin/npm", "run", "--silent", "corpus:grants-audit"]
         timeout: 900
+      # DOES NVDA EVER ANNOUNCE LEAVING A LANDMARK? The fact `vague_link_lacks_context` rests on and
+      # nobody had established. Reports, never blocks: it describes NVDA, not a defect.
+      container-exits:
+        argv: ["{{ lab_python }}", "packages/scorer/python/audit_container_exits.py"]
+        timeout: 900
       applicability-audit:
         argv: ["{{ lab_python }}", "packages/scorer/python/audit_applicability.py"]
         timeout: 900
