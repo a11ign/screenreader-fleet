@@ -651,6 +651,11 @@ test("a filter that can return nothing is defaulted BEFORE it is indexed", () =>
   for (const expression of expressions) {
     const flat = expression.replace(/\s+/g, " ");
     // Every point where a possibly-null filter is followed by one that indexes into it.
+    // `regex_search` with a CAPTURE-GROUP argument is worse than risky: Ansible's filter calls `.group()`
+    // on the non-match itself, so it throws INSIDE the filter and no amount of defaulting afterwards
+    // helps. `regex_findall` returns `[]`. That distinction cost two attempts at this fix.
+    assert.ok(!/regex_search\([^)]*,\s*['"]\\\\?\d/.test(flat),
+      `regex_search with a capture group throws on a non-match — use regex_findall: ${flat.slice(0, 90)}`);
     const risky = /(regex_search|regex_findall|selectattr|map)\([^)]*\)\s*\|\s*(first|last)\b/;
     if (!risky.test(flat)) continue;
     assert.match(flat, /\|\s*default\([^)]*\)\s*\|\s*(first|last)\b/,
