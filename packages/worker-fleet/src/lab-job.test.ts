@@ -546,13 +546,7 @@ test("no task name appears twice, and no task reads a fact nothing sets", () => 
     "a duplicated task runs twice with the same name, so its second copy is invisible in the output — "
     + "and if it survived a refactor it is reading whatever facts that refactor left behind");
 
-  // Every `{{ fact }}` a task reads must be set by an earlier task, be a play var, or be a caller
-  // parameter. A leftover reference is silent precisely because Ansible's `default()` turns it into a
-  // plausible empty value rather than a failure.
-  const body = executable(read("lab-job.yml"));
-  for (const stale of ["job_reads", "job_needs", "job_text", "job_templates"]) {
-    assert.ok(!body.includes(stale),
-      `${stale} was removed when the parameter gate became declared data; a task still reads it, and `
-      + `will get an empty value rather than an error`);
-  }
+  // The other half — a task reading a fact nothing sets — is `playbook-variables.test.ts`, which derives
+  // the answer instead of naming the four facts this particular refactor happened to delete. A list of
+  // names somebody has to keep current is this repo's definition of a rule that gets broken.
 });

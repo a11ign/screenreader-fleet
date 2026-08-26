@@ -700,3 +700,15 @@
         job_argv: "{{ lab_jobs[job].argv }}"
         job_setenv: "{{ lab_jobs[job].setenv | default([]) }}"
         job_timeout: "{{ lab_jobs[job].timeout }}"
+        # `run-job.yml` has read `job_success_codes` since it was written and NOTHING has ever passed it,
+        # so `job_ok` was always `[0]` and no job could declare a non-zero exit that means something. Found
+        # by `playbook-variables.test.ts`, which is the whole reason that check exists: the reference
+        # carried `| default([])`, so the missing value was an empty list rather than an error.
+        #
+        # Wired from the job entry, defaulting to none — so behaviour is unchanged today and the interface
+        # is real rather than notional. `evidence-check` is the obvious first candidate: its exit codes are
+        # a documented contract (0 same, 1 evidence CHANGED, 2 inconclusive) where 1 is a successful,
+        # informative run, and as a job it currently reports FAILED for it — conflating "told you to
+        # recapture" with "broke". Deliberately not changed here: that is a behaviour decision, and this
+        # commit is about the wiring being absent.
+        job_success_codes: "{{ lab_jobs[job].successCodes | default([]) }}"
