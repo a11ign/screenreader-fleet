@@ -37,6 +37,20 @@
   gather_facts: false
 
   vars:
+    # Every `-e NAME=` a caller may supply. NOT derived: this is the published interface, and it is what
+    # makes a name a job ignores answerable rather than silently dropped. A name absent from this list is
+    # outside the interface and Ansible will discard it — there is no way to enumerate extra vars, so this
+    # list is the boundary of what can be checked at all, and adding a parameter means adding it here.
+    lab_caller_params: [only, out, role, shard, model, worker, sample]
+    # A parameter that reaches its command through a DERIVED FACT rather than by its own name. The
+    # derivation below reads the job's own command, and a command saying `{{ lab_named_worker }}` cannot
+    # say which parameter produced it — so the one indirection is declared, with its reason, rather than
+    # guessed at. `lab-job-params.test.ts` refuses a new `set_fact` guarded by `when: <param> is defined`
+    # that is not listed here, which is what stops this drifting from the tasks that build the facts.
+    lab_param_aliases:
+      # `-e worker=` is a NAME from the inventory and the command needs an ADDRESS. Turning one into the
+      # other is the containment: an address cannot be supplied directly.
+      lab_named_worker: worker
     # Every job this playbook can run. `timeout` becomes `RuntimeMaxSec`, so it is a real ceiling rather
     # than advice — set it above the slowest honest run, because a deadline that expires early turns "still
     # working" into "failed".
@@ -463,8 +477,139 @@
           Pass -e job=<name>, one of: {{ lab_jobs.keys() | list | join(', ') }}.
           There is deliberately no way to pass a command: see this playbook's header.
 
+    # WHICH PARAMETERS THIS JOB READS — DERIVED from its own argv, never declared beside it.
+    #
+    # Every parameter check below is `when: job == '<name>'`, hand-written, and that shape lets two things
+    # through. A new job taking a parameter needs somebody to remember an assert; and a parameter passed
+    # to a job that IGNORES it is silently accepted, because Ansible discards an unused extra var without
+    # a word. "It did something other than what you asked" must never be silent — the rule
+    # `capture-real-pages` already carries for refusing `-e worker=` rather than quietly using five.
+    #
+    # Both are answerable from the job entry itself, and that is the point: a template saying `{{ only }}`
+    # reads that parameter, and one saying `{{ out | default('candidate') }}` reads it and can do without.
+    # The requirement is already written in the one place that cannot drift from the command being run.
+    # WHAT THIS JOB TAKES, DERIVED FROM THE COMMAND IT RUNS
+    #
+    # Below this point the parameter checks are `when: job == '<name>'`, hand-written, and that shape lets
+    # two things through. A new job taking a parameter needs somebody to remember an assert; and a
+    # parameter passed to a job that IGNORES it is silently accepted, because Ansible discards an unused
+    # extra var without a word. "It did something other than what you asked" must never be silent — the
+    # rule `capture-real-pages` already carries for refusing `-e worker=` rather than quietly using five.
+    #
+    # Both are answerable from the job entry itself, which is the point: a command saying `{{ only }}`
+    # reads that parameter, and one saying `{{ out | default('candidate') }}` reads it and can do without.
+    # A default is how a job declares a parameter optional, so the requirement is already written in the
+    # one place that cannot drift from the command being run.
+    #
+    # The hand-written asserts STAY. They validate the SHAPE of a value — that a shard is `i/n`, that a
+    # worker is in the inventory, that an `--only` is ids and not paths — which no amount of reading the
+    # template can answer. These two answer presence and absence, which it can.
+    - name: The command this job will run, AS WRITTEN rather than as rendered
+      # `lab_jobs[job].argv` cannot be inspected: reading it renders it, so a job whose command says
+      # `{{ only }}` dies with "'only' is undefined" while being asked WHETHER it needs `only`. The
+      # question destroys its own subject.
+      #
+      # A lookup result is marked unsafe and is therefore never re-templated, so re-reading this playbook
+      # yields the argv with its `{{ ... }}` intact. Still ONE source — the same lines the job runs from —
+      # so nothing here can drift from the command.
+      ansible.builtin.set_fact:
+        job_raw: "{{ (((lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs | default({}))[job] | default({})) | to_json }}"
+
+    - name: The read found this job, and not an empty set
+      # A guard must be shown to fail before it is trusted, and this one CANNOT be: if the lookup ever
+      # returns nothing — the file moves, the play gains an entry, `lab_jobs` moves to vars_files — then
+      # `job_raw` is "{}", nothing matches, every check below passes, and the validation reports success
+      # having examined nothing. That is this repo's most-repeated defect, so it is refused here rather
+      # than discovered by a job running against an empty `--only=`.
+      ansible.builtin.assert:
+        that: job_raw is search('"argv"')
+        fail_msg: >-
+          Re-reading this playbook did not find job '{{ job }}' — got {{ job_raw }}. Every parameter check
+          below would pass on that, so this refuses instead. `lab_jobs` has moved out of the first play's
+          `vars:`; point the lookup at wherever it now lives.
+
+    # Only what is INSIDE `{{ }}`, never the whole entry. `--output runs/model-...` and `"REPEAT=repeat-1"`
+    # are literal text, and a job must not be read as taking a parameter because a word appears in a path.
+    - name: The expressions in that command, which are the only place a parameter can appear
+      ansible.builtin.set_fact:
+        job_templates: '{{ job_raw | regex_findall("\{\{.*?\}\}") | join(" ") }}'
+
+    - name: Follow a parameter that arrives through a derived fact
+      ansible.builtin.set_fact:
+        job_templates: "{{ job_templates | regex_replace(item.key, item.value) }}"
+      loop: "{{ lab_param_aliases | dict2items }}"
+      loop_control:
+        label: "{{ item.key }} -> {{ item.value }}"
+
+    - name: Which caller parameters this job reads
+      ansible.builtin.set_fact:
+        job_reads: "{{ (job_reads | default([])) + [item] }}"
+      loop: "{{ lab_caller_params }}"
+      when: job_templates is search('(^|\W)' ~ item ~ '(\W|$)')
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Which of those it cannot run without
+      ansible.builtin.set_fact:
+        job_needs: "{{ (job_needs | default([])) + [item] }}"
+      loop: "{{ job_reads | default([]) }}"
+      # `| default(...)` and `is defined` are both a job saying a parameter is optional. Reading only
+      # the first would report `sweep` as REQUIRING `model`, which it does not.
+      when:
+        - not (job_templates is search(item ~ '\s*\|\s*default'))
+        - not (job_templates is search(item ~ '\s+is\s+defined'))
+      loop_control:
+        label: "{{ item }}"
+
+    - name: What this job runs, and what it takes
+      # `-e describe=1` answers the question both refusals raise, and is named in both their messages — so
+      # it has to exist. An error naming a command that does not is worse than no suggestion.
+      #
+      # Deliberately BEFORE the refusals. You ask what a job takes precisely when you cannot yet satisfy
+      # them, and describing `capture-only` used to hit its own "needs -e only=" first — an answer that
+      # withholds itself until you already know it.
+      ansible.builtin.debug:
+        msg: >-
+          {{ job }} — reads {{ job_reads | default([]) | join(', ') or 'no caller parameters' }};
+          {{ 'REQUIRES ' ~ (job_needs | join(', ')) if job_needs | default([]) else 'all optional' }}.
+          Budget {{ lab_jobs[job].timeout | default('the playbook default') }}s.
+          Runs {{ ((lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs)[job].argv }}
+      when: describe | default(false) | bool
+
+    - name: Describing is not running
+      ansible.builtin.meta: end_play
+      when: describe | default(false) | bool
+
     # Only for the job that needs it, and only from the inventory. An address cannot be supplied directly,
     # so `--worker=http://:8765` — which cost 29 minutes — is not a value this interface can express.
+    - name: Refuse a parameter this job does not read
+      # The dangerous half. `-e out=varied` on a job that never reads `out` looks like it worked: Ansible
+      # discards the value, the job runs its default, and the operator believes their value was applied.
+      ansible.builtin.assert:
+        that: item in (job_reads | default([]))
+        fail_msg: >-
+          -e {{ item }}= was passed and job '{{ job }}' never reads it — it reads
+          {{ job_reads | default([]) | join(', ') or 'no caller parameters at all' }}. Ansible would
+          discard the value silently and run the default, so this refuses instead. Drop the parameter, or
+          name a job that takes it: `npm run lab:job -- -e job={{ job }} -e describe=1`.
+      loop: "{{ lab_caller_params }}"
+      when: vars[item] is defined
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Refuse a MISSING parameter this job cannot run without
+      # Without it Ansible renders an empty string, and `capture-only` with an empty `--only=` captures
+      # the WHOLE corpus — the four hours that job exists to avoid.
+      ansible.builtin.assert:
+        that: vars[item] is defined
+        fail_msg: >-
+          job '{{ job }}' needs -e {{ item }}=. Its command reads that parameter with no default, so
+          without it the job runs against an empty value rather than refusing.
+          `npm run lab:job -- -e job={{ job }} -e describe=1` lists what it takes.
+      loop: "{{ job_needs | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+
     - name: A real-page capture names a role and, if it shards, a well-formed shard
       # `worker` is no longer required, and no longer accepted: the run uses the whole fleet from
       # `A11Y_WORKERS`. It USED to be mandatory and named rather than addressed, so a malformed URL could
