@@ -41,6 +41,10 @@
       # Read-only and enumerated like every other entry; the repeat is a NAME from a fixed list, never a
       # path, so `runs/../../etc/passwd` is inexpressible rather than rejected.
       grants-audit: "runs/grants-audit.json"
+      # A TRACKED file the lab writes, so it dirties the checkout and blocks the next pull until it is
+      # committed here — the same trap the promoted weights spring, and the reason `lab:reset` exists.
+      # Fetchable so the round trip is a CLI operation rather than an ssh one.
+      shortcuts-baseline: "packages/lab/scripts/scorer-shortcuts.baseline.json"
       # THE PROMOTED WEIGHTS THEMSELVES. `promote:gated` runs on the lab, because that is the only place
       # the candidate and the code both exist -- and it deliberately does not commit, since promoting is a
       # MAJOR release of @a11y-witness/scorer and a job that can push is a job that can release by
