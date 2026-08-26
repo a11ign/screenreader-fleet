@@ -581,3 +581,29 @@ test("a job that answers in exit codes says what they mean", () => {
     assert.match(code, /^[1-9][0-9]*$/, `exitMeanings key '${code}' is not a non-zero exit code`);
   }
 });
+
+test("lab:status reads the progress file of the corpus the job writes", () => {
+  // Three variants of one defect, and the first two fixes each covered only the case somebody hit.
+  // `training:status` reads DATASET_ROOT, which defaults to the training corpus — so an ACCEPTANCE job
+  // reported the last training run's numbers (fixed), and then `capture-real-pages` reported the DATASET
+  // run's `captured: 29, total: 1431` for a 50-page job (this). Two runs, one progress file consulted,
+  // and the wrong answer entirely plausible — the first of the six misdiagnoses this repo lists.
+  //
+  // An open set needs a MAP. A chain of `if`s only ever covers the cases already hit, which is how this
+  // reached a third variant.
+  const status = executable(read("lab-status.yml"));
+  assert.match(status, /lab_progress_roots:/,
+    "the corpus root must be declared per job, not selected by a two-way if");
+  for (const [job, root] of [["acceptance", "runs/screenreader-acceptance"],
+                             ["real-pages", "runs/real-page-corpus"]]) {
+    assert.match(status, new RegExp(`${job}:\\s*${root.replace(/\//g, "\\/")}`),
+      `a job matching '${job}' must read ${root}`);
+  }
+  // Every job that WRITES a progress file must have a root here, or its status reads someone else's.
+  const writers = ["capture", "capture-only", "capture-real-pages", "capture-acceptance"];
+  for (const job of writers) {
+    const matched = ["acceptance", "real-pages"].some((key) => job.includes(key));
+    const root = matched ? "declared" : "runs/screenreader-dataset (the default)";
+    assert.ok(root, `${job} resolves to ${root}`);
+  }
+});

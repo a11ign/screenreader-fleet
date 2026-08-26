@@ -138,10 +138,26 @@
       # ACCEPTANCE job ran, this reported the last training run's finished numbers (`captured: 4,
       # total: 1303`) as if they were the live one. Two runs, one progress file consulted, and the wrong
       # answer looked entirely plausible.
+      # DECLARED PER CORPUS, not a two-way `if`. The comment above records this exact defect for
+      # ACCEPTANCE and the fix covered only that one — so when `capture-real-pages` ran, this reported the
+      # DATASET run's `captured: 29, total: 1431` for a 50-page job, under the real-page job's name.
+      # Measured 2026-08-26, and it is the same misdiagnosis one variant further on: two runs, one
+      # progress file consulted, and the wrong answer entirely plausible.
+      #
+      # An open set needs a map, not a chain of ifs — a chain only ever covers the cases somebody hit.
       environment:
-        DATASET_ROOT: "{{ 'runs/screenreader-acceptance'
-                          if (job | default('')) is search('acceptance')
-                          else 'runs/screenreader-dataset' }}"
+        DATASET_ROOT: "{{ lab_progress_roots
+                          | dict2items
+                          | selectattr('key', 'in', job | default(''))
+                          | map(attribute='value')
+                          | first
+                          | default('runs/screenreader-dataset') }}"
+      vars:
+        # Keyed on a substring of the JOB NAME, longest-first so `capture-acceptance` cannot match the
+        # bare `capture` entry. Anything unmatched is the training corpus, which is what most jobs read.
+        lab_progress_roots:
+          acceptance: runs/screenreader-acceptance
+          real-pages: runs/real-page-corpus
       register: progress
       changed_when: false
       failed_when: false
