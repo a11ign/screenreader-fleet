@@ -117,7 +117,16 @@ export const PIPELINES = {
   gates: {
     fleet: false,
     what: "score every gate against the corpus already on disk — no worker, minutes",
-    jobs: ["check-signals", "rules-gate", "rules-coverage", "rules-real-pages", "release-gate"],
+    // `grants-audit` and `applicability-audit` are IN the chain, and that is the point of adding them.
+    // Both were written on 2026-08-25, both found real defects the same day, and neither gated anything —
+    // they ran when somebody remembered, which is this repo's own definition of a check that does not
+    // happen. `capture-check` was mandatory and never ran once; `release:gate` was broken from the day it
+    // was written. A pipeline that passes without its sharpest audits is a pipeline that passes partly by
+    // not asking.
+    //
+    // Cheap and offline: both read the corpus already on disk, seconds each, no worker.
+    jobs: ["check-signals", "grants-audit", "applicability-audit",
+           "rules-gate", "rules-coverage", "rules-real-pages", "release-gate"],
   },
 };
 
