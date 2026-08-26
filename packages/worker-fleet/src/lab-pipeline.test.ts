@@ -230,3 +230,35 @@ test("no stage consumes a dataset an EARLIER stage has not produced", () => {
     .flatMap(([pipelineName, pipeline]) => outOfOrder(pipelineName, pipeline.jobs));
   assert.deepEqual(problems, []);
 });
+
+test("a chain that TRAINS must gate what it built, not what was already shipped", () => {
+  // Caught by reading `lab:everything` before it ran, two hours into a capture it depends on.
+  //
+  // The chain was: retrain -> export-acceptance -> train -> grants-audit -> release:gate. That trains a
+  // CANDIDATE and then runs `release:gate`, which scores the SHIPPED weights — so it would have graded
+  // the old model against freshly exported acceptance data and reported on an artefact nobody had just
+  // built. Every stage would have passed or failed for reasons unconnected to the retrain.
+  //
+  // This is the same defect CLAUDE.md records twice already: `npm run eval` resolved the shipped artefact
+  // always, so a candidate's judge quality was unknowable until after promotion; and the abstention sweep
+  // measured raw predictions instead of the product path. "A gate that does not exercise what ships is
+  // not a gate" — and its mirror, a gate that examines what ships when a candidate is the question.
+  const scripts = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8"),
+  ).scripts as Record<string, string>;
+
+  for (const [name, command] of Object.entries(scripts)) {
+    const trains = /\btraining:train\b|\blab:retrain\b/.test(command);
+    const gatesRelease = /\brelease:gate\b/.test(command);
+    if (!trains || !gatesRelease) continue;
+    assert.match(command, /promote:gated|candidate:gate/,
+      `'${name}' trains a candidate and then runs release:gate, which scores the SHIPPED weights. It must `
+      + "gate the candidate (promote:gated / candidate:gate) first, or it reports on an artefact it did "
+      + "not build.");
+    // Ordering too: gating the candidate AFTER the release gate would satisfy the check above and still
+    // grade the wrong thing.
+    assert.ok(command.indexOf("promote:gated") < command.indexOf("release:gate"),
+      `'${name}' runs release:gate before promoting the candidate, so the release gate still describes `
+      + "the previous weights.");
+  }
+});
