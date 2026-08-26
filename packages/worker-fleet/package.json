@@ -18,7 +18,8 @@
     "./worker-http": {
       "types": "./dist/worker-http.d.mts",
       "default": "./dist/worker-http.mjs"
-    }
+    },
+    "./cli-flags": "./src/cli-flags.mjs"
   },
   "bin": {
     "a11y-doctor": "./dist/doctor.mjs",

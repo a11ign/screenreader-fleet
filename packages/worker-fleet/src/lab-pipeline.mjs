@@ -46,6 +46,17 @@
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * a mistyped `--ref=` falls back to the local branch, which is how the fleet and the lab came to be on
+ * different commits.
+ *
+ * An unrecognised flag is otherwise IGNORED — every CLI here parses argv by looking for the flags it
+ * knows — so it runs the default and reports success. See `cli-flags.mjs`.
+ */
+refuseUnknownFlags(["--pipeline=", "--ref=", "--only=", "--list"],
+  { command: "npm run lab:pipeline" });
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
