@@ -1,0 +1,127 @@
+---
+# Discard the lab checkout's uncommitted changes — but only ones already committed on origin.
+#
+#     npm run lab:reset                 # report what is dirty and whether it is safe to discard
+#     npm run lab:reset -- -e apply=true
+#
+# ## Why this exists
+#
+# `promote:gated` runs on the lab, because that is the only box where the candidate weights and the code
+# both exist, and it deliberately does not commit — promoting is a MAJOR release and a job that can push
+# is a job that can release by accident. So it leaves modified weights in the lab's checkout.
+#
+# `run-job.yml` then refuses to pull into a dirty checkout, correctly: it cannot tell a stray artefact
+# from somebody's work in progress. Measured 2026-08-26: every subsequent job was pinned to the commit
+# from before the promotion, and the `gates` pipeline failed at stage 1 naming exactly that.
+#
+# The manual fix was `ssh root@... git checkout --`, which is the hand-crank this whole interface exists
+# to remove — and a dangerous one, because a `git checkout --` on the wrong file destroys work with no
+# undo. This project has already lost release-eligible weights to exactly that command.
+#
+# ## It REFUSES anything origin does not already have
+#
+# Every dirty path is compared against `origin/<ref>` before anything is discarded. A file whose working
+# copy differs from what origin holds is somebody's unpushed work and is never touched — the play stops
+# and names it. That is what makes this safe to run without reading the box first: the only thing it can
+# throw away is a byte-for-byte copy of something already committed.
+- name: Clean the lab checkout, safely
+  hosts: a11y_lab
+  gather_facts: false
+
+  tasks:
+    - name: A ref must look like a ref
+      ansible.builtin.assert:
+        that:
+          - (ref | default('main')) is match('^[A-Za-z0-9._/-]{1,100}$')
+          - "'..' not in (ref | default('main'))"
+        fail_msg: "-e ref= must be a plain branch, tag or commit."
+
+    - name: What is dirty
+      ansible.builtin.command:
+        argv: [git, status, --porcelain]
+        chdir: "{{ lab_repo_path }}"
+      register: dirty
+      changed_when: false
+
+    - name: Nothing to do
+      when: (dirty.stdout | trim) == ''
+      ansible.builtin.debug:
+        msg: "{{ lab_repo_path }} is clean — nothing to discard."
+
+    - name: Fetch origin, so the comparison is against what is really there
+      when: (dirty.stdout | trim) != ''
+      ansible.builtin.command:
+        argv: [git, fetch, --quiet, origin]
+        chdir: "{{ lab_repo_path }}"
+      changed_when: false
+
+    - name: Which DIRTY files differ from what origin holds
+      # Restricted to the dirty paths, and that restriction is the whole correctness of this play.
+      #
+      # The first version ran `git diff --name-only origin/<ref>` with no paths, which compares the whole
+      # tree — so it listed every file the lab has not PULLED yet and reported "1 dirty path; 1 differs"
+      # while naming six. It then refused on `.changeset/promote-v15-scorer.md`, a file the lab has never
+      # had and cannot be carrying work in. The counts disagreeing with the list is what gave it away.
+      #
+      # `-- <paths>` asks the question actually being asked: of the files that are dirty HERE, which hold
+      # content origin does not have? A promoted artefact committed and pushed from a laptop does not
+      # appear; genuinely unpushed work does.
+      when: (dirty.stdout | trim) != ''
+      ansible.builtin.shell:
+        cmd: >-
+          git status --porcelain | awk '{print $NF}' |
+          xargs -r git diff --name-only origin/{{ ref | default('main') }} --
+        chdir: "{{ lab_repo_path }}"
+      register: unpushed
+      changed_when: false
+      failed_when: false
+
+    - name: Say what was found
+      when: (dirty.stdout | trim) != ''
+      ansible.builtin.debug:
+        msg: >-
+          {{ (dirty.stdout | trim | split('\n') | length) }} dirty path(s);
+          {{ (unpushed.stdout | trim | split('\n') | reject('equalto', '') | list | length) }}
+          differ(s) from origin/{{ ref | default('main') }}.
+          {{ 'SAFE to discard: every modified file matches what origin already has.'
+             if (unpushed.stdout | trim) == ''
+             else 'REFUSING: these carry work origin does not have — ' ~ (unpushed.stdout | trim) }}
+
+    - name: Refuse to discard work origin does not have
+      when: (dirty.stdout | trim) != '' and (unpushed.stdout | trim) != ''
+      ansible.builtin.fail:
+        msg: >-
+          {{ lab_repo_path }} has modified file(s) whose content is NOT on origin/{{ ref | default('main') }}:
+          {{ unpushed.stdout | trim }}. Nothing has been discarded. Commit and push them from the lab, or
+          look at them before deciding — this play will not throw away work that exists nowhere else.
+
+    - name: Report only, unless asked to apply
+      when: (dirty.stdout | trim) != '' and not (apply | default(false) | bool)
+      ansible.builtin.debug:
+        msg: "Report only. Re-run with -e apply=true to discard."
+
+    - name: Discard the tracked changes
+      # `git checkout --` is the command that once destroyed release-eligible weights in this repo, which
+      # is why it runs only after the comparison above proves every path is recoverable from origin.
+      when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
+      ansible.builtin.command:
+        argv: [git, checkout, "--", "."]
+        chdir: "{{ lab_repo_path }}"
+      changed_when: true
+
+    - name: Prove it is clean
+      # Read BACK, never inferred from the command returning cleanly — the rule this repo applies to every
+      # deploy and every provision.
+      when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
+      ansible.builtin.command:
+        argv: [git, status, --porcelain]
+        chdir: "{{ lab_repo_path }}"
+      register: after
+      changed_when: false
+
+    - name: Say what is left
+      when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'CLEAN — the checkout can pull again.' if (after.stdout | trim) == ''
+             else 'STILL DIRTY (untracked files are not discarded): ' ~ (after.stdout | trim) }}
