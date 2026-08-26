@@ -179,6 +179,25 @@
         chdir: "{{ lab_repo_path }}"
       register: removed_named
       changed_when: "'removed ' in (removed_named.stdout | default(''))"
+      # A refusal must REPORT, not abort. `exit 1` failed the play before the reporting tasks below, so
+      # the operator saw an Ansible module error and no reason — three times on 2026-08-26 I read
+      # "STILL DIRTY" about a file the play had just declined to explain. The task's own stdout carries
+      # the verdict; the assert two tasks down is what decides the play's fate.
+      failed_when: false
+
+    - name: Say what the named removal did
+      when: remove is defined and (apply | default(false) | bool)
+      ansible.builtin.debug:
+        msg: "{{ removed_named.stdout | default('(no output)') | trim }}"
+
+    - name: A named removal that refused must fail the play, having SAID why
+      when: remove is defined and (apply | default(false) | bool)
+      ansible.builtin.assert:
+        that: "'removed ' in (removed_named.stdout | default(''))"
+        fail_msg: >-
+          {{ removed_named.stdout | default('the removal produced no output') | trim }}.
+          Nothing was deleted. `-e remove=` takes one UNTRACKED path relative to {{ lab_repo_path }};
+          `npm run lab:reset` with no -e remove reports what is dirty.
 
     - name: Say what happened to the untracked files
       when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
