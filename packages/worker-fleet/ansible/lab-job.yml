@@ -373,6 +373,13 @@
         timeout: 900
       # DOES NVDA EVER ANNOUNCE LEAVING A LANDMARK? The fact `vague_link_lacks_context` rests on and
       # nobody had established. Reports, never blocks: it describes NVDA, not a defect.
+      # WHICH FEATURES ARE CONSTANT ACROSS A SUBTYPE'S POSITIVES — the corpus half of ADR 0015, answerable
+      # with no weights at all. `scorer:shortcuts` reports which vetoes a head TOOK; this reports which it
+      # COULD take, before a retrain exists to measure. It needs the authoritative export, which is why it
+      # is a job: a laptop's copy predates the announcement parse and the audit refuses it by name.
+      starvation:
+        argv: ["/usr/bin/npm", "run", "--silent", "corpus:starvation"]
+        timeout: 900
       container-exits:
         argv: ["{{ lab_python }}", "packages/scorer/python/audit_container_exits.py"]
         timeout: 900
