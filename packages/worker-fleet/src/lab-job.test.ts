@@ -403,103 +403,111 @@ test("every Jinja expression in run-job.yml can actually be TEMPLATED", () => {
   }
 });
 /**
- * The parameter gate derives what a job takes from the command it runs, and these are the three ways that
- * derivation can go quietly wrong.
+ * A job's `params:` declaration must say exactly what its command reads.
  *
- * It replaced six hand-written `when: job == '<name>'` asserts covering 36 jobs, so the two things that
- * shape let through — a new job whose parameter nobody remembered to assert, and a parameter passed to a
- * job that IGNORES it, which Ansible discards without a word — are now answered from the job entry itself.
- * The hand-written asserts stay: they validate the SHAPE of a value (a shard is `i/n`, a worker is in the
- * inventory), which reading a template cannot answer.
+ * The gate replaced six hand-written `when: job == '<name>'` asserts covering 36 jobs, so the two things
+ * that shape let through — a new job whose parameter nobody remembered to assert, and a parameter passed
+ * to a job that IGNORES it, which Ansible discards without a word — are now answered from a `params:`
+ * map beside each command. The hand-written asserts stay: they validate the SHAPE of a value (a shard is
+ * `i/n`, a worker is in the inventory), which no declaration can.
+ *
+ * ## Why the derivation lives HERE and the declaration lives THERE
+ *
+ * The first version derived it live, inside Ansible: re-read the playbook, `regex_findall` the `{{ ... }}`
+ * out of the job's argv, and decide from the text. It worked, and it was the wrong place. The SRE
+ * Workbook names that shape exactly — a YAML+Jinja config accruing "ad hoc language features" becomes
+ * "an esoteric and complex programming language ... difficult for both humans and tools to maintain and
+ * analyze" — and its remedy is to separate config from data and put the cleverness in TOOLING.
+ *
+ * The evidence was already in hand. A `\b` inside a Jinja string literal is a BACKSPACE, because Jinja
+ * parses escapes with Python's rules: the first regex matched nothing, both checks passed vacuously, and
+ * it refused `-e only=` on the one job that requires it. A real regex engine under a real test runner
+ * does not have that failure mode, and can be mutation-checked.
+ *
+ * So the interface is DATA where an operator reads it, and this file derives the same answer from each
+ * job's raw argv and refuses any disagreement — over all 36 jobs, not a hand-picked few.
  */
-/** Only the shapes these assertions actually reach into. */
-type JobEntry = { argv?: unknown[] | string; setenv?: string[]; timeout?: number };
-type SetFactTask = { when?: string; "ansible.builtin.set_fact"?: Record<string, string> };
-type PlayVars = {
-  lab_jobs: Record<string, JobEntry>;
-  lab_caller_params: string[];
-  lab_param_aliases: Record<string, string>;
-};
-const RAW_LAB_JOB = parseYaml(read("lab-job.yml")) as Array<{ vars: PlayVars; tasks: SetFactTask[] }>;
+const RAW_LAB_JOB = parseYaml(read("lab-job.yml")) as Array<{ vars: PlayVars }>;
 const PLAY_VARS = RAW_LAB_JOB[0].vars;
 
-/** The same two regexes the playbook uses, so this test measures the real rule and not a paraphrase. */
-const readsParam = (templates: string, param: string) =>
-  new RegExp(`(^|\\W)${param}(\\W|$)`).test(templates);
-const templatesOf = (entry: unknown) =>
-  (JSON.stringify(entry).match(/\{\{.*?\}\}/g) ?? []).join(" ")
-    .replace(/lab_named_worker/g, "worker");
+type JobEntry = { argv?: unknown[] | string; setenv?: string[]; timeout?: number;
+                  params?: Record<string, "required" | "optional"> };
+type PlayVars = { lab_jobs: Record<string, JobEntry>; lab_caller_params: string[] };
 
-test("the playbook re-reads its own job table, and finds it where it looks", () => {
-  // The gate reads `(lookup('file', ...) | from_yaml)[0].vars.lab_jobs`, because reading `lab_jobs[job]`
-  // directly RENDERS it — a job whose command says `{{ only }}` dies with "'only' is undefined" while
-  // being asked whether it needs `only`. If that path ever returns nothing the gate examines an empty
-  // object, every check passes, and the validation reports success having looked at nothing.
-  //
-  // The playbook refuses that at runtime by requiring `"argv"` in what it read. This is the same claim
-  // asserted where it can be seen without dispatching a job.
-  assert.ok(PLAY_VARS?.lab_jobs, "lab_jobs must stay in the FIRST play's `vars:` — the lookup indexes [0]");
-  assert.ok(Object.keys(PLAY_VARS.lab_jobs).length > 20, "the job table must not read as near-empty");
+/**
+ * `-e worker=` is a NAME and the command needs an ADDRESS, so it reaches the job as `lab_named_worker`.
+ * That indirection is invisible in the argv, so the derivation has to know it; it lives here rather than
+ * in the playbook because here is where the deriving happens.
+ */
+const VIA_DERIVED_FACT: Record<string, string> = { lab_named_worker: "worker" };
+
+/** What a job's command actually reads: only what is INSIDE `{{ }}`, never literal text in a path. */
+function derivedParams(entry: JobEntry): Record<string, "required" | "optional"> {
+  let templates = (JSON.stringify(entry).match(/\{\{.*?\}\}/g) ?? []).join(" ");
+  for (const [fact, param] of Object.entries(VIA_DERIVED_FACT)) {
+    templates = templates.replaceAll(fact, param);
+  }
+  const declared: Record<string, "required" | "optional"> = {};
+  for (const param of PLAY_VARS.lab_caller_params) {
+    if (!new RegExp(`(^|\\W)${param}(\\W|$)`).test(templates)) continue;
+    // BOTH spellings of optional count. `| default(...)` is the common one; `sweep` writes
+    // `model is defined`, and reading only the first reports it as REQUIRING a model it does not.
+    const hasFallback = new RegExp(`${param}\\s*\\|\\s*default`).test(templates)
+      || new RegExp(`${param}\\s+is\\s+defined`).test(templates);
+    declared[param] = hasFallback ? "optional" : "required";
+  }
+  return declared;
+}
+
+test("every job's declared params are exactly what its command reads", () => {
+  // All 36, not a sample. A declaration that says too LITTLE refuses a correct usage; one that says too
+  // MUCH accepts a parameter the job will discard, which is the silence this gate exists to remove.
   for (const [name, entry] of Object.entries(PLAY_VARS.lab_jobs)) {
-    // A list OR the expression that builds one: `evidence-check` composes its argv from the fleet, so
-    // this asserts the key is present and non-empty rather than that it has one particular YAML shape.
-    assert.ok(entry.argv?.length, `${name} must carry an argv for the gate to find`);
+    assert.deepEqual(entry.params ?? {}, derivedParams(entry),
+      `job '${name}' declares params that disagree with its own argv. A parameter with no `
+      + `| default(...) and no "is defined" is REQUIRED; anything else is optional`);
   }
 });
 
-test("a parameter that arrives through a derived fact is declared, not guessed", () => {
-  // `-e worker=` is a NAME and the command needs an ADDRESS, so it reaches the job as `lab_named_worker`.
-  // A command saying `{{ lab_named_worker }}` cannot say which parameter produced it, so the one
-  // indirection is declared — and this is what stops the declaration drifting from the task that builds
-  // the fact. Without it, `-e worker=a11y-worker-2 -e job=stability` is refused as a parameter the job
-  // does not read, which is a correct usage rejected.
-  const aliases = PLAY_VARS.lab_param_aliases;
-  const tasks = RAW_LAB_JOB[0].tasks;
-  const derived = tasks.filter((task) =>
-    typeof task.when === "string"
-    && /^\s*(\w+) is defined\s*$/.test(String(task.when).split(" and ")[0])
-    && task["ansible.builtin.set_fact"]);
-  for (const task of derived) {
-    const param = String(task.when).split(" and ")[0].replace(" is defined", "").trim();
-    if (!PLAY_VARS.lab_caller_params.includes(param)) continue;
-    for (const fact of Object.keys(task["ansible.builtin.set_fact"] ?? {})) {
-      assert.equal(aliases[fact], param,
-        `${fact} is built from -e ${param}=, so lab_param_aliases must map it — otherwise the gate `
-        + `cannot see that a job reading ${fact} takes ${param}, and refuses the correct usage`);
-    }
-  }
+test("a job requires a parameter exactly when its command has no fallback", () => {
+  // The worked cases, spelled out, because a deepEqual over 36 entries says nothing about WHY.
+  const required = (name: string) => Object.entries(PLAY_VARS.lab_jobs[name].params ?? {})
+    .filter(([, kind]) => kind === "required").map(([param]) => param);
+  assert.deepEqual(required("capture-only"), ["only"],
+    "an empty --only= captures the WHOLE corpus, which is the run this job exists to avoid");
+  assert.deepEqual(required("stability"), ["worker"],
+    "A11Y_WORKER would be `http://:8765` — reached through lab_named_worker, so the derivation must "
+    + "follow that fact or this correct usage is refused");
+  assert.deepEqual(required("sweep"), [],
+    "`model is defined` is this job saying the model is optional, in the other of the two spellings");
+  assert.deepEqual(required("train"), [], "`out` falls back to `candidate`");
 });
 
-test("every published parameter is one some job actually reads", () => {
+test("every published parameter is one some job declares", () => {
   // `lab_caller_params` is the boundary of what can be checked at all: Ansible offers no way to enumerate
   // extra vars, so a name absent from it is discarded silently whatever this gate does. A name on it that
-  // NO job reads is worse than useless — it is an interface entry promising something nothing honours.
+  // NO job takes is worse than useless — an interface entry promising something nothing honours.
   //
   // `repeat` was exactly that. The playbook says so twenty lines from where it was listed: "TWO ENTRIES
   // RATHER THAN A `repeat` PARAMETER, and the ugliness is the point."
-  const templates = Object.values(PLAY_VARS.lab_jobs).map(templatesOf).join(" ");
   for (const param of PLAY_VARS.lab_caller_params) {
-    assert.ok(readsParam(templates, param),
-      `-e ${param}= is published but no job's command reads it. Either a job should, or it is not a `
-      + `parameter — Ansible will discard it and the caller will believe it was applied`);
+    const takers = Object.values(PLAY_VARS.lab_jobs).filter((entry) => param in (entry.params ?? {}));
+    assert.ok(takers.length > 0,
+      `-e ${param}= is published but no job declares it. Either a job should, or it is not a parameter — `
+      + `Ansible will discard it and the caller will believe it was applied`);
   }
 });
 
-test("a job requires a parameter exactly when its command has no fallback for it", () => {
-  // The two spellings of "optional" both count. `| default(...)` is the common one; `sweep` uses
-  // `model is defined`, and reading only the first reports it as REQUIRING a model it does not.
-  const required = (name: string) => {
-    const tpl = templatesOf(PLAY_VARS.lab_jobs[name]);
-    return PLAY_VARS.lab_caller_params.filter((param) =>
-      readsParam(tpl, param)
-      && !new RegExp(`${param}\\s*\\|\\s*default`).test(tpl)
-      && !new RegExp(`${param}\\s+is\\s+defined`).test(tpl));
-  };
-  assert.deepEqual(required("capture-only"), ["only"],
-    "an empty --only= captures the WHOLE corpus, which is the run this job exists to avoid");
-  assert.deepEqual(required("stability"), ["worker"], "A11Y_WORKER would be `http://:8765`");
-  assert.deepEqual(required("sweep"), [], "`model is defined` is this job saying the model is optional");
-  assert.deepEqual(required("train"), [], "`out` falls back to `candidate`");
+test("the sibling playbooks re-read the job table, and find it where it looks", () => {
+  // `lab:status`, `lab:log` and `lab:stop` refuse a job name they do not have by reading the catalogue
+  // from the file that DEFINES it, indexed as `[0].vars.lab_jobs`. If that path ever returns nothing they
+  // would refuse every job, so this pins the shape they depend on.
+  assert.ok(PLAY_VARS.lab_jobs, "lab_jobs must stay in the FIRST play's `vars:` — the lookup indexes [0]");
+  assert.ok(Object.keys(PLAY_VARS.lab_jobs).length > 20, "the job table must not read as near-empty");
+  for (const [name, entry] of Object.entries(PLAY_VARS.lab_jobs)) {
+    // A list OR the expression that builds one: `evidence-check` composes its argv from the fleet.
+    assert.ok(entry.argv?.length, `${name} must carry an argv`);
+  }
 });
 
 test("asking about a job that does not exist is refused, not answered", () => {

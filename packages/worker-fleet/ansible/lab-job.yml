@@ -56,6 +56,7 @@
     # working" into "failed".
     lab_jobs:
       train:
+        params: {out: optional}
         # Trains to a SCRATCH directory on purpose. The trainer now refuses to overwrite a release-eligible
         # model without `--allow-overwrite`, and promoting is a separate, deliberate step — one was already
         # lost to a `git checkout` on the assumption that a tracked file is always recoverable.
@@ -82,6 +83,7 @@
       # could be asked only after promoting, which is the wrong order and the same shape as `npm run eval`
       # resolving the shipped artefact always.
       sweep:
+        params: {model: optional}
         argv: ["/usr/bin/node", "packages/lab/scripts/calibrate-abstention.mjs"]
         setenv: ["A11Y_SCORER_MODEL={{ ('/opt/a11y/runs/model-' ~ model) if model is defined else '' }}"]
         timeout: 1800
@@ -90,6 +92,7 @@
       # specific changed about one group of pages" — opposite fixes, and the second is invisible to every
       # summary statistic.
       false-positives:
+        params: {out: optional}
         argv: ["{{ lab_python }}", "packages/lab/scripts/diagnose-false-positives.py",
                "--model", "runs/model-{{ out | default('candidate') }}",
                "--data", "runs/screenreader-dataset/with-realism.jsonl",
@@ -99,6 +102,7 @@
       # same audit but always on what is shipped, which cannot answer "did this retrain help?" — the
       # question a candidate exists to settle. Reads files already on disk; no worker, seconds.
       shortcuts:
+        params: {out: optional}
         argv: ["{{ lab_python }}", "packages/lab/scripts/audit-scorer-shortcuts.py",
                "--model", "runs/model-{{ out | default('candidate') }}",
                "--data", "runs/screenreader-dataset/with-realism.jsonl",
@@ -113,6 +117,7 @@
                "--update-baseline"]
         timeout: 900
       acceptance:
+        params: {out: optional}
         argv: ["{{ lab_python }}", "packages/lab/scripts/evaluate-screenreader-acceptance.py",
                "--data", "runs/screenreader-acceptance/repeat-1.jsonl",
                "--data", "runs/screenreader-acceptance/repeat-2.jsonl",
@@ -148,6 +153,7 @@
       # publisher, so each site sees the same rate at any fleet size. `--shard` still works, for splitting a
       # run across separate machines; it is no longer how you use more than one worker.
       capture-real-pages:
+        params: {role: optional, shard: optional}
         argv: ["/usr/bin/node", "packages/lab/src/training/capture-real-pages.mjs",
                "--role={{ role | default('training') }}",
                "--shard={{ shard | default('0/1') }}"]
@@ -171,6 +177,7 @@
       # flag cannot be expressed. The runner validates it a second time and refuses an id matching nothing,
       # which is the difference between "captured 0 cases" and "you asked for a case that does not exist".
       capture-only:
+        params: {only: required}
         argv: ["/usr/bin/npm", "run", "training:capture", "--", "--only={{ only }}"]
         setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
         # Minutes, not hours: this exists precisely because it is small.
@@ -277,6 +284,7 @@
       # reintroduces the quoting class that sent four capture shards at `--worker=http://:8765` for 29
       # minutes. The gate-then-promote chain lives in an npm script where it can be read and tested.
       promote:
+        params: {out: optional}
         argv: ["/usr/bin/npm", "run", "--silent", "promote:gated", "--",
                "--from={{ out | default('candidate') }}"]
         timeout: 3600
@@ -312,6 +320,7 @@
       # and takes ~25 min. One worker, like evidence-check and for the same reason: it is asking whether the
       # PIPELINE is deterministic, and a second guest is a second variable.
       stability:
+        params: {worker: required}
         argv: ["{{ lab_tsx }}", "packages/lab/scripts/stability-gate.mjs"]
         setenv: ["A11Y_WORKER={{ lab_named_worker }}"]
         timeout: 5400
@@ -462,6 +471,7 @@
       # separate elements — joining them with a space would hand the script one argument containing four
       # URLs, which is the quoting class `argv:` exists to remove, reintroduced by hand.
       evidence-check:
+        params: {sample: optional}
         argv: "{{ [lab_tsx, 'packages/lab/scripts/evidence-check.mjs']
                   + (lab_fleet_workers | split(','))
                   + ['--sample=' ~ (sample | default(24) | int)] }}"
@@ -488,7 +498,7 @@
     # Both are answerable from the job entry itself, and that is the point: a template saying `{{ only }}`
     # reads that parameter, and one saying `{{ out | default('candidate') }}` reads it and can do without.
     # The requirement is already written in the one place that cannot drift from the command being run.
-    # WHAT THIS JOB TAKES, DERIVED FROM THE COMMAND IT RUNS
+    # WHAT THIS JOB TAKES — DECLARED AS DATA, PINNED TO THE COMMAND BY A TEST
     #
     # Below this point the parameter checks are `when: job == '<name>'`, hand-written, and that shape lets
     # two things through. A new job taking a parameter needs somebody to remember an assert; and a
@@ -496,70 +506,27 @@
     # extra var without a word. "It did something other than what you asked" must never be silent — the
     # rule `capture-real-pages` already carries for refusing `-e worker=` rather than quietly using five.
     #
-    # Both are answerable from the job entry itself, which is the point: a command saying `{{ only }}`
-    # reads that parameter, and one saying `{{ out | default('candidate') }}` reads it and can do without.
-    # A default is how a job declares a parameter optional, so the requirement is already written in the
-    # one place that cannot drift from the command being run.
-    #
     # The hand-written asserts STAY. They validate the SHAPE of a value — that a shard is `i/n`, that a
-    # worker is in the inventory, that an `--only` is ids and not paths — which no amount of reading the
-    # template can answer. These two answer presence and absence, which it can.
-    - name: The command this job will run, AS WRITTEN rather than as rendered
-      # `lab_jobs[job].argv` cannot be inspected: reading it renders it, so a job whose command says
-      # `{{ only }}` dies with "'only' is undefined" while being asked WHETHER it needs `only`. The
-      # question destroys its own subject.
-      #
-      # A lookup result is marked unsafe and is therefore never re-templated, so re-reading this playbook
-      # yields the argv with its `{{ ... }}` intact. Still ONE source — the same lines the job runs from —
-      # so nothing here can drift from the command.
+    # worker is in the inventory, that an `--only` is ids and not paths. These two answer presence and
+    # absence, which a `params:` declaration can.
+    #
+    # ## Why this is DATA here and a derivation in the test, which is the second design
+    #
+    # The first version derived it live: re-read this playbook, `regex_findall` the `{{ ... }}` out of the
+    # job's argv, and decide from the text. It worked, and it was the wrong place. The SRE Workbook names
+    # it exactly — a YAML+Jinja config that grows "ad hoc language features" becomes "an esoteric and
+    # complex programming language ... difficult for both humans and tools to maintain and analyze", and
+    # its remedy is to separate config from data and put the cleverness in TOOLING. The evidence was
+    # already in hand: a `\b` inside a Jinja string is a BACKSPACE (Jinja parses escapes with Python's
+    # rules), so the first regex matched nothing, both checks passed vacuously, and it refused `-e only=`
+    # on the one job that requires it. A real regex engine with real tests does not have that failure.
+    #
+    # So the interface is declared beside the command it belongs to, where an operator can read it, and
+    # `lab-job.test.ts` DERIVES the same answer from each job's raw argv and refuses any disagreement.
+    # That is CLAUDE.md's third remedy for a duplication that cannot be deleted: pin the copies equal.
+    - name: What this job takes
       ansible.builtin.set_fact:
-        job_raw: "{{ (((lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs | default({}))[job] | default({})) | to_json }}"
-
-    - name: The read found this job, and not an empty set
-      # A guard must be shown to fail before it is trusted, and this one CANNOT be: if the lookup ever
-      # returns nothing — the file moves, the play gains an entry, `lab_jobs` moves to vars_files — then
-      # `job_raw` is "{}", nothing matches, every check below passes, and the validation reports success
-      # having examined nothing. That is this repo's most-repeated defect, so it is refused here rather
-      # than discovered by a job running against an empty `--only=`.
-      ansible.builtin.assert:
-        that: job_raw is search('"argv"')
-        fail_msg: >-
-          Re-reading this playbook did not find job '{{ job }}' — got {{ job_raw }}. Every parameter check
-          below would pass on that, so this refuses instead. `lab_jobs` has moved out of the first play's
-          `vars:`; point the lookup at wherever it now lives.
-
-    # Only what is INSIDE `{{ }}`, never the whole entry. `--output runs/model-...` and `"REPEAT=repeat-1"`
-    # are literal text, and a job must not be read as taking a parameter because a word appears in a path.
-    - name: The expressions in that command, which are the only place a parameter can appear
-      ansible.builtin.set_fact:
-        job_templates: '{{ job_raw | regex_findall("\{\{.*?\}\}") | join(" ") }}'
-
-    - name: Follow a parameter that arrives through a derived fact
-      ansible.builtin.set_fact:
-        job_templates: "{{ job_templates | regex_replace(item.key, item.value) }}"
-      loop: "{{ lab_param_aliases | dict2items }}"
-      loop_control:
-        label: "{{ item.key }} -> {{ item.value }}"
-
-    - name: Which caller parameters this job reads
-      ansible.builtin.set_fact:
-        job_reads: "{{ (job_reads | default([])) + [item] }}"
-      loop: "{{ lab_caller_params }}"
-      when: job_templates is search('(^|\W)' ~ item ~ '(\W|$)')
-      loop_control:
-        label: "{{ item }}"
-
-    - name: Which of those it cannot run without
-      ansible.builtin.set_fact:
-        job_needs: "{{ (job_needs | default([])) + [item] }}"
-      loop: "{{ job_reads | default([]) }}"
-      # `| default(...)` and `is defined` are both a job saying a parameter is optional. Reading only
-      # the first would report `sweep` as REQUIRING `model`, which it does not.
-      when:
-        - not (job_templates is search(item ~ '\s*\|\s*default'))
-        - not (job_templates is search(item ~ '\s+is\s+defined'))
-      loop_control:
-        label: "{{ item }}"
+        job_params: "{{ lab_jobs[job].params | default({}) }}"
 
     - name: What this job runs, and what it takes
       # `-e describe=1` answers the question both refusals raise, and is named in both their messages — so
@@ -570,8 +537,9 @@
       # withholds itself until you already know it.
       ansible.builtin.debug:
         msg: >-
-          {{ job }} — reads {{ job_reads | default([]) | join(', ') or 'no caller parameters' }};
-          {{ 'REQUIRES ' ~ (job_needs | join(', ')) if job_needs | default([]) else 'all optional' }}.
+          {{ job }} — takes {{ job_params | dict2items
+             | map(attribute='key') | zip(job_params.values()) | map('join', ': ') | join(', ')
+             if job_params else 'no parameters' }}.
           Budget {{ lab_jobs[job].timeout | default('the playbook default') }}s.
           Runs {{ ((lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs)[job].argv }}
       when: describe | default(false) | bool
@@ -582,6 +550,34 @@
 
     # Only for the job that needs it, and only from the inventory. An address cannot be supplied directly,
     # so `--worker=http://:8765` — which cost 29 minutes — is not a value this interface can express.
+    - name: Refuse a parameter this job does not read
+      # The dangerous half. `-e out=varied` on a job that never reads `out` looks like it worked: Ansible
+      # discards the value, the job runs its default, and the operator believes their value was applied.
+      ansible.builtin.assert:
+        that: item in job_params
+        fail_msg: >-
+          -e {{ item }}= was passed and job '{{ job }}' does not take it — it takes
+          {{ job_params.keys() | list | join(', ') if job_params else 'no parameters at all' }}. Ansible
+          would discard the value silently and run the default, so this refuses instead. Drop the
+          parameter, or name a job that takes it: `npm run lab:job -- -e job={{ job }} -e describe=1`.
+      loop: "{{ lab_caller_params }}"
+      when: vars[item] is defined
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Refuse a MISSING parameter this job cannot run without
+      # Without it Ansible renders an empty string, and `capture-only` with an empty `--only=` captures
+      # the WHOLE corpus — the four hours that job exists to avoid.
+      ansible.builtin.assert:
+        that: vars[item.key] is defined
+        fail_msg: >-
+          job '{{ job }}' needs -e {{ item.key }}=. Its command reads that parameter with no fallback, so
+          without it the job runs against an empty value rather than refusing.
+          `npm run lab:job -- -e job={{ job }} -e describe=1` lists what it takes.
+      loop: "{{ job_params | dict2items | selectattr('value', 'equalto', 'required') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+
     - name: Refuse a parameter this job does not read
       # The dangerous half. `-e out=varied` on a job that never reads `out` looks like it worked: Ansible
       # discards the value, the job runs its default, and the operator believes their value was applied.
