@@ -478,6 +478,18 @@
       # URLs, which is the quoting class `argv:` exists to remove, reintroduced by hand.
       evidence-check:
         params: {sample: optional}
+        # ITS EXIT CODE IS THE ANSWER, not just a status: 0 safe to ship, 1 the evidence CHANGED so a
+        # recapture is required, 2 it could not answer. All three are successful runs of the check; only a
+        # crash is a failure. They stay non-zero-is-failure deliberately — 1 means "invalidate 2,122
+        # cached captures", which must never read as a green job — but the operator is now told which of
+        # the three they got instead of having to remember.
+        exitMeanings:
+          "1": >-
+            the evidence CHANGED. The check ran correctly and this is its answer: bump
+            CAPTURE_PROTOCOL_VERSION and recapture. Not a fault.
+          "2": >-
+            INCONCLUSIVE — it could not compare enough captures to answer, which includes PARTIAL
+            coverage and not only zero. Re-run it; do not read this as "unchanged".
         argv: "{{ [lab_tsx, 'packages/lab/scripts/evidence-check.mjs']
                   + (lab_fleet_workers | split(','))
                   + ['--sample=' ~ (sample | default(24) | int)] }}"
@@ -718,3 +730,10 @@
         # recapture" with "broke". Deliberately not changed here: that is a behaviour decision, and this
         # commit is about the wiring being absent.
         job_success_codes: "{{ lab_jobs[job].successCodes | default([]) }}"
+        # What a non-zero code MEANS, when the command documents one. A job that answers in exit codes
+        # currently reports `exit 1 (expected one of [0])` and leaves the operator to know that 1 is an
+        # ANSWER rather than a crash. Reporting the meaning is strictly better than making 1 a success
+        # code, which was the other option and is worse: `evidence:check` exiting 1 means "recapture 2,122
+        # captures", and a job that reports OK for that is a green light on the most expensive operation
+        # this repo has.
+        job_exit_meanings: "{{ lab_jobs[job].exitMeanings | default({}) }}"

@@ -447,7 +447,9 @@
     that: (job_exit | int) in (job_ok | map('int') | list)
     fail_msg: >-
       {{ job_name }} ended {{ job_outcome }} with exit {{ job_exit }} on {{ inventory_hostname }}
-      (expected one of {{ job_ok }}). Its output is above, and all of it is still on the box:
+      (expected one of {{ job_ok }}).
+      {{ ('THAT CODE MEANS: ' ~ job_exit_meanings[job_exit | string]) if job_exit_meanings[job_exit | string] | default('') else '' }}
+      Its output is above, and all of it is still on the box:
       `journalctl -u {{ job_unit }}`. A `timeout` outcome means it hit RuntimeMaxSec={{ job_timeout }}s,
       which is a budget to raise rather than a failure to debug.
     success_msg: "{{ job_name }} completed ({{ job_outcome }}, exit {{ job_exit }})"

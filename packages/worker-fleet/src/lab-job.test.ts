@@ -562,3 +562,22 @@ test("every capture job regenerates the pages before capturing them", () => {
       `${name} must generate before capturing, or a newly added case has no page to capture`);
   }
 });
+
+test("a job that answers in exit codes says what they mean", () => {
+  // `evidence-check` exits 1 for "the evidence CHANGED" and 2 for "could not answer" — both successful
+  // runs of the check. The operator saw `exit 1 (expected one of [0])` and had to already know that. The
+  // remedy is to REPORT the meaning, not to make 1 a success code: exit 1 means "invalidate 2,122 cached
+  // captures", and a job reporting OK for that is a green light on the most expensive operation here.
+  const meanings = (PLAY_VARS.lab_jobs["evidence-check"] as { exitMeanings?: Record<string, string> })
+    .exitMeanings ?? {};
+  assert.ok(meanings["1"]?.includes("CHANGED"), "exit 1 must say the evidence changed");
+  assert.ok(meanings["2"]?.includes("INCONCLUSIVE"), "exit 2 must say it could not answer");
+  // And the runner must actually surface them, or the declaration is a comment.
+  assert.match(executable(read("tasks/run-job.yml")), /job_exit_meanings\[job_exit \| string\]/,
+    "run-job.yml must print the meaning of the code it failed on");
+  // Every declared code must be one the job can actually produce — a meaning for an impossible code is
+  // advice that never fires, and a missing one for a code the job DOES return is the gap this closes.
+  for (const code of Object.keys(meanings)) {
+    assert.match(code, /^[1-9][0-9]*$/, `exitMeanings key '${code}' is not a non-zero exit code`);
+  }
+});
