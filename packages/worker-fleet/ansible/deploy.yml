@@ -83,6 +83,17 @@
         $ErrorActionPreference = "Stop"
         function Run($what) { & git @args; if ($LASTEXITCODE -ne 0) { throw "git $what failed with $LASTEXITCODE" } }
         Run "fetch" fetch --quiet origin
+        # A WORKER IS AN APPLIANCE: git is the source of truth there and nothing is authored on a guest,
+        # so a modified TRACKED file is dirt and it blocks every fast-forward for ever. Measured
+        # 2026-08-26: `packages/scorer/bin/fetch-encoder.mjs` was modified on all five boxes, so every
+        # deploy since had aborted its merge and reported success anyway.
+        #
+        # REPORTED before it is discarded, and only tracked files — the same containment `lab:reset`
+        # uses, for the opposite reason. On the LAB a dirty file may be work that exists nowhere else and
+        # is refused; on a WORKER it cannot be, so it is named and cleared rather than blocking the fleet.
+        # Untracked files are never touched.
+        $dirty = git status --porcelain --untracked-files=no
+        if ($dirty) { Write-Output "discarding local modifications on this guest:"; Write-Output $dirty; Run "checkout" checkout -- . }
         Run "checkout" -c advice.detachedHead=false checkout --quiet {{ a11y_git_ref | default('main') }}
         Run "merge" merge --ff-only --quiet origin/{{ a11y_git_ref | default('main') }}
         git rev-parse HEAD
