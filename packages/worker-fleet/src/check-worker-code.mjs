@@ -22,6 +22,15 @@ import { configuredWorkers, inventoryWorkerUrls } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
 // the same question before every run and a second copy of "is this worker stale" is a second answer.
 import { expectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * takes NO flags — it asks every worker what code it is running and compares. Any flag passed to it
+ * today is discarded in silence.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags([], { command: "npm run worker:code" });
 
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.

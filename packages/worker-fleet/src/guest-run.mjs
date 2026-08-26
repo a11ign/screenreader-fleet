@@ -32,6 +32,15 @@ import { createReadStream, readFileSync, existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * takes a VM name and a script POSITIONALLY, which this guard does not touch, plus `--timeout=`;
+ * a mistyped timeout silently falls back to 600s on an operation that may legitimately need longer.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--timeout="], { command: "npm run guest:run" });
 
 const run = promisify(execFile);
 

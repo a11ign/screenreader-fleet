@@ -32,6 +32,16 @@ import { resolve } from "node:path";
 import { WORKER_FILES } from "@a11y-witness/nvda-worker/worker-files";
 import { workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker/code-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * `--allow-protocol-change` is the flag that lets a CAPTURE_PROTOCOL_VERSION bump ship, invalidating
+ * 2,122 cached captures. A typo silently means "do not allow", which is the safe direction — but
+ * `--vm=` mistyped deploys to EVERY guest instead of the one named.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--vm=", "--allow-protocol-change"], { command: "npm run worker:deploy" });
 
 const run = promisify(execFile);
 // From the worker PACKAGE, not from the cwd. This was `resolve("src/capture/nvda")` and then

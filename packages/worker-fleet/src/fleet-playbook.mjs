@@ -37,6 +37,16 @@
  */
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * `--serial=` and `--limit=` decide how many of twelve machines an operation touches at once, and
+ * `--ref=` decides what code they end up running. `--abbrev-ref`, `--all`, `--ff-only` and `--quiet`
+ * appear in this file because it passes them to GIT; they are not its own.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--playbook=", "--ref=", "--limit=", "--serial="], { command: "npm run fleet:deploy" });
 
 /** CT 120. Named here rather than parsed out of the inventory, which needs Ansible to read properly. */
 const CONTROL_PLANE = process.env.A11Y_CONTROL_HOST || "REDACTED-INTERNAL-ADDRESS";
