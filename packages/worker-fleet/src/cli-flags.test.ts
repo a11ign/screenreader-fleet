@@ -75,6 +75,16 @@ const GUARDED: Record<string, string> = {
     "takes NO flags — it asks every worker what code it is running and compares. Any flag passed to it today is discarded in silence",
   "packages/worker-fleet/src/guest-run.mjs":
     "takes a VM name and a script POSITIONALLY, which this guard does not touch, plus `--timeout=`; a mistyped timeout silently falls back to 600s on an op",
+  "packages/lab/src/harnesses/capture-check.mjs":
+    "the capture-layer regression check; a mistyped --worker= falls back to in-process mode, which REFUSES while a worker is serving",
+  "packages/lab/src/harnesses/page-identity-rate.mjs":
+    "asks whether a capture ever reads the WRONG page; --rounds= sets the width of the 95% upper bound a zero count is reported as",
+  "packages/lab/src/harnesses/occurrence-verdict-stability.mjs":
+    "takes its worker positionally and no flags at all",
+  "packages/lab/src/harnesses/capture-fixtures.mjs":
+    "recaptures the eval fixtures; --ff-only appears in the file because it is passed to GIT",
+  "packages/worker-fleet/src/compare-workers.mjs":
+    "--runs= is a documented alias of --rounds=, so a guard listing one would refuse a spelling the code supports",
   "packages/lab/src/training/wait-for-capture.mjs":
     "its EXIT CODE is the contract — 0 clean, 1 failures, 2 no run, 3 wedged — so a caller reading it "
     + "has already committed to an output shape, and a mistyped `--json` gives it the other one",
@@ -97,12 +107,10 @@ const UNGUARDED = new Set([
   "packages/lab/scripts/bench-capture.mjs", "packages/lab/scripts/compare-layers.mjs", "packages/lab/scripts/corpus-backup.mjs",
   "packages/lab/scripts/corpus-snapshot.mjs", "packages/lab/scripts/emit-grants-map.mjs", "packages/lab/scripts/explain-scorer.mjs",
   "packages/lab/scripts/retrain-pipeline.mjs", "packages/lab/scripts/verify-safetensors.mjs",
-  "packages/lab/src/harnesses/assert-action-report.mjs", "packages/lab/src/harnesses/capture-check.mjs",
-  "packages/lab/src/harnesses/capture-fixtures.mjs", "packages/lab/src/harnesses/occurrence-verdict-stability.mjs",
-  "packages/lab/src/harnesses/page-identity-rate.mjs", "packages/lab/src/training/generate-screenreader-acceptance.mjs",
+  "packages/lab/src/harnesses/assert-action-report.mjs", "packages/lab/src/training/generate-screenreader-acceptance.mjs",
   "packages/lab/src/training/generate-screenreader-dataset.mjs", "packages/lab/src/training/preflight-screenreader-dataset.mjs",
-  "packages/worker-fleet/src/compare-workers.mjs", "packages/worker-fleet/src/fleet-discover.mjs",
-  "packages/worker-fleet/src/fleet-env.mjs", "packages/worker-fleet/src/fleet-wake.mjs", "packages/worker-fleet/src/normalise-fleet.mjs",
+  "packages/worker-fleet/src/fleet-discover.mjs", "packages/worker-fleet/src/fleet-env.mjs",
+  "packages/worker-fleet/src/fleet-wake.mjs", "packages/worker-fleet/src/normalise-fleet.mjs",
 ]);
 
 /** Does this file take a command line? The guard itself reads argv, and is the implementation. */

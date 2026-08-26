@@ -29,6 +29,15 @@ import { compareWorkers, describe as summarise, recoveryRates } from "./worker-s
 import { sampleHost, diffHost } from "./host-metrics.mjs";
 import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.mjs";
 import { resolve } from "node:path";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * takes a page and two workers POSITIONALLY. `--runs=` is a documented alias of `--rounds=`, so both
+ * are accepted — a guard listing only one would refuse a spelling the code deliberately supports.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--rounds=", "--runs="], { command: "npm run worker:compare" });
 
 // `requestJson`, not `fetch`: undici stops waiting for response HEADERS at 300 s whatever the
 // AbortSignal says, and the worker writes its status and body together at the END of a capture.
