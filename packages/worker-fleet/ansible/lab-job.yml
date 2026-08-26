@@ -268,6 +268,20 @@
         argv: ["{{ lab_tsx }}", "packages/lab/scripts/stability-gate.mjs"]
         setenv: ["A11Y_WORKER={{ lab_named_worker }}"]
         timeout: 5400
+      # SCORE THE SHIPPED MODEL FROM A COPY, which is what `release:gate` needs and could not do.
+      #
+      # `training:evaluate-acceptance` passes neither `--model` nor `--training-report`, and both default
+      # into `packages/scorer/models/` — tracked source. The evaluator REFUSES to stamp a verdict there,
+      # correctly: "that record describes what was true when those weights shipped", and a dirty
+      # `packages/` also stops the lab pulling, which is how it ran 17 commits behind for days.
+      #
+      # So `release:gate` could never pass as written — measured 2026-08-26, blocking at stage 5 with the
+      # refusal naming its own remedy. This job IS that remedy: copy to `runs/`, score the copy. The copy
+      # is made here rather than inside the script because a script that copies its own input into a
+      # writable place is a script that can no longer refuse.
+      acceptance-shipped-copy:
+        argv: ["/usr/bin/npm", "run", "--silent", "training:evaluate-acceptance:shipped"]
+        timeout: 1800
       # THE COMPOSITE, and the only entry that delegates to an npm script rather than naming a binary.
       #
       # That is deliberate: `release:gate` IS the ordering -- isolation, then signals, then rules, then
