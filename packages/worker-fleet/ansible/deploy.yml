@@ -64,6 +64,20 @@
       run_once: true
 
   tasks:
+    # A GUEST THAT IS STILL COMING BACK IS NOT AN UNREACHABLE ONE, and this play could not tell them
+    # apart. It reboots every guest it deploys to, so running two deploys in succession — or deploying
+    # after any other operation that rebooted a box — meets a machine that is up but not yet answering
+    # ssh, and Ansible reports UNREACHABLE at the first task. Measured 2026-08-26 across four separate
+    # runs: one to four boxes dropped each time, every one of them healthy minutes later, and each
+    # failure read as a fleet problem rather than as timing.
+    #
+    # A Windows guest takes a couple of minutes to come back, so the wait is generous; a box that is
+    # genuinely off still fails, just after saying it waited rather than at the first packet.
+    - name: Wait for the guest to be reachable at all
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        sleep: 10
+
     - name: Fetch and fast-forward the guest checkout
       # --ff-only, so a guest that somebody committed on fails loudly here instead of silently diverging
       # from the fleet and producing evidence under a code version nothing else has.

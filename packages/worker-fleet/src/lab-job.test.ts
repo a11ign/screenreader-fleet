@@ -607,3 +607,27 @@ test("lab:status reads the progress file of the corpus the job writes", () => {
     assert.ok(root, `${job} resolves to ${root}`);
   }
 });
+
+test("a fleet play waits for a guest to come back before calling it unreachable", () => {
+  // `deploy.yml` REBOOTS every guest it deploys to. So a second deploy — or any operation following one
+  // — meets machines that are up but not yet answering ssh, and Ansible reports UNREACHABLE at the first
+  // task. Measured 2026-08-26 across four runs: one to four boxes dropped each time, every one healthy
+  // minutes later, and each failure read as a fleet problem rather than as timing. I attributed it to the
+  // boxes twice before measuring.
+  //
+  // `wait_for_connection` must come FIRST, before any task that touches the guest — placed after one, it
+  // is the task that fails.
+  const deploy = executable(read("deploy.yml"));
+  const tasks = deploy.slice(deploy.indexOf("\n  tasks:"));
+  const waitAt = tasks.indexOf("wait_for_connection");
+  assert.ok(waitAt !== -1, "deploy.yml must wait for a guest to be reachable before working on it");
+  // Every task with a `win_` module or a `chdir` touches the guest; none may precede the wait.
+  for (const marker of ["ansible.windows.win_shell", "ansible.windows.win_"]) {
+    const first = tasks.indexOf(marker);
+    if (first !== -1) {
+      assert.ok(waitAt < first,
+        `wait_for_connection must precede the first ${marker} task, or that task is the one that fails `
+        + `UNREACHABLE on a guest which is merely still rebooting`);
+    }
+  }
+});
