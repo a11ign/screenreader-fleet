@@ -178,7 +178,13 @@
       # which is the difference between "captured 0 cases" and "you asked for a case that does not exist".
       capture-only:
         params: {only: required}
-        argv: ["/usr/bin/npm", "run", "training:capture", "--", "--only={{ only }}"]
+        # `:fresh` — GENERATE, then capture. It ran `training:capture` alone, so a case that did not yet
+        # exist as a page could never be captured: `training:capture failed: No generated case matches`.
+        # That defeats half of what this job is for. `--pipeline=verify` exists to prove a corpus change
+        # cheaply, and ADDING a case is the corpus change most worth proving before paying for the whole
+        # corpus. The `capture` job has always used `:fresh`; this one was the odd one out, against this
+        # repo's own rule that "capturing without regenerating is testing the previous commit".
+        argv: ["/usr/bin/npm", "run", "training:capture:fresh", "--", "--only={{ only }}"]
         setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
         # Minutes, not hours: this exists precisely because it is small.
         timeout: 3600

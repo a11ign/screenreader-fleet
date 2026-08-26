@@ -550,3 +550,15 @@ test("no task name appears twice, and no task reads a fact nothing sets", () => 
   // the answer instead of naming the four facts this particular refactor happened to delete. A list of
   // names somebody has to keep current is this repo's definition of a rule that gets broken.
 });
+
+test("every capture job regenerates the pages before capturing them", () => {
+  // "Capturing without regenerating is testing the previous commit" — and `capture-only`, whose entire
+  // purpose is proving a corpus change before paying for the full corpus, did exactly that. A case added
+  // but not generated failed with `No generated case matches`, which reads like a bad --only rather than
+  // a missing page. The `capture` job had always used `:fresh`; this one was the odd one out.
+  for (const name of ["capture", "capture-only"]) {
+    const argv = [PLAY_VARS.lab_jobs[name].argv ?? ""].flat().join(" ");
+    assert.match(argv, /training:capture:fresh/,
+      `${name} must generate before capturing, or a newly added case has no page to capture`);
+  }
+});
