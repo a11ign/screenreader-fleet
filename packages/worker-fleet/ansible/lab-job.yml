@@ -141,6 +141,26 @@
         # 77 real pages on one worker measured ~6.5 h; across the fleet ~1.6 h. Generous either way, and a
         # ceiling rather than a cost.
         timeout: 28800
+      # CAPTURE ONE SUBTYPE, to prove a corpus change works before paying for the whole thing.
+      #
+      # A full recapture is ~4 h on this fleet, and a change usually targets ONE subtype's evidence. Paying
+      # four hours to discover the fix did not move the number is the wrong order, and it is the order this
+      # catalogue enforced by having no smaller unit: `capture` was all-or-nothing, while
+      # `capture-screenreader-dataset.mjs` has supported `--only=` with exact ids and comma-separated lists
+      # the whole time. The capability existed; no job exposed it.
+      #
+      # `-e only=<ids>` takes what `check-signals` and the audits already PRINT — a case id, or a list of
+      # them — so the natural next step after a gate names failures is to paste them back in. Substring
+      # matching means `-e only=route-title-stale` sweeps that family, which is the common case.
+      #
+      # Contained by SHAPE like every other parameter: ids are `[a-z0-9.+-]` and commas, so a path or a
+      # flag cannot be expressed. The runner validates it a second time and refuses an id matching nothing,
+      # which is the difference between "captured 0 cases" and "you asked for a case that does not exist".
+      capture-only:
+        argv: ["/usr/bin/npm", "run", "training:capture", "--", "--only={{ only }}"]
+        setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
+        # Minutes, not hours: this exists precisely because it is small.
+        timeout: 3600
       # `--require-complete` because THIS box owns the corpus. Here "no evidence for that case" is a real
       # answer — go capture — rather than the unanswerable question it is on a laptop, where `runs/` is
       # gitignored and a copy is only ever as fresh as its last sync.
@@ -428,6 +448,19 @@
     # Same containment as `worker` and `role`: a NAME from a fixed list, never a path. `--output` is a
     # directory the trainer creates and writes weights into, so an unvalidated value here would be an
     # arbitrary write on the box holding the corpus and the release keys.
+    # Same containment as `worker` and `out`: a SHAPE, so a path or a flag is inexpressible rather than
+    # rejected. `--only=` reaches an argv list and never a shell, but this value comes from the wire.
+    - name: A targeted capture names case ids and nothing else
+      when: job == 'capture-only'
+      ansible.builtin.assert:
+        that:
+          - only is defined
+          - only is match('^[a-z0-9][a-z0-9.+-]{0,80}(,[a-z0-9][a-z0-9.+-]{0,80})*$')
+        fail_msg: >-
+          capture-only needs -e only=<case-id> or a comma-separated list, e.g.
+          -e only=route-title-stale. Ids only: letters, digits, dot, plus and hyphen. Paste what
+          check-signals or an audit printed.
+
     - name: A train job names its scratch output from a fixed list
       when: job in ['train', 'acceptance', 'shortcuts', 'false-positives']
       ansible.builtin.assert:

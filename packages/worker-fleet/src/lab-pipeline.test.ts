@@ -138,7 +138,11 @@ test("the lab stages are pinned to a COMMIT, not to a branch that can move under
   const source = readFileSync(fileURLToPath(new URL("./lab-pipeline.mjs", import.meta.url)), "utf8");
   const code = source.split("\n").filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join("\n");
 
-  assert.match(code, /labJob\(job, pinned\)/,
+  // Matched loosely on the ARGUMENT, not the whole call: the first version asserted `labJob(job, pinned)`
+  // literally and broke the moment a third parameter was added for `-e only=`. The property is "the
+  // stage receives the pinned commit"; a pattern that also pins the arity is asserting something nobody
+  // meant. It failed on a change that preserved exactly what it was written to protect.
+  assert.match(code, /labJob\(job, pinned/,
     "lab stages must be given the resolved commit, never the branch name");
   assert.ok(!/labJob\(job, ref\)/.test(code), "a lab stage still takes the moving branch");
   // The fleet stage keeps the BRANCH, and that asymmetry is forced: deploy.yml fast-forwards each guest

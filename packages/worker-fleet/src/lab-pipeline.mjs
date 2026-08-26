@@ -112,6 +112,23 @@ export const PIPELINES = {
     what: "re-derive and re-gate the model from the dataset already on disk — no capture, no export",
     jobs: ["train", "shortcuts", "acceptance", "promote"],
   },
+  // PROVE A CORPUS CHANGE ON ONE SUBTYPE BEFORE PAYING FOR THE WHOLE CORPUS.
+  //
+  // A full recapture is ~4 h on this fleet and a corpus change usually targets one subtype's evidence.
+  // Running four hours to discover the fix did not move the number is the wrong order — and it was the
+  // only order available, because `capture` was all-or-nothing.
+  //
+  // So: capture just the cases named by `-e only=`, then run the audits that would SEE the change.
+  // If the audit still reports the same finding, the fix is wrong and it cost minutes. If it clears,
+  // the full `corpus` run is worth starting.
+  //
+  // The audits come after deliberately: a targeted capture that reports success proves only that NVDA
+  // read some pages. Whether the EVIDENCE moved is a different question, and it is the one being asked.
+  verify: {
+    fleet: true,
+    what: "capture one subtype (-e only=<ids>) and re-run the audits that would see the change",
+    jobs: ["capture-only", "grants-audit", "check-signals"],
+  },
   // No capture, so no fleet, so it can run while the boxes are doing something else. This is the cheap
   // pipeline to run after a rule change: everything reads from disk and the venv.
   gates: {
@@ -137,6 +154,18 @@ export const PIPELINES = {
  * into a command a remote shell interprets on the box holding the fleet key, and it becomes `-e ref=` on
  * an Ansible command line here. `;rm -rf /` is inexpressible rather than rejected.
  */
+/** Jobs that accept `-e only=`. Named, so a var cannot be silently ignored by a stage that has no use for it. */
+const TAKES_ONLY = new Set(["capture-only"]);
+
+/**
+ * Case ids, contained by SHAPE — the same rule as `validRef`, and needed for the same reason: this value
+ * becomes an `-e` on an Ansible command line. `lab-job.yml` validates it a second time at the far end,
+ * deliberately, because a malformed id there means capturing the wrong cases rather than none.
+ */
+export function validOnly(only) {
+  return /^[a-z0-9][a-z0-9.+-]{0,80}(,[a-z0-9][a-z0-9.+-]{0,80})*$/.test(String(only));
+}
+
 export function validRef(ref) {
   return /^[0-9a-zA-Z._/-]{1,64}$/.test(String(ref)) && !String(ref).includes("..");
 }
@@ -215,12 +244,34 @@ function stage(label, command, args) {
  * without which the collections path and host-key settings differ. This repo's rule for a fact stated
  * twice is to delete a copy; going through the npm script is how.
  */
-const labJob = (job, ref) =>
-  stage(job, "npm", ["run", "lab:job", "--", "-e", `job=${job}`, "-e", `ref=${ref}`]);
+const labJob = (job, ref, extra = []) =>
+  stage(job, "npm", ["run", "lab:job", "--", "-e", `job=${job}`, "-e", `ref=${ref}`, ...extra]);
 
 const fleetDeploy = (ref) =>
   stage("fleet:deploy — ship this ref to the workers and PROVE it",
     "npm", ["run", "fleet:deploy", "--", `--ref=${ref}`]);
+
+/**
+ * The `--only=` case ids, validated, or a refusal. Extracted because `main` grew past the complexity gate
+ * as flags accumulated — the same signal `fleet-playbook.mjs` got, and the same answer: dispatching a
+ * pipeline and deciding whether its arguments are usable are two things.
+ */
+function caseIds(name, pipeline) {
+  const only = process.argv.find((a) => a.startsWith("--only="))?.slice("--only=".length);
+  if (only !== undefined && !validOnly(only)) {
+    process.stderr.write(`refusing --only=${only}: case ids only, comma-separated.\n`);
+    process.exit(2);
+  }
+  // A pipeline that NEEDS ids and got none would capture the WHOLE corpus — the four hours it exists to
+  // avoid. Refused rather than defaulted, because the default is the expensive direction.
+  if (pipeline.jobs.some((job) => TAKES_ONLY.has(job)) && !only) {
+    process.stderr.write(`pipeline '${name}' needs --only=<case-id[,case-id]> — it captures just those `
+      + "cases to prove a change before the full corpus run. Paste what check-signals or an audit "
+      + "printed.\n");
+    process.exit(2);
+  }
+  return only;
+}
 
 function usage() {
   const names = Object.entries(PIPELINES)
@@ -251,6 +302,8 @@ async function main() {
     process.exit(2);
   }
 
+  const only = caseIds(name, pipeline);
+
   const ref = process.argv.find((a) => a.startsWith("--ref="))?.slice("--ref=".length) ?? localBranch();
   if (!validRef(ref)) {
     process.stderr.write(`refusing --ref=${ref}: a commit or simple branch name only.\n`);
@@ -268,7 +321,11 @@ async function main() {
     ...(pipeline.fleet ? [["fleet:deploy", () => fleetDeploy(ref)]] : []),
     // PINNED, not `ref`. Every lab stage runs at the same commit no matter what lands on the branch while
     // the pipeline is going.
-    ...pipeline.jobs.map((job) => [job, () => labJob(job, pinned)]),
+    // `-e only=` reaches the jobs that take it and nothing else. A pipeline that forwarded every extra
+    // var to every stage would hand `only` to `check-signals`, which does not take it — and Ansible
+    // ignores an unused extra var silently, so the operator would think it had been applied.
+    ...pipeline.jobs.map((job) => [job, () => labJob(job, pinned, TAKES_ONLY.has(job) && only
+      ? ["-e", `only=${only}`] : [])]),
   ];
 
   process.stdout.write(`\n  pipeline: ${name} at ${ref} -> PINNED ${pinned.slice(0, 12)}\n`
