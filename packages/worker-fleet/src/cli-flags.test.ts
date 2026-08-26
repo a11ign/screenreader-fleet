@@ -52,6 +52,8 @@ const GUARDED: Record<string, string> = {
   "packages/lab/src/training/repeat-capture.mjs":
     "`--probe-forms` and `--probe-tables` are how a canary reaches the fields carrying interaction "
     + "evidence, and a canary that cannot express the fault is worthless",
+  "packages/lab/scripts/everything-pipeline.mjs":
+    "hours long and unattended — a mistyped `--dry-run` would run the real thing",
   "packages/lab/src/training/wait-for-capture.mjs":
     "its EXIT CODE is the contract — 0 clean, 1 failures, 2 no run, 3 wedged — so a caller reading it "
     + "has already committed to an output shape, and a mistyped `--json` gives it the other one",
