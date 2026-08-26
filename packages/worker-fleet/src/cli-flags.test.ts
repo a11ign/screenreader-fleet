@@ -183,3 +183,19 @@ test("a new CLI cannot quietly join the unguarded ones", () => {
     "these read argv and neither refuse unknown flags nor appear in UNGUARDED. Guard them "
     + "(preferred — an ignored flag runs the default and reports success), or add them with a reason");
 });
+
+test("CLAUDE.md states the real guarded/unguarded counts", () => {
+  // I updated these numbers by hand three times and TWICE the edit silently did not match, so the doc
+  // said "the five" through several commits that claimed otherwise. A number a human retypes is a number
+  // that drifts; this makes the drift fail rather than sit there being quietly wrong.
+  //
+  // The counts are the point of the sentence — "guarded on 26, 18 remain" is a shrinking gap somebody can
+  // hold to account, and "guarded on the five" describes a repo that no longer exists.
+  const doc = readFileSync(join(REPO, "CLAUDE.md"), "utf8");
+  const stated = doc.match(/Guarded on \*\*(\d+)\*\*/);
+  const remaining = doc.match(/The other\s*\n?\s*\*\*(\d+)\*\* are an `UNGUARDED` list/);
+  assert.ok(stated && remaining,
+    "CLAUDE.md must state both counts as `Guarded on **N**` and `**N** are an `UNGUARDED` list`");
+  assert.equal(Number(stated[1]), Object.keys(GUARDED).length, "CLAUDE.md's guarded count is stale");
+  assert.equal(Number(remaining[1]), UNGUARDED.size, "CLAUDE.md's unguarded count is stale");
+});
