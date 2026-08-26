@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Where the fleet's shell, PowerShell and XML assets live — ONE definition.
  *

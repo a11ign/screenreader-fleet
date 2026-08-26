@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Is a worker healthy, degraded, or unusable — from the vitals it reports.
  *
