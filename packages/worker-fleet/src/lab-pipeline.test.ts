@@ -161,3 +161,72 @@ test("the pin comes from ORIGIN, so it cannot be a stale local ref", () => {
   assert.match(source, /\^\[0-9a-f\]\{40\}\$|\[0-9a-f\]\{40\}/,
     "and must verify origin answered a commit rather than trusting the string");
 });
+
+/**
+ * What each job PRODUCES, declared — because argv cannot be scraped for it.
+ *
+ * My first version of the ordering guard derived producers from `--out=` in each job's argv, and it did
+ * not catch `train` moved ahead of `retrain`: `retrain` delegates to an npm script
+ * (`["/usr/bin/npm","run","lab:retrain"]`), so the artifact it writes appears nowhere in its argv. A
+ * guard that reads the command line can only see jobs that name a binary, which is a subset that happens
+ * to exclude the composite jobs an ordering error is most likely to involve.
+ *
+ * So production is DECLARED and consumption is derived. That asymmetry is deliberate: consumption really
+ * is visible in argv (`--data <path>`), and declaring both would be two lists to keep in step.
+ * `producesSomething` below fails if a declared producer stops existing, so this cannot rot silently.
+ */
+const PRODUCES: Record<string, string> = {
+  retrain: "runs/screenreader-dataset/with-realism.jsonl",
+  "build-realism": "runs/screenreader-dataset/with-realism.jsonl",
+  export: "runs/screenreader-dataset/screenreader-evidence.jsonl",
+  "export-test": "runs/screenreader-dataset/screenreader-evidence.jsonl",
+  "export-acceptance": "runs/screenreader-acceptance/repeat-1.jsonl",
+};
+
+test("every declared producer is a real job, so this list cannot rot", () => {
+  for (const job of Object.keys(PRODUCES)) {
+    assert.ok(Object.hasOwn(JOBS, job), `${job} is declared to produce an artifact and is not a job`);
+  }
+});
+
+test("no stage consumes a dataset an EARLIER stage has not produced", () => {
+  // A 13-stage pipeline that fails at stage 4 because its input does not exist has burned three stages —
+  // and for `full` the first of those is a multi-hour capture. Ordering is the one property a long chain
+  // has that a single job does not, and nothing asserted it.
+  const consumers = new Map<string, string[]>();
+  for (const [name, job] of Object.entries(JOBS)) {
+    const argv = JSON.stringify(job.argv ?? "");
+    for (const match of argv.matchAll(/runs\/[a-z0-9/-]+\.jsonl/g)) {
+      const artifact = match[0];
+      if (PRODUCES[name] === artifact) continue;   // its own output is not a dependency
+      consumers.set(name, [...(consumers.get(name) ?? []), artifact]);
+    }
+  }
+  assert.ok(consumers.size > 2, "no consumers found; the argv shape changed and this guard is blind");
+
+  // Flattened into a helper rather than three nested loops: `max-depth` flagged it, and the gate was
+  // right — the ordering question is about ONE pipeline, and saying so makes it readable.
+  const outOfOrder = (pipelineName: string, jobs: string[]): string[] => {
+    const produced = new Set<string>();
+    const problems: string[] = [];
+    for (const job of jobs) {
+      // Only an artifact this pipeline produces ITSELF is ordered by it. One produced by an earlier run
+      // is a precondition, not an ordering error — `gates` deliberately reads a corpus already on disk,
+      // which is why it needs no fleet.
+      const missing = (consumers.get(job) ?? [])
+        .filter((artifact) => jobs.some((candidate) => PRODUCES[candidate] === artifact))
+        .filter((artifact) => !produced.has(artifact));
+      for (const artifact of missing) {
+        const producer = jobs.find((candidate) => PRODUCES[candidate] === artifact);
+        problems.push(`pipeline '${pipelineName}' runs '${job}', which reads ${artifact}, before `
+          + `'${producer}' which writes it — it would fail there having paid for the stages before it.`);
+      }
+      if (PRODUCES[job]) produced.add(PRODUCES[job]);
+    }
+    return problems;
+  };
+
+  const problems = Object.entries(PIPELINES)
+    .flatMap(([pipelineName, pipeline]) => outOfOrder(pipelineName, pipeline.jobs));
+  assert.deepEqual(problems, []);
+});
