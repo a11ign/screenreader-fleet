@@ -163,7 +163,7 @@ const TAKES_ONLY = new Set(["capture-only"]);
  * deliberately, because a malformed id there means capturing the wrong cases rather than none.
  */
 export function validOnly(only) {
-  return /^[a-z0-9][a-z0-9.+-]{0,80}(,[a-z0-9][a-z0-9.+-]{0,80})*$/.test(String(only));
+  return /^[a-z0-9][a-z0-9.+-]{0,80}\+?(,[a-z0-9][a-z0-9.+-]{0,80}\+?)*$/.test(String(only));
 }
 
 export function validRef(ref) {
