@@ -273,6 +273,19 @@
       export-acceptance:
         argv: ["/usr/bin/npm", "run", "training:export-acceptance:all"]
         timeout: 1800
+      # EXPORT FOR A TEST, accepting captures whose page has moved.
+      #
+      # The normal export drops a capture that does not describe the current page, which is right for a
+      # release and wrong for a question. Measured 2026-08-26: a corpus change left 1,082 of 1,401 pairs
+      # stale, so an export produced 319 and a retrain on it would have been a worse model that every gate
+      # scored as whole. The only way to ask "did the fix work?" was to spend four hours first.
+      #
+      # The model this produces is structurally unpromotable: every record is stamped `grade: "test"`, the
+      # trainer sets releaseEligible False at initialisation and says why, and promote-model refuses a
+      # model that is not eligible. Three gates, none of them a comment.
+      export-test:
+        argv: ["/usr/bin/npm", "run", "training:export:test"]
+        timeout: 900
       # Cheap, and here because it is a STEP rather than a check: it rewrites the labels every later stage
       # reads, and it silently used a stale manifest twice in one session before the drift guard existed.
       export:
