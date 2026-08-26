@@ -150,8 +150,9 @@
                           | dict2items
                           | selectattr('key', 'in', job | default(''))
                           | map(attribute='value')
-                          | first
-                          | default('runs/screenreader-dataset') }}"
+                          | list
+                          | default(['runs/screenreader-dataset'], true)
+                          | first }}"
       vars:
         # Keyed on a substring of the JOB NAME, longest-first so `capture-acceptance` cannot match the
         # bare `capture` entry. Anything unmatched is the training corpus, which is what most jobs read.

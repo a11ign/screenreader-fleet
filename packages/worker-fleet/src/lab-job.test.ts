@@ -631,3 +631,30 @@ test("a fleet play waits for a guest to come back before calling it unreachable"
     }
   }
 });
+
+test("a filter that can return nothing is defaulted BEFORE it is indexed", () => {
+  // `regex_search` returns None when it does not match, and `None | first` throws. The refusal that
+  // catches a lab running at the wrong commit did exactly that:
+  //
+  //     regex_search('a11y-job-([a-z0-9-]+)\.service', '\1') | first | default('<name>')
+  //
+  // The default came AFTER `first`, so it never got the chance. The guard FIRED correctly — the lab was
+  // four commits behind — and then crashed building its own explanation, so the operator saw a Jinja
+  // traceback instead of "the lab is at X, you asked for Y". I read the previous run's log as current
+  // because of it, which is the misdiagnosis this repo lists first.
+  //
+  // A guard whose MESSAGE cannot render is worse than no guard: it stops the job and tells you nothing,
+  // and the natural response is to distrust the guard.
+  const raw = read("tasks/run-job.yml") + read("lab-status.yml") + read("lab-log.yml");
+  const expressions = [...raw.matchAll(/\{\{[\s\S]*?\}\}/g)].map((match) => match[0]);
+  assert.ok(expressions.length > 10, "found too few expressions; the scan is broken");
+  for (const expression of expressions) {
+    const flat = expression.replace(/\s+/g, " ");
+    // Every point where a possibly-null filter is followed by one that indexes into it.
+    const risky = /(regex_search|regex_findall|selectattr|map)\([^)]*\)\s*\|\s*(first|last)\b/;
+    if (!risky.test(flat)) continue;
+    assert.match(flat, /\|\s*default\([^)]*\)\s*\|\s*(first|last)\b/,
+      `this indexes a filter that can return nothing without defaulting FIRST, so a non-match throws `
+      + `while rendering the message: ${flat.slice(0, 120)}`);
+  }
+});

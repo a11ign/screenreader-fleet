@@ -312,8 +312,8 @@
       four commits behind reports success for code you did not ask for.
       {{ 'THIS ONE CLEARS ITSELF: the other job holds the checkout only while it runs, so re-dispatch when
           it finishes. Watch it with `npm run lab:status -- -e job=' ~
-          ((lab_other_jobs.stdout | trim | regex_search('a11y-job-([a-z0-9-]+)\\.service', '\\1') | first)
-           | default('<name>')) ~ '`.'
+          ((lab_other_jobs.stdout | trim | regex_search('a11y-job-([a-z0-9-]+)\\.service', '\\1')
+            | default([], true) | first | default('<name>', true))) ~ '`.'
          if (lab_other_jobs.stdout | default('') | trim) != ''
          else 'This one needs a decision: the checkout will stay this way until somebody commits or reverts
                what is in it.' }}
