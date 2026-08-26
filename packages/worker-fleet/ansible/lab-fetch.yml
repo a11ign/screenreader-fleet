@@ -59,6 +59,12 @@
       # Read-only and enumerated like every other entry. Binary, so `fetch` handles it; the checksum is
       # verified by Ansible on arrival, which matters more here than for a report.
       promoted-weights: "packages/scorer/models/screenreader-scorer/model.safetensors"
+      # THE CHANGESET THE PROMOTION WROTE, which is the only record of WHY those weights moved and what
+      # version bump they imply. It was the one promotion output that could not be fetched, so bringing a
+      # release back meant reconstructing its changeset by hand — a second spelling of the release note,
+      # written by whoever happened to be doing it. The name is fixed by `promote:model`; `out` selects
+      # which candidate produced it, exactly as the reports above do.
+      promoted-changeset: ".changeset/promote-{{ out | default('candidate') }}-4.md"
       promoted-training-report: "packages/scorer/models/screenreader-scorer/training-report.json"
       promoted-acceptance-report: "packages/scorer/models/screenreader-scorer/acceptance-report.json"
       acceptance-records: "runs/screenreader-acceptance/{{ repeat | default('repeat-1') }}.jsonl"
@@ -91,11 +97,16 @@
     # The extension comes from the SOURCE, not from a hardcoded `.json`. Every artifact was JSON until
     # `promoted-weights` (a safetensors binary), and writing that as `.json` would name a file after a
     # format it is not — the sort of quiet wrongness that survives until somebody parses it.
+    #
+    # TAKEN from the source path rather than special-cased, because the special case was already wrong the
+    # first time a THIRD format appeared: `promoted-changeset` is markdown and landed as `.json`. A
+    # two-way `if` over an open set is a list that has to be remembered, which is this repo's definition
+    # of a rule that gets broken.
     - name: Name it after what it actually is
       ansible.builtin.set_fact:
         lab_fetch_dest: >-
-          {{ playbook_dir }}/../../../runs/fetched/{{ out | default('candidate') }}.{{ artifact }}{{
-             '.safetensors' if lab_artifacts[artifact].endswith('.safetensors') else '.json' }}
+          {{ playbook_dir }}/../../../runs/fetched/{{ out | default('candidate') }}.{{ artifact
+             }}{{ (lab_artifacts[artifact] | splitext)[1] | default('.json', true) }}
 
     - name: Write it locally
       ansible.builtin.copy:
