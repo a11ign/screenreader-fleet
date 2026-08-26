@@ -315,6 +315,26 @@
       acceptance-shipped-copy:
         argv: ["/usr/bin/npm", "run", "--silent", "training:evaluate-acceptance:shipped"]
         timeout: 1800
+      # THE WHOLE CHAIN AS ONE SUPERVISED UNIT — corpus, model and gates, inside systemd.
+      #
+      # `lab:pipeline` sequences the same stages and it runs on a LAPTOP: each stage is a supervised job,
+      # and the thing deciding what comes next is a node process on a developer's machine. Measured
+      # 2026-08-26 — five local watchers were killed during one capture. Each time the systemd unit
+      # survived exactly as designed and the ORCHESTRATION did not, so the stages after it never started.
+      #
+      # As a job this is one unit: it survives the ssh connection, the playbook, and the laptop. If the
+      # local wait dies, `lab:status -e job=everything` still finds it running and `lab:log` still reads
+      # what it said. That is the same argument ADR 0013 makes for jobs over shell commands, applied one
+      # level up to the thing that sequences them.
+      #
+      # `lab:pipeline` stays and is still the right tool for a SHORT chain you want to watch — it prints
+      # per-stage boundaries live, which a single unit cannot. This is for the long unattended one.
+      everything:
+        argv: ["/usr/bin/npm", "run", "--silent", "lab:everything"]
+        setenv: ["A11Y_WORKERS={{ lab_fleet_workers }}"]
+        # Above a full recapture plus a train plus every gate, because a ceiling that expires early turns
+        # "still working" into "failed" — and this is the most expensive unit in the catalogue to lose.
+        timeout: 50400
       # THE COMPOSITE, and the only entry that delegates to an npm script rather than naming a binary.
       #
       # That is deliberate: `release:gate` IS the ordering -- isolation, then signals, then rules, then
