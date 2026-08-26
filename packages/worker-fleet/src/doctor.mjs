@@ -19,6 +19,15 @@ import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers } from "./fleet-env.mjs";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * a mistyped `--json` prints for a human where a script expected a machine-readable answer, and the
+ * caller parses the prose.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--json"], { command: "npm run doctor" });
 
 const run = promisify(execFile);
 const JSON_OUT = process.argv.includes("--json");

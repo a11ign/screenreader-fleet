@@ -31,9 +31,17 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
  * flag list was read out of each file rather than derived. `UNGUARDED` below is the rest, listed so the
  * gap is countable instead of invisible.
  */
+/** Shared by the `--json` reporters, whose only flag is the one that decides who the output is for. */
+const JSON_REPORTER =
+  "a mistyped `--json` prints for a human where a script expected a machine-readable answer, and the "
+  + "caller then parses the prose";
+
 const GUARDED: Record<string, string> = {
   "packages/lab/src/training/capture-screenreader-dataset.mjs":
     "a typo costs a full corpus run — `--resmue` silently means a fresh capture of 1,061 pairs",
+  "packages/lab/src/training/capture-real-pages.mjs":
+    "THE script that ran four shards against `--worker=http://:8765` for 29 minutes. Its `--shard=` "
+    + "arrives through `parseShard`, so a regex over this file would not find it",
   "packages/worker-fleet/src/lab-pipeline.mjs":
     "a mistyped `--ref=` falls back to the local branch, which is how the fleet and the lab came to be "
     + "on different commits, failing with a hash mismatch that reads like a corrupted checkout",
@@ -44,7 +52,15 @@ const GUARDED: Record<string, string> = {
   "packages/lab/src/training/repeat-capture.mjs":
     "`--probe-forms` and `--probe-tables` are how a canary reaches the fields carrying interaction "
     + "evidence, and a canary that cannot express the fault is worthless",
+  "packages/lab/src/training/wait-for-capture.mjs":
+    "its EXIT CODE is the contract — 0 clean, 1 failures, 2 no run, 3 wedged — so a caller reading it "
+    + "has already committed to an output shape, and a mistyped `--json` gives it the other one",
+  "packages/worker-fleet/src/doctor.mjs": JSON_REPORTER,
+  "packages/worker-fleet/src/fleet-status.mjs": JSON_REPORTER,
+  "packages/lab/src/training/capture-status.mjs": JSON_REPORTER,
+  "packages/lab/scripts/lab-inventory.mjs": JSON_REPORTER,
 };
+
 
 /**
  * Not yet guarded. THIS LIST MAY ONLY SHRINK.
@@ -55,29 +71,19 @@ const GUARDED: Record<string, string> = {
  */
 const UNGUARDED = new Set([
   "packages/lab/scripts/audit-corpus-starvation.mjs", "packages/lab/scripts/audit-size-sensitivity.mjs",
-  "packages/lab/scripts/bench-capture.mjs", "packages/lab/scripts/build-realism-tier.mjs",
-  "packages/lab/scripts/calibrate-abstention.mjs", "packages/lab/scripts/compare-layers.mjs",
-  "packages/lab/scripts/corpus-backup.mjs", "packages/lab/scripts/corpus-snapshot.mjs",
-  "packages/lab/scripts/emit-grants-map.mjs", "packages/lab/scripts/evidence-check.mjs",
-  "packages/lab/scripts/explain-scorer.mjs", "packages/lab/scripts/lab-inventory.mjs",
-"packages/lab/scripts/retrain-pipeline.mjs",
-  "packages/lab/scripts/stability-gate.mjs", "packages/lab/scripts/verify-safetensors.mjs",
+  "packages/lab/scripts/bench-capture.mjs", "packages/lab/scripts/build-realism-tier.mjs", "packages/lab/scripts/calibrate-abstention.mjs",
+  "packages/lab/scripts/compare-layers.mjs", "packages/lab/scripts/corpus-backup.mjs", "packages/lab/scripts/corpus-snapshot.mjs",
+  "packages/lab/scripts/emit-grants-map.mjs", "packages/lab/scripts/evidence-check.mjs", "packages/lab/scripts/explain-scorer.mjs",
+  "packages/lab/scripts/retrain-pipeline.mjs", "packages/lab/scripts/stability-gate.mjs", "packages/lab/scripts/verify-safetensors.mjs",
   "packages/lab/src/harnesses/assert-action-report.mjs", "packages/lab/src/harnesses/capture-check.mjs",
-  "packages/lab/src/harnesses/capture-fixtures.mjs",
-  "packages/lab/src/harnesses/occurrence-verdict-stability.mjs",
-  "packages/lab/src/harnesses/page-identity-rate.mjs",
-  "packages/lab/src/training/capture-real-pages.mjs", "packages/lab/src/training/capture-status.mjs",
-  "packages/lab/src/training/export-screenreader-dataset.mjs",
-  "packages/lab/src/training/generate-screenreader-acceptance.mjs",
-  "packages/lab/src/training/generate-screenreader-dataset.mjs",
-  "packages/lab/src/training/preflight-screenreader-dataset.mjs",
-  "packages/lab/src/training/wait-for-capture.mjs",
-  "packages/worker-fleet/src/check-worker-code.mjs", "packages/worker-fleet/src/compare-workers.mjs",
-  "packages/worker-fleet/src/deploy-worker.mjs", "packages/worker-fleet/src/doctor.mjs",
+  "packages/lab/src/harnesses/capture-fixtures.mjs", "packages/lab/src/harnesses/occurrence-verdict-stability.mjs",
+  "packages/lab/src/harnesses/page-identity-rate.mjs", "packages/lab/src/training/export-screenreader-dataset.mjs",
+  "packages/lab/src/training/generate-screenreader-acceptance.mjs", "packages/lab/src/training/generate-screenreader-dataset.mjs",
+  "packages/lab/src/training/preflight-screenreader-dataset.mjs", "packages/worker-fleet/src/check-worker-code.mjs",
+  "packages/worker-fleet/src/compare-workers.mjs", "packages/worker-fleet/src/deploy-worker.mjs",
   "packages/worker-fleet/src/fleet-discover.mjs", "packages/worker-fleet/src/fleet-env.mjs",
-  "packages/worker-fleet/src/fleet-playbook.mjs", "packages/worker-fleet/src/fleet-status.mjs",
-  "packages/worker-fleet/src/fleet-wake.mjs", "packages/worker-fleet/src/guest-run.mjs",
-  "packages/worker-fleet/src/normalise-fleet.mjs",
+  "packages/worker-fleet/src/fleet-playbook.mjs", "packages/worker-fleet/src/fleet-wake.mjs",
+  "packages/worker-fleet/src/guest-run.mjs", "packages/worker-fleet/src/normalise-fleet.mjs",
 ]);
 
 /** Does this file take a command line? The guard itself reads argv, and is the implementation. */

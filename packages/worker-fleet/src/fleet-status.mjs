@@ -39,6 +39,14 @@ import { configuredWorkers, workersFromInventory, workerNamesFromInventory, port
   from "./fleet-env.mjs";
 import { assessWorker } from "./worker-health.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * as `doctor`.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--json"], { command: "npm run fleet:status" });
 
 /** Short: a status table is unreadable if one slow box holds it up. */
 const PROBE_TIMEOUT_MS = 5_000;
