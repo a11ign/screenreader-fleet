@@ -119,6 +119,72 @@
       register: after
       changed_when: false
 
+    - name: Remove untracked files that ORIGIN already carries
+      # `git checkout --` restores tracked files and cannot touch an untracked one, so a changeset written
+      # by `promote:gated` survived every reset and went on blocking `git pull` — the exact condition this
+      # play exists to clear. Measured 2026-08-26: three resets in a row reported SAFE, cleaned the tracked
+      # weights, and left `.changeset/promote-candidate-3.md` behind.
+      #
+      # Same containment as above and it matters more here, because removal has no undo: a path is deleted
+      # ONLY if origin has a file at that path, so the copy being removed is recoverable by pulling. An
+      # untracked file origin has never seen is somebody's work and is left alone.
+      when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
+      ansible.builtin.shell:
+        cmd: >-
+          git status --porcelain | awk '/^\?\?/ {print $2}' |
+          while read -r path; do
+            if git cat-file -e origin/{{ ref | default('main') }}:"$path" 2>/dev/null; then
+              rm -f -- "$path" && echo "removed $path"
+            else
+              echo "kept $path (origin has never seen it)"
+            fi
+          done
+        chdir: "{{ lab_repo_path }}"
+      register: untracked
+      changed_when: "'removed ' in (untracked.stdout | default(''))"
+
+    - name: A named removal must be a plain path inside the checkout
+      when: remove is defined
+      ansible.builtin.assert:
+        that:
+          - remove is match('^[A-Za-z0-9._/-]{1,120}$')
+          - "'..' not in remove"
+        fail_msg: "-e remove= must be a plain relative path; globs and traversal are not expressible."
+
+    - name: Remove a named untracked path, having looked at it
+      # The escape hatch for the case the comparison above cannot settle: an untracked file origin has
+      # never seen might be somebody's work or might be an artefact a job wrote, and only a human who has
+      # READ it can tell. Measured 2026-08-26: `promote:gated` writes a changeset each time it runs, and
+      # one superseded by a hand-written changeset blocked every pull while being safe to delete.
+      #
+      # Named explicitly, one path, never a glob — so this cannot become a `clean -fd` that takes work
+      # with it. The path must still be untracked, which is checked rather than trusted.
+      # NOT gated on the tree being dirty overall. A lone untracked file leaves `git status --porcelain`
+      # non-empty but the TRACKED files clean, and the first version's `when: dirty != ''` still held —
+      # until an earlier reset cleaned the tracked half, after which every task skipped and the play
+      # reported "STILL DIRTY" about a file it had just declined to look at. A task gated on a condition
+      # unrelated to what it does is a task that silently does nothing.
+      when: remove is defined and (apply | default(false) | bool)
+      ansible.builtin.shell:
+        # A BLOCK scalar (`|`), never `>-`. Folding joins the lines, so the `if/else` became three
+        # sequential statements and the refusal branch ran unconditionally — measured here, and the same
+        # trap `lab-log.yml` hit an hour earlier with a pipeline. Multi-line shell needs `|`.
+        cmd: |
+          if git status --porcelain -- "{{ remove }}" | grep -q '^??'; then
+            rm -f -- "{{ remove }}" && echo "removed {{ remove }}"
+          else
+            echo "REFUSED: {{ remove }} is not an untracked file"
+            exit 1
+          fi
+        chdir: "{{ lab_repo_path }}"
+      register: removed_named
+      changed_when: "'removed ' in (removed_named.stdout | default(''))"
+
+    - name: Say what happened to the untracked files
+      when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
+      ansible.builtin.debug:
+        var: untracked.stdout_lines
+
     - name: Say what is left
       when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
       ansible.builtin.debug:
