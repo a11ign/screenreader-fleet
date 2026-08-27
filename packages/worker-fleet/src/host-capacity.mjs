@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * How many worker VMs will actually fit on this Mac?
  *
@@ -80,6 +81,7 @@ export function availableHostMemoryMb() {
     const output = execFileSync("vm_stat", { encoding: "utf8", timeout: 5_000 });
     const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
     if (!Number.isFinite(pageSize)) return null;
+    /** @param {string} label */
     const pagesFor = (label) =>
       Number(new RegExp(`Pages ${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
     const pages = pagesFor("free") + pagesFor("inactive") + pagesFor("speculative") + pagesFor("purgeable");

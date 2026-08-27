@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * This host's address as a WORKER sees it — one definition, because there were five.
  *
@@ -31,6 +32,7 @@ import { networkInterfaces } from "node:os";
 const IPV4_OCTETS = 4;
 
 /** Dotted quad to a comparable integer, or null if it is not one (a hostname, IPv6, nonsense). */
+/** @param {string} ip */
 export function ipv4ToInt(ip) {
   const parts = String(ip).split(".").map(Number);
   if (parts.length !== IPV4_OCTETS || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;

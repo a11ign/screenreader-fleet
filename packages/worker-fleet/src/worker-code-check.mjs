@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Is the fleet running the code this checkout expects — asked BEFORE a capture run, not after it.
  *
@@ -174,6 +175,7 @@ export function describeCodeDrift(drift, { when = "before the run", bareMetalUrl
 }
 
 /** What a single worker is serving, or `null` when it did not answer. */
+/** @param {string} url */
 export async function readWorkerCode(url) {
   try {
     const response = await fetch(`${String(url).replace(/\/$/, "")}/health`, {

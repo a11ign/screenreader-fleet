@@ -1,3 +1,4 @@
+// @ts-check
 // Bring every local guest to the same baseline, elevated, and prove it took.
 //
 //   npm run fleet:normalise
@@ -57,7 +58,7 @@ async function main() {
       process.stdout.write(out);
     } catch (error) {
       failures.push(vm.name);
-      process.stdout.write(`==> ${vm.name}: FAILED — ${error.message.split("\n")[0]}\n`);
+      process.stdout.write(`==> ${vm.name}: FAILED — ${(error instanceof Error ? error.message : String(error)).split("\n")[0]}\n`);
     }
   }
 
