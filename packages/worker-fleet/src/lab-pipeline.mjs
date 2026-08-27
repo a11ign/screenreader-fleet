@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Produce evidence and prove it, as ONE command instead of six typed in the right order.
  *
@@ -224,10 +225,12 @@ const TAKES_ONLY = new Set(["capture-only"]);
  * becomes an `-e` on an Ansible command line. `lab-job.yml` validates it a second time at the far end,
  * deliberately, because a malformed id there means capturing the wrong cases rather than none.
  */
+/** @param {string} only */
 export function validOnly(only) {
   return /^[a-z0-9][a-z0-9.+-]{0,80}\+?(,[a-z0-9][a-z0-9.+-]{0,80}\+?)*$/.test(String(only));
 }
 
+/** @param {string} ref */
 export function validRef(ref) {
   return /^[0-9a-zA-Z._/-]{1,64}$/.test(String(ref)) && !String(ref).includes("..");
 }
@@ -249,6 +252,7 @@ const localBranch = () =>
  * remote already had — and `run-job.yml`'s commit refusal then fires at the far end, after the fleet has
  * been deployed and rebooted. Measured today: four boxes rebooted for a ref nobody had pushed.
  */
+/** @param {string} ref */
 function resolveOnOrigin(ref) {
   const remote = execFileSync("git", ["ls-remote", "--heads", "--tags", "origin", ref],
     { encoding: "utf8" }).trim();
@@ -288,6 +292,7 @@ function resolveOnOrigin(ref) {
  */
 
 /** One stage, run to completion, with its exit status READ rather than piped away. */
+/** @param {string} label @param {string} command @param {string[]} args */
 function stage(label, command, args) {
   process.stdout.write(`\n${"=".repeat(78)}\n  ${label}\n  ${command} ${args.join(" ")}\n${"=".repeat(78)}\n`);
   // `spawnSync` with inherited stdio, never a pipe. This repo has masked a real `ANSIBLE_EXIT=2` twice in
@@ -306,10 +311,10 @@ function stage(label, command, args) {
  * without which the collections path and host-key settings differ. This repo's rule for a fact stated
  * twice is to delete a copy; going through the npm script is how.
  */
-const labJob = (job, ref, extra = []) =>
+const labJob = (/** @type {string} */ job, /** @type {string} */ ref, /** @type {string[]} */ extra = []) =>
   stage(job, "npm", ["run", "lab:job", "--", "-e", `job=${job}`, "-e", `ref=${ref}`, ...extra]);
 
-const fleetDeploy = (ref) =>
+const fleetDeploy = (/** @type {string} */ ref) =>
   stage("fleet:deploy — ship this ref to the workers and PROVE it",
     "npm", ["run", "fleet:deploy", "--", `--ref=${ref}`]);
 
@@ -318,6 +323,7 @@ const fleetDeploy = (ref) =>
  * as flags accumulated — the same signal `fleet-playbook.mjs` got, and the same answer: dispatching a
  * pipeline and deciding whether its arguments are usable are two things.
  */
+/** @param {string} name @param {Record<string, any>} pipeline */
 function caseIds(name, pipeline) {
   const only = process.argv.find((a) => a.startsWith("--only="))?.slice("--only=".length);
   if (only !== undefined && !validOnly(only)) {
@@ -358,7 +364,10 @@ async function main() {
     process.stderr.write(usage());
     process.exit(2);
   }
-  const pipeline = PIPELINES[name];
+  // Indexed by a name that came off the command line, which is the whole reason the refusal below
+  // exists. The inferred type admits only the seven keys, so the lookup that CHECKS for an eighth is
+  // itself the error -- a check must be able to express the case it is checking for.
+  const pipeline = /** @type {Record<string, any>} */ (PIPELINES)[name];
   if (!pipeline) {
     process.stderr.write(`refusing --pipeline=${name}: one of ${Object.keys(PIPELINES).join(", ")}.\n`);
     process.exit(2);
@@ -375,7 +384,7 @@ async function main() {
   try {
     pinned = resolveOnOrigin(ref);
   } catch (error) {
-    process.stderr.write(`${error.message}\n`);
+    process.stderr.write(`${/** @type {Error} */ (error).message}\n`);
     process.exit(2);
   }
 
@@ -386,7 +395,7 @@ async function main() {
     // `-e only=` reaches the jobs that take it and nothing else. A pipeline that forwarded every extra
     // var to every stage would hand `only` to `check-signals`, which does not take it — and Ansible
     // ignores an unused extra var silently, so the operator would think it had been applied.
-    ...pipeline.jobs.map((entry) => {
+    ...pipeline.jobs.map((/** @type {Record<string, any>} */ entry) => {
       // A stage is either a bare job name or `{ job, vars }` — the second form exists because one job can
       // need running more than once with different parameters, and a pipeline that cannot say so pushes
       // that knowledge back into the operator's head, which is what this file exists to stop.

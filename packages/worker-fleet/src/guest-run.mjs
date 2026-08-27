@@ -1,3 +1,4 @@
+// @ts-check
 // Run a script on a guest, elevated, and get its output back.
 //
 //   node packages/worker-fleet/src/guest-run.mjs <vm-name> <local-script.cmd> [--timeout=600]
@@ -57,6 +58,7 @@ const POLL_MS = 5_000;
  * Built as a single string on purpose -- see trap 1 above. Exported so the quoting is testable without
  * a guest, because it is the part that silently produces wrong answers rather than errors.
  */
+/** @param {{ scriptPath: string, taskName?: string }} where */
 export function scheduleCommand({ scriptPath, taskName = TASK_NAME }) {
   return `schtasks /create /tn ${taskName} /tr "${scriptPath}" /sc once /st 00:00 ` +
     `/ru SYSTEM /rl HIGHEST /f >nul 2>&1 & schtasks /run /tn ${taskName} >nul 2>&1`;
@@ -68,23 +70,27 @@ export function scheduleCommand({ scriptPath, taskName = TASK_NAME }) {
  * Without this there is no way to distinguish "still running" from "died on line one" -- which is
  * exactly how a trim that crashed immediately looked identical to a trim in progress, for three boots.
  */
+/** @param {string} body @param {string} outputFile */
 export function wrapScript(body, outputFile) {
   const lines = [
     "@echo off",
     `cd /d ${GUEST_DIR}`,
     `set OUT=${outputFile}`,
     `> ${outputFile} echo === guest-run ===`,
-    ...body.split(/\r?\n/).filter((l) => !/^@echo off\s*$/i.test(l)).map((l) => l.trimEnd()),
+    ...body.split(/\r?\n/).filter((/** @type {string} */ l) => !/^@echo off\s*$/i.test(l)).map((/** @type {string} */ l) => l.trimEnd()),
     `>> ${outputFile} echo ${DONE_SENTINEL}`,
   ];
   return lines.join("\r\n") + "\r\n";
 }
 
 /** Did the run finish? Exported because "no sentinel" and "no file" are different failures. */
+/** @param {string} output */
+/** @param {string | null} output */
 export function isComplete(output) {
   return typeof output === "string" && output.includes(DONE_SENTINEL);
 }
 
+/** @param {string} vmName */
 async function uuidFor(vmName) {
   const { stdout } = await run(UTMCTL, ["list"]);
   const line = stdout.split("\n").find((l) => l.trim().endsWith(` ${vmName}`) || l.trim().endsWith(`\t${vmName}`));
@@ -93,14 +99,16 @@ async function uuidFor(vmName) {
   return uuid;
 }
 
+/** @param {string} uuid @param {string} guestPath @param {string} localPath @returns {Promise<void>} */
 function push(uuid, guestPath, localPath) {
   return new Promise((done, fail) => {
     const child = execFile(UTMCTL, ["file", "push", uuid, guestPath], (error) =>
-      error ? fail(new Error(`push failed: ${error.message}`)) : done());
-    createReadStream(localPath).pipe(child.stdin);
+      error ? fail(new Error(`push failed: ${/** @type {Error} */ (error).message}`)) : done());
+    if (child.stdin) createReadStream(localPath).pipe(child.stdin);
   });
 }
 
+/** @param {string} uuid @param {string} guestPath */
 async function pull(uuid, guestPath) {
   try {
     const { stdout } = await run(UTMCTL, ["file", "pull", uuid, guestPath], { maxBuffer: 1 << 24 });
@@ -143,7 +151,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, POLL_MS));
     const output = await pull(uuid, guestOutput);
     if (isComplete(output)) {
-      process.stdout.write(output.replace(DONE_SENTINEL, "").trimEnd() + "\n");
+      process.stdout.write((output ?? "").replace(DONE_SENTINEL, "").trimEnd() + "\n");
       process.stdout.write("    done\n");
       return;
     }

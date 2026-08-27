@@ -1,3 +1,4 @@
+// @ts-check
 // Deploy the worker's code to the guests, in one command, and prove it landed.
 //
 //   node scripts/deploy-worker.mjs              # every local worker VM, one at a time
@@ -95,9 +96,10 @@ function localVersion() {
 async function pool() {
   const { stdout } = await run(CTL, ["pool"], { timeout: POOL_TIMEOUT_MS, encoding: "utf8" });
   const all = JSON.parse(stdout);
-  return only ? all.filter((vm) => vm.name === only) : all;
+  return only ? all.filter((/** @type {{ name: string }} */ vm) => vm.name === only) : all;
 }
 
+/** @param {string} action @param {string} vmName */
 function ctl(action, vmName) {
   return run(CTL, [action], {
     timeout: LIFECYCLE_TIMEOUT_MS, encoding: "utf8",
@@ -109,14 +111,16 @@ function ctl(action, vmName) {
  * Push one file. `utmctl file push` reads the content from stdin, which execFile cannot stream, so the
  * child is spawned and the file piped in.
  */
+/** @param {string} uuid @param {string} file @returns {Promise<void>} */
 function push(uuid, file) {
   return new Promise((done, fail) => {
     const child = execFile("utmctl", ["file", "push", uuid, `${GUEST_DIR}\\${file}`], (error) =>
-      error ? fail(new Error(`push ${file}: ${error.message}`)) : done());
-    createReadStream(resolve(NVDA_DIR, file)).pipe(child.stdin);
+      error ? fail(new Error(`push ${file}: ${/** @type {Error} */ (error).message}`)) : done());
+    if (child.stdin) createReadStream(resolve(NVDA_DIR, file)).pipe(child.stdin);
   });
 }
 
+/** @param {string} ip @param {number} port */
 async function healthCode(ip, port) {
   const response = await fetch(`http://${ip}:${port}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`HTTP ${response.status} from /health`);
@@ -141,6 +145,7 @@ const VERIFY_POLL_MS = 10_000;
  * times measured on this fleet run from 30 s to 147 s depending on how much Edge-profile hygiene the guest has
  * to do first, so the budget is well above the slowest honest answer.
  */
+/** @param {string} ip @param {number} port */
 async function healthCodeWhenAwake(ip, port) {
   const deadline = Date.now() + VERIFY_BUDGET_MS;
   let last = "no answer";
@@ -169,16 +174,18 @@ async function healthCodeWhenAwake(ip, port) {
  * Bounded and non-fatal: if it never settles we continue and let the next deploy report its own failure,
  * because a deploy that hangs forever is worse than one that reports a stale worker.
  */
+/** @param {string} name @param {number} [limitMs] */
 async function waitUntilSettled(name, limitMs = 120_000) {
   const deadline = Date.now() + limitMs;
   while (Date.now() < deadline) {
-    const vm = (await pool()).find((v) => v.name === name);
+    const vm = (await pool()).find((/** @type {{ name: string }} */ v) => v.name === name);
     if (!vm || vm.state !== "stopping") return;
     await new Promise((resolve) => setTimeout(resolve, 5_000));
   }
   process.stdout.write(`  note: ${name} is still stopping; continuing anyway\n`);
 }
 
+/** @param {Record<string, any>} vm @param {string[]} files @param {string} expected */
 async function deployTo(vm, files, expected) {
   process.stdout.write(`\n=== ${vm.name} ===\n`);
   // Push needs the guest running; the reboot afterwards is what actually loads the new code.
@@ -198,7 +205,7 @@ async function deployTo(vm, files, expected) {
   // sent me looking to rebuild one that boots to ready in 33 s.
   try {
     const fresh = await pool();
-    const back = fresh.find((v) => v.name === vm.name);
+    const back = fresh.find((/** @type {{ name: string }} */ v) => v.name === vm.name);
     if (!back?.ip) throw new Error(`${vm.name} did not come back with an address`);
     const actual = await healthCodeWhenAwake(back.ip, back.port);
     const ok = actual === expected;
@@ -288,7 +295,7 @@ async function main() {
     try {
       if (!await deployTo(vm, files, expected)) failed.push(vm.name);
     } catch (error) {
-      process.stdout.write(`  FAILED: ${error.message}\n`);
+      process.stdout.write(`  FAILED: ${/** @type {Error} */ (error).message}\n`);
       failed.push(vm.name);
     }
     // A `stop` returns before the guest has actually released its memory — one was observed sitting in
