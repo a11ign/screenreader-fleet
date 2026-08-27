@@ -53,7 +53,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--cidr=", "--port=", "--enroll", "--json"], { command: "npm run fleet:discover" });
+refuseUnknownFlags(["--cidr=", "--port=", "--enroll", "--json"], { entry: import.meta.url, command: "npm run fleet:discover" });
 
 const DEFAULT_PORT = 8765;
 const PROBE_TIMEOUT_MS = 2_000;

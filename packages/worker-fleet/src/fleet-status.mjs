@@ -46,7 +46,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--json"], { command: "npm run fleet:status" });
+refuseUnknownFlags(["--json"], { entry: import.meta.url, command: "npm run fleet:status" });
 
 /** Short: a status table is unreadable if one slow box holds it up. */
 const PROBE_TIMEOUT_MS = 5_000;

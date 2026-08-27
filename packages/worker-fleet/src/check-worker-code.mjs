@@ -30,7 +30,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags([], { command: "npm run worker:code" });
+refuseUnknownFlags([], { entry: import.meta.url, command: "npm run worker:code" });
 
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.

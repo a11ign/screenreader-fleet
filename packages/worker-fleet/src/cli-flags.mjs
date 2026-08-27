@@ -22,6 +22,7 @@
  * two equal, which is this repo's remedy when a duplication is forced.
  */
 import { basename } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /** How far apart two flags may be and still be worth suggesting. One typo, or one word. */
 const NEAR = 4;
@@ -76,11 +77,27 @@ export function didYouMean(flag, known) {
  */
 /**
  * @param {string[]} known  Every flag this command reads, `--name` or `--name=`.
- * @param {{argv?: string[], command?: string}} [options]  `command` names the thing a HUMAN typed — the
- *   npm script, not the file — because that is what they will retype. Its absence from these types was
- *   found by the first `// @ts-check` caller to pass it, which is the whole argument for checking `.mjs`.
+ * @param {{entry: string, argv?: string[], command?: string}} options
+ *   `entry` is the caller's `import.meta.url`, and it is REQUIRED. `command` names the thing a HUMAN
+ *   typed — the npm script, not the file — because that is what they will retype.
  */
-export function refuseUnknownFlags(known, { argv = process.argv.slice(2), command } = {}) {
+export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2), command } = {}) {
+  // ONLY WHEN THIS MODULE IS THE COMMAND, never when it is imported.
+  //
+  // These calls sit at module top level, so they run on IMPORT — and then inspect the IMPORTING process's
+  // argv. Measured 2026-08-27, an hour after the guards went in: `capture-real-pages --role=calibration`
+  // imports `fleet-env.mjs`, whose guard woke up, saw `--role`, decided it did not know it, and killed a
+  // 50-page capture with "unknown flag --role — did you mean --list?". The guard was right about its own
+  // flags and asking the wrong process.
+  //
+  // `entry` is REQUIRED rather than defaulted, for the reason `createHostThrottle`'s `minGapMs` is: a
+  // default here would silently restore exactly this behaviour for any caller who forgot it, and the
+  // failure mode is a guard that fires on somebody else's command line.
+  if (!entry) {
+    throw new TypeError("refuseUnknownFlags needs { entry: import.meta.url } — without it the guard runs "
+      + "on import and inspects the importing process's flags");
+  }
+  if (entry !== pathToFileURL(process.argv[1] ?? "").href) return;
   const unknown = unknownFlags(argv, known);
   if (unknown.length === 0) return;
   const name = command ?? basename(process.argv[1] ?? "this command");

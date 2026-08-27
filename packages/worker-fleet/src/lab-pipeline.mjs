@@ -56,7 +56,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  * knows — so it runs the default and reports success. See `cli-flags.mjs`.
  */
 refuseUnknownFlags(["--pipeline=", "--ref=", "--only=", "--list"],
-  { command: "npm run lab:pipeline" });
+  { entry: import.meta.url, command: "npm run lab:pipeline" });
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 

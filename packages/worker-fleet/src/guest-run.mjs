@@ -40,7 +40,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--timeout="], { command: "npm run guest:run" });
+refuseUnknownFlags(["--timeout="], { entry: import.meta.url, command: "npm run guest:run" });
 
 const run = promisify(execFile);
 

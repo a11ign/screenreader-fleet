@@ -37,7 +37,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--rounds=", "--runs="], { command: "npm run worker:compare" });
+refuseUnknownFlags(["--rounds=", "--runs="], { entry: import.meta.url, command: "npm run worker:compare" });
 
 // `requestJson`, not `fetch`: undici stops waiting for response HEADERS at 300 s whatever the
 // AbortSignal says, and the worker writes its status and body together at the END of a capture.

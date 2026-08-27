@@ -35,7 +35,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags([], { command: "npm run fleet:wake" });
+refuseUnknownFlags([], { entry: import.meta.url, command: "npm run fleet:wake" });
 
 /** Port 9 (discard) by convention; nothing listens, the NIC's firmware matches the frame. */
 const WOL_PORT = 9;

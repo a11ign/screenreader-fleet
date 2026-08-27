@@ -41,7 +41,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--vm=", "--allow-protocol-change"], { command: "npm run worker:deploy" });
+refuseUnknownFlags(["--vm=", "--allow-protocol-change"], { entry: import.meta.url, command: "npm run worker:deploy" });
 
 const run = promisify(execFile);
 // From the worker PACKAGE, not from the cwd. This was `resolve("src/capture/nvda")` and then

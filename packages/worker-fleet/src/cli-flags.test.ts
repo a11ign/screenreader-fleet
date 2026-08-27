@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { unknownFlags, didYouMean, nameOf } from "./cli-flags.mjs";
+import { unknownFlags, didYouMean, nameOf, refuseUnknownFlags } from "./cli-flags.mjs";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -233,3 +233,38 @@ test("CLAUDE.md states the real guarded count, and that nothing is exempt", () =
     "CLAUDE.md says the exemption list is empty; if you add one, say so there and give a reason here");
 });
 
+
+test("the guard never fires on an IMPORTING command's flags", () => {
+  // THE DEFECT THIS INTRODUCED, an hour after the guards went in. These calls sit at module top level, so
+  // they run on IMPORT — and then inspect the importing process's argv. `capture-real-pages
+  // --role=calibration` imports `fleet-env.mjs`, whose guard woke up, saw `--role`, decided it did not
+  // know it, and killed a 50-page capture with "unknown flag --role — did you mean --list?".
+  //
+  // The guard was right about its own flags and asking the wrong process. A check that fails somebody
+  // else's correct command is worse than no check: it is the crying-wolf failure that gets guards deleted.
+  assert.doesNotThrow(() =>
+    refuseUnknownFlags(["--list"], { entry: "file:///some/other/module.mjs", argv: ["--role=x"] }),
+    "an imported module must ignore the importer's flags entirely");
+
+  // `entry` is REQUIRED, not defaulted, for the reason `createHostThrottle`'s `minGapMs` is: a default
+  // would silently restore this behaviour for any caller who forgot it.
+  // Cast because the types REQUIRE `entry` — TypeScript rejects this call outright, which is the
+  // required-parameter design working. The runtime guard covers the .mjs callers nothing typechecks.
+  assert.throws(() => refuseUnknownFlags(["--list"], { argv: ["--nope"] } as never),
+    /needs \{ entry: import\.meta\.url \}/,
+    "a call without entry must fail loudly rather than guard the wrong process");
+});
+
+test("every call site passes its own import.meta.url", () => {
+  // The runtime guard above fires wherever the call happens to run. This one fires here, and covers the
+  // call sites that no test happens to execute.
+  const offenders: string[] = [];
+  for (const path of [...Object.keys(GUARDED)]) {
+    const source = readFileSync(join(REPO, path), "utf8");
+    const call = source.slice(source.indexOf("refuseUnknownFlags("));
+    const args = call.slice(0, call.indexOf(");") + 2);
+    if (!args.includes("entry: import.meta.url")) offenders.push(path);
+  }
+  assert.deepEqual(offenders, [],
+    "these pass no `entry`, so if anything imports them their guard inspects the importer's flags");
+});

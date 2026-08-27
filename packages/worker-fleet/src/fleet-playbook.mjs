@@ -46,7 +46,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--playbook=", "--ref=", "--limit=", "--serial="], { command: "npm run fleet:deploy" });
+refuseUnknownFlags(["--playbook=", "--ref=", "--limit=", "--serial="], { entry: import.meta.url, command: "npm run fleet:deploy" });
 
 /** CT 120. Named here rather than parsed out of the inventory, which needs Ansible to read properly. */
 const CONTROL_PLANE = process.env.A11Y_CONTROL_HOST || "REDACTED-INTERNAL-ADDRESS";

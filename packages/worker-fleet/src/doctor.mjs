@@ -27,7 +27,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--json"], { command: "npm run doctor" });
+refuseUnknownFlags(["--json"], { entry: import.meta.url, command: "npm run doctor" });
 
 const run = promisify(execFile);
 const JSON_OUT = process.argv.includes("--json");

@@ -37,7 +37,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--list"], { command: "npm run fleet:env" });
+refuseUnknownFlags(["--list"], { entry: import.meta.url, command: "npm run fleet:env" });
 
 export const DEFAULT_WORKER_PORT = 8765;
 
