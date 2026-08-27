@@ -50,7 +50,10 @@ if (process.platform !== "darwin") {
 }
 
 const availableMb = availableHostMemoryMb();
-assert.equal(typeof availableMb, "number");
+// `assert.ok` NARROWS and `assert.equal(typeof ...)` does not, which is why this read as a type error the
+// moment the file entered the program. The two failures stay separate: null means `vm_stat` gave nothing
+// readable, zero means it answered and the host has nothing -- different faults, different messages.
+assert.ok(availableMb !== null, "availableHostMemoryMb() returned null — vm_stat produced nothing readable");
 assert.ok(availableMb > 0, `expected a positive memory reading, got ${availableMb}`);
 
 console.log(`@a11y-witness/worker-fleet works when installed: ${Object.keys(scripts).length - 1} provisioning `
