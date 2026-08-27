@@ -97,14 +97,32 @@
     # Naming a path IS the deliberate decision the refusal asks for ("look at them before deciding"), so
     # it is excluded here and nowhere else: everything unnamed is still refused, and `remove` still has to
     # be a plain in-checkout path.
+    - name: The paths named for deliberate removal, as a LIST
+      # A LIST, because one deliberate act commonly involves several files. `promote:gated` writes three
+      # tracked artefacts at once — the weights, the training report and the acceptance report — and
+      # `-e remove=` took exactly one, so naming any single file cleared it from the refusal below while
+      # the other two still triggered it and the play aborted before the checkout ever ran. Measured
+      # 2026-08-27: three invocations, one per file, all refused, nothing discarded.
+      #
+      # Comma-separated and split here rather than in each consumer. Verified by running it, not by
+      # reading: `split(',')` inside `"{{ }}"` behaves, while `split('\n')` inside a FOLDED (`>-`) scalar
+      # silently does not split at all — which cost a wrong classifier earlier the same day.
+      ansible.builtin.set_fact:
+        lab_removals: >-
+          {{ (remove | default('')).split(',') | map('trim') | reject('equalto', '') | list }}
+
     - name: What remains unaccounted for
       ansible.builtin.set_fact:
         # `| default('')` because the task that registers `unpushed` is itself conditional: on a clean
         # tree it never runs, and a skipped register is a dict with no `stdout`. Written without it first,
         # which made this play fail on the one state it should say least about — a lab with nothing wrong.
-        lab_unpushed_unnamed: >-
-          {{ (unpushed.stdout | default('')) | trim | split('\n') | reject('equalto', '')
-             | reject('equalto', remove | default('')) | list }}
+        # A PLAIN scalar, never a folded one. Measured 2026-08-27 with a three-line playbook:
+        # `split('\n')` inside `>-` returns ONE element and inside `"{{ }}"` returns three. YAML folding
+        # eats the escape, so the blob never splits — and with a single dirty file the blob IS that path,
+        # so `reject` matched and this looked correct for as long as only one file was ever dirty.
+        # `promote:gated` writes THREE tracked artefacts, and against those `-e remove=` could never have
+        # worked: every named path was compared against one blob containing all of them.
+        lab_unpushed_unnamed: "{{ (unpushed.stdout | default('')) | trim | split('\n') | reject('equalto', '') | reject('in', lab_removals) | list }}"
 
     - name: Refuse to discard work origin does not have
       when: (dirty.stdout | trim) != '' and lab_unpushed_unnamed | length > 0
@@ -113,7 +131,7 @@
           {{ lab_repo_path }} has modified file(s) whose content is NOT on origin/{{ ref | default('main') }}:
           {{ lab_unpushed_unnamed | join(', ') }}. Nothing has been discarded. Commit and push them from
           the lab, or look at them before deciding — this play will not throw away work that exists
-          nowhere else. To drop ONE of them deliberately: -e remove=<path> -e apply=true.
+          nowhere else. To drop them deliberately, having looked: -e remove=<path>[,<path>...] -e apply=true.
 
     - name: Report only, unless asked to apply — and FAIL, so a caller can use this as a precondition
       # EXIT NON-ZERO ON A DIRTY TREE, because "I looked and it is dirty" and "it is clean" were the same
@@ -181,13 +199,16 @@
       register: untracked
       changed_when: "'removed ' in (untracked.stdout | default(''))"
 
-    - name: A named removal must be a plain path inside the checkout
+    - name: Every named removal must be a plain path inside the checkout
       when: remove is defined
       ansible.builtin.assert:
         that:
-          - remove is match('^[A-Za-z0-9._/-]{1,120}$')
-          - "'..' not in remove"
-        fail_msg: "-e remove= must be a plain relative path; globs and traversal are not expressible."
+          - lab_removals | length > 0
+          - lab_removals | select('match', '^[A-Za-z0-9._/-]{1,120}$') | list | length == lab_removals | length
+          - lab_removals | select('search', '\.\.') | list | length == 0
+        fail_msg: >-
+          -e remove= must be one plain relative path, or several separated by commas; globs and traversal
+          are not expressible. Got: {{ lab_removals | to_json }}
 
     - name: Remove a named untracked path, having looked at it
       # The escape hatch for the case the comparison above cannot settle: an untracked file origin has
@@ -208,15 +229,20 @@
         # sequential statements and the refusal branch ran unconditionally — measured here, and the same
         # trap `lab-log.yml` hit an hour earlier with a pipeline. Multi-line shell needs `|`.
         cmd: |
-          before=$(printf '%s\n' "$LAB_DIRTY_BEFORE" | grep -F -- " {{ remove }}" | head -1 | cut -c1-2)
-          if git status --porcelain -- "{{ remove }}" | grep -q '^??'; then
-            rm -f -- "{{ remove }}" && echo "removed {{ remove }}"
-          elif [ -n "$before" ] && [ "$before" != "??" ]; then
-            echo "restored {{ remove }} (a TRACKED modification, discarded by the checkout above)"
-          else
-            echo "REFUSED: {{ remove }} was neither untracked nor a tracked modification"
-            exit 1
-          fi
+          rc=0
+          printf '%s\n' "$LAB_REMOVALS" | while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            before=$(printf '%s\n' "$LAB_DIRTY_BEFORE" | grep -F -- " $path" | head -1 | cut -c1-2)
+            if git status --porcelain -- "$path" | grep -q '^??'; then
+              rm -f -- "$path" && echo "removed $path"
+            elif [ -n "$before" ] && [ "$before" != "??" ]; then
+              echo "restored $path (a TRACKED modification, discarded by the checkout above)"
+            else
+              echo "REFUSED: $path was neither untracked nor a tracked modification"
+              rc=1
+            fi
+          done
+          exit $rc
         chdir: "{{ lab_repo_path }}"
         # THE PRE-CHECKOUT PORCELAIN, handed to the shell rather than parsed in Jinja.
         #
@@ -232,10 +258,9 @@
         # escaping — settled by RUNNING it, never by reading.
       environment:
         LAB_DIRTY_BEFORE: "{{ dirty.stdout | default('') }}"
+        LAB_REMOVALS: "{{ lab_removals | join('\n') }}"
       register: removed_named
-      changed_when: >-
-        {{ 'removed ' in (removed_named.stdout | default('')) 
-           or 'restored ' in (removed_named.stdout | default('')) }}
+      changed_when: "'removed ' in (removed_named.stdout | default('')) or 'restored ' in (removed_named.stdout | default(''))"
       # A refusal must REPORT, not abort. `exit 1` failed the play before the reporting tasks below, so
       # the operator saw an Ansible module error and no reason — three times on 2026-08-26 I read
       # "STILL DIRTY" about a file the play had just declined to explain. The task's own stdout carries
@@ -257,9 +282,8 @@
         # `git checkout -- .` restored it, the tree came back clean, and then this assert failed with
         # "Nothing was deleted". The operator is told nothing happened by a play that had just acted,
         # which is worse than either a failure or a success: it invites a second, blinder attempt.
-        that: >-
-          {{ 'removed ' in (removed_named.stdout | default(''))
-             or 'restored ' in (removed_named.stdout | default('')) }}
+        that:
+          - "'removed ' in (removed_named.stdout | default('')) or 'restored ' in (removed_named.stdout | default(''))"
         fail_msg: >-
           {{ removed_named.stdout | default('the removal produced no output') | trim }}.
           Nothing was changed. `-e remove=` takes ONE path that is dirty right now — either untracked
