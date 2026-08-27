@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
-import { PIPELINES, validRef } from "./lab-pipeline.mjs";
+import { PIPELINES, jobNames, validRef } from "./lab-pipeline.mjs";
 
 type Job = { argv?: unknown; setenv?: string[]; timeout?: number };
 
@@ -47,7 +47,7 @@ test("the catalogue parsed, and parsed enough of it to be worth asserting on", (
 
 test("every job a pipeline names exists in the catalogue", () => {
   for (const [name, pipeline] of Object.entries(PIPELINES)) {
-    for (const job of pipeline.jobs) {
+    for (const job of jobNames(pipeline)) {
       assert.ok(Object.hasOwn(JOBS, job),
         `pipeline '${name}' names job '${job}', which lab-job.yml does not have. It would be refused at `
         + `that stage — for 'corpus' that is after a multi-hour capture has already run.`);
@@ -60,7 +60,7 @@ test("a pipeline that captures deploys the fleet first", () => {
   // a commit that did not produce it. `assertFleetRunsThisCheckout` would now REFUSE such a run at the
   // worker level, which is the belt; this is the braces, and it fails at dispatch rather than an hour in.
   for (const [name, pipeline] of Object.entries(PIPELINES)) {
-    const needs = pipeline.jobs.filter((job) => usesWorkers(JOBS[job]));
+    const needs = jobNames(pipeline).filter((job) => usesWorkers(JOBS[job]));
     if (!needs.length) continue;
     assert.equal(pipeline.fleet, true,
       `pipeline '${name}' runs ${needs.join(", ")}, which read A11Y_WORKER(S), but does not deploy the `
@@ -72,7 +72,7 @@ test("a pipeline that needs no worker does NOT wake the fleet", () => {
   // The other direction, and it matters as much: deploying restarts every guest, so a gates-only pipeline
   // that declared `fleet: true` would take the fleet offline to run something that reads from disk.
   for (const [name, pipeline] of Object.entries(PIPELINES)) {
-    if (pipeline.jobs.some((job) => usesWorkers(JOBS[job]))) continue;
+    if (jobNames(pipeline).some((job) => usesWorkers(JOBS[job]))) continue;
     assert.equal(pipeline.fleet, false,
       `pipeline '${name}' needs no worker, so deploying would restart the fleet for nothing.`);
   }
@@ -87,8 +87,8 @@ test("at least one pipeline of each kind exists, so neither branch is untested b
 test("every pipeline names what it is for, and orders at least two stages", () => {
   for (const [name, pipeline] of Object.entries(PIPELINES)) {
     assert.ok((pipeline.what ?? "").length > 20, `pipeline '${name}' does not say what it is for`);
-    assert.ok(pipeline.jobs.length >= 2,
-      `pipeline '${name}' has ${pipeline.jobs.length} stage(s) — a pipeline of one is a job, so use lab:job`);
+    assert.ok(jobNames(pipeline).length >= 2,
+      `pipeline '${name}' has ${jobNames(pipeline).length} stage(s) — a pipeline of one is a job, so use lab:job`);
     assert.deepEqual([...new Set(pipeline.jobs)], pipeline.jobs,
       `pipeline '${name}' runs a job twice; each stage is idempotent, so that is almost certainly a slip`);
   }
@@ -227,7 +227,7 @@ test("no stage consumes a dataset an EARLIER stage has not produced", () => {
   };
 
   const problems = Object.entries(PIPELINES)
-    .flatMap(([pipelineName, pipeline]) => outOfOrder(pipelineName, pipeline.jobs));
+    .flatMap(([pipelineName, pipeline]) => outOfOrder(pipelineName, jobNames(pipeline)));
   assert.deepEqual(problems, []);
 });
 
@@ -260,5 +260,33 @@ test("a chain that TRAINS must gate what it built, not what was already shipped"
     assert.ok(command.indexOf("promote:gated") < command.indexOf("release:gate"),
       `'${name}' runs release:gate before promoting the candidate, so the release gate still describes `
       + "the previous weights.");
+  }
+});
+
+/**
+ * THE REAL-PAGE PIPELINE MUST CAPTURE EVERY SCORED ROLE, and this is the test that says so.
+ *
+ * `capture-real-pages` defaults to `--role=training`, so a stage that names no role captures 39 of the 89
+ * real pages — and `rules-real-pages` then scores, and `--update` rewrites the baseline against, whatever
+ * happened to be on disk from some earlier run. Measured 2026-08-27: a calibration-only capture followed
+ * by an update took the baseline from 85 pages to 81 and erased a known 2.4.3, silently.
+ *
+ * Derived from the corpus rather than hardcoded, so adding a role to `real-page-corpus.mjs` fails HERE
+ * instead of quietly halving a run's coverage. `fixture` is excluded because those pages are not scored
+ * as conformant real pages — the same list `pagesFor` serves.
+ */
+test("the real-pages pipeline captures every role the corpus scores", async () => {
+  const { REAL_PAGES } = await import("../../lab/src/training/real-page-corpus.mjs");
+  const scored = [...new Set(REAL_PAGES.map((page) => page.role))].filter((role) => role !== "fixture");
+  const captured = (PIPELINES["real-pages"].jobs as Array<string | { job: string; vars?: Record<string, string> }>)
+    .filter((entry): entry is { job: string; vars?: Record<string, string> } =>
+      typeof entry !== "string" && entry.job === "capture-real-pages")
+    .map((entry) => entry.vars?.role)
+    .filter((role): role is string => typeof role === "string");
+  for (const role of scored) {
+    assert.ok(captured.includes(role),
+      `pipeline 'real-pages' never captures role='${role}', so it would score and rewrite the baseline `
+      + `against whatever stale captures that role has on disk. Captured: ${captured.join(", ") || "(none — "
+      + "the stage names no role, so it takes capture-real-pages' default of training)"}`);
   }
 });

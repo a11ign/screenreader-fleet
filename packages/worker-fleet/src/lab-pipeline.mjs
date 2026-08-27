@@ -73,12 +73,45 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
  */
 export { resolveOnOrigin };
 
+/**
+ * The job NAMES a pipeline runs, whichever form its stages are declared in.
+ *
+ * ONE reader, exported, because a stage may be a bare name or `{ job, vars }` and there are five places
+ * that ask "which jobs does this pipeline run" — the runner, the `--only` check, `--list`, and two tests
+ * that pin every named job against the real catalogue. Those tests are the ones that matter: they exist
+ * so a renamed job fails here instead of at its STAGE, which for `corpus` is after a multi-hour capture.
+ * A second spelling of this destructure is how such a test comes to examine `[object Object]` and pass.
+ */
+/** @param {{jobs?: Array<string | {job: string, vars?: Record<string, string>}>}} pipeline
+ *  @returns {string[]} */
+export function jobNames(pipeline) {
+  return (pipeline?.jobs ?? []).map((entry) => (typeof entry === "string" ? entry : entry.job));
+}
+
 export const PIPELINES = {
   // The chain that was run by hand all of 2026-08-25.
   "real-pages": {
     fleet: true,
-    what: "recapture the real-page corpus and prove no conformant page gained a finding",
-    jobs: ["capture-real-pages", "rules-real-pages", "rules-coverage"],
+    what: "recapture EVERY real-page role and prove no conformant page gained a finding",
+    // BOTH ROLES, NAMED, and that is the whole point of this entry.
+    //
+    // `capture-real-pages` DEFAULTS to `--role=training`, so this pipeline used to capture 39 of the 89
+    // real pages and then score and rewrite the baseline against all of them. A default that is silently
+    // a SUBSET is the shape this repo keeps paying for: the run reports success, and the corpus it
+    // reasoned over was whatever happened to be on disk from some earlier run.
+    //
+    // Measured 2026-08-27, by hand-running the pieces this pipeline exists to hold: a calibration-only
+    // capture followed by `rules:real-pages --update` took the baseline from 85 pages to 81 and erased
+    // `events.bl.uk`'s known 2.4.3, silently. `check-real-page-findings.ts` now REFUSES that write, and
+    // this names the roles so the refusal never has cause to fire from a pipeline run.
+    //
+    // `fixture` is deliberately absent: those four pages are not scored as conformant real pages.
+    jobs: [
+      { job: "capture-real-pages", vars: { role: "calibration" } },
+      { job: "capture-real-pages", vars: { role: "training" } },
+      "rules-real-pages",
+      "rules-coverage",
+    ],
   },
   // The synthetic corpus and the gates that read it. `check-signals` FIRST among the gates, deliberately:
   // it is the one that says whether the corpus can express what the rules are scored on, and a rules score
@@ -293,7 +326,7 @@ function caseIds(name, pipeline) {
   }
   // A pipeline that NEEDS ids and got none would capture the WHOLE corpus — the four hours it exists to
   // avoid. Refused rather than defaulted, because the default is the expensive direction.
-  if (pipeline.jobs.some((job) => TAKES_ONLY.has(job)) && !only) {
+  if (jobNames(pipeline).some((job) => TAKES_ONLY.has(job)) && !only) {
     process.stderr.write(`pipeline '${name}' needs --only=<case-id[,case-id]> — it captures just those `
       + "cases to prove a change before the full corpus run. Paste what check-signals or an audit "
       + "printed.\n");
@@ -305,7 +338,7 @@ function caseIds(name, pipeline) {
 function usage() {
   const names = Object.entries(PIPELINES)
     .map(([name, p]) => `  ${name.padEnd(12)} ${p.fleet ? "[fleet]" : "[no fleet]"}  ${p.what}\n`
-      + `${" ".repeat(16)}${p.jobs.join(" -> ")}`)
+      + `${" ".repeat(16)}${jobNames(p).join(" -> ")}`)
     .join("\n");
   return `\nnpm run lab:pipeline -- --pipeline=<name> [--ref=<branch>]\n\n${names}\n\n`
     + "  --ref defaults to the branch this checkout is on, and must be pushed: both halves fetch\n"
@@ -353,8 +386,17 @@ async function main() {
     // `-e only=` reaches the jobs that take it and nothing else. A pipeline that forwarded every extra
     // var to every stage would hand `only` to `check-signals`, which does not take it — and Ansible
     // ignores an unused extra var silently, so the operator would think it had been applied.
-    ...pipeline.jobs.map((job) => [job, () => labJob(job, pinned, TAKES_ONLY.has(job) && only
-      ? ["-e", `only=${only}`] : [])]),
+    ...pipeline.jobs.map((entry) => {
+      // A stage is either a bare job name or `{ job, vars }` — the second form exists because one job can
+      // need running more than once with different parameters, and a pipeline that cannot say so pushes
+      // that knowledge back into the operator's head, which is what this file exists to stop.
+      const { job, vars } = typeof entry === "string" ? { job: entry, vars: {} } : entry;
+      const declared = Object.entries(vars ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
+      const label = declared.length ? `${job} (${Object.entries(vars).map(([k, v]) => `${k}=${v}`).join(" ")})` : job;
+      // `-e only=` reaches the jobs that take it and nothing else, for the reason below.
+      const extra = [...declared, ...(TAKES_ONLY.has(job) && only ? ["-e", `only=${only}`] : [])];
+      return [label, () => labJob(job, pinned, extra)];
+    }),
   ];
 
   process.stdout.write(`\n  pipeline: ${name} at ${ref} -> PINNED ${pinned.slice(0, 12)}\n`
