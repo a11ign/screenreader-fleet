@@ -287,7 +287,9 @@
       # exist, and promotes only if it passes. That is the thing that was impossible before: testing both
       # halves TOGETHER before shipping either.
       #
-      # It stops at an uncommitted working tree, exactly as `promote-model.mjs` does. Committing and pushing
+      # `promote-model.mjs` refuses when a previous promotion is still uncommitted where this one would
+      # write — added 2026-08-27, having been asserted here and in CLAUDE.md while no code ran it.
+      # Committing and pushing
       # is deliberately NOT here: promoting is a MAJOR release of `@a11y-witness/scorer` (ADR 0007), and a
       # job that can push a release is a job that can release by accident. `lab:job -e job=promote-diff`
       # shows what it produced; a human commits it.
