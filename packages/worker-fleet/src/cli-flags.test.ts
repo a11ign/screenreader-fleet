@@ -88,6 +88,42 @@ const GUARDED: Record<string, string> = {
   "packages/lab/scripts/audit-corpus-urls.mjs":
     "a mistyped --timeout= silently uses 15s, and a slow government host then reports as MOVED when it "
     + "merely did not answer in time",
+  "packages/lab/scripts/audit-corpus-starvation.mjs":
+    "takes no flags; any passed today is discarded",
+  "packages/lab/scripts/audit-size-sensitivity.mjs":
+    "--evaluating and --stdin are passed ONWARD to the Python scorer, not read here",
+  "packages/lab/scripts/bench-capture.mjs":
+    "a mistyped --from-disk silently drives the fleet when you meant to replay a file",
+  "packages/lab/scripts/compare-layers.mjs":
+    "takes its sites POSITIONALLY; the flags in the file are passed onward",
+  "packages/lab/scripts/corpus-backup.mjs":
+    "--verify-only is the difference between checking a backup and WRITING one",
+  "packages/lab/scripts/corpus-snapshot.mjs":
+    "a mistyped --out= writes the snapshot where you will not look for it",
+  "packages/lab/scripts/emit-grants-map.mjs":
+    "takes no flags",
+  "packages/lab/scripts/explain-scorer.mjs":
+    "--name, --case and --weights appear in its prose, not its argv",
+  "packages/lab/scripts/retrain-pipeline.mjs":
+    "a mistyped --dry-run runs the REAL retrain",
+  "packages/lab/scripts/verify-safetensors.mjs":
+    "--inference decides which contract is verified, so a typo checks the wrong one and passes",
+  "packages/lab/src/harnesses/assert-action-report.mjs":
+    "the flags ARE the assertion: a mistyped --require-wcag= asserts nothing and reports success",
+  "packages/lab/src/training/generate-screenreader-acceptance.mjs":
+    "takes no flags",
+  "packages/lab/src/training/generate-screenreader-dataset.mjs":
+    "takes no flags",
+  "packages/lab/src/training/preflight-screenreader-dataset.mjs":
+    "takes no flags",
+  "packages/worker-fleet/src/fleet-discover.mjs":
+    "--enroll WRITES to inventory.yml; mistyped it scans and enrols nothing",
+  "packages/worker-fleet/src/fleet-env.mjs":
+    "its output is eval-ed by a shell, so a wrong shape is executed rather than read",
+  "packages/worker-fleet/src/fleet-wake.mjs":
+    "takes no flags",
+  "packages/worker-fleet/src/normalise-fleet.mjs":
+    "takes no flags",
   "packages/lab/src/training/wait-for-capture.mjs":
     "its EXIT CODE is the contract — 0 clean, 1 failures, 2 no run, 3 wedged — so a caller reading it "
     + "has already committed to an output shape, and a mistyped `--json` gives it the other one",
@@ -105,15 +141,12 @@ const GUARDED: Record<string, string> = {
  * CLI cannot join them without a test failing, which is the difference between a known gap and an unknown
  * one. Guarding one means deleting its line.
  */
-const UNGUARDED = new Set([
-  "packages/lab/scripts/audit-corpus-starvation.mjs", "packages/lab/scripts/audit-size-sensitivity.mjs",
-  "packages/lab/scripts/bench-capture.mjs", "packages/lab/scripts/compare-layers.mjs", "packages/lab/scripts/corpus-backup.mjs",
-  "packages/lab/scripts/corpus-snapshot.mjs", "packages/lab/scripts/emit-grants-map.mjs", "packages/lab/scripts/explain-scorer.mjs",
-  "packages/lab/scripts/retrain-pipeline.mjs", "packages/lab/scripts/verify-safetensors.mjs",
-  "packages/lab/src/harnesses/assert-action-report.mjs", "packages/lab/src/training/generate-screenreader-acceptance.mjs",
-  "packages/lab/src/training/generate-screenreader-dataset.mjs", "packages/lab/src/training/preflight-screenreader-dataset.mjs",
-  "packages/worker-fleet/src/fleet-discover.mjs", "packages/worker-fleet/src/fleet-env.mjs",
-  "packages/worker-fleet/src/fleet-wake.mjs", "packages/worker-fleet/src/normalise-fleet.mjs",
+const UNGUARDED = new Set<string>([
+  // EMPTY, as of 2026-08-27. Every `.mjs` that reads argv refuses a flag it does not know.
+  //
+  // Kept rather than deleted: the test below discovers every argv-reading module and requires each to be
+  // guarded or listed here WITH A REASON. An empty set means the discovery has nothing to forgive, and
+  // deleting it would remove the only place a future exemption has to justify itself.
 ]);
 
 /** Does this file take a command line? The guard itself reads argv, and is the implementation. */
@@ -187,18 +220,16 @@ test("a new CLI cannot quietly join the unguarded ones", () => {
     + "(preferred — an ignored flag runs the default and reports success), or add them with a reason");
 });
 
-test("CLAUDE.md states the real guarded/unguarded counts", () => {
-  // I updated these numbers by hand three times and TWICE the edit silently did not match, so the doc
-  // said "the five" through several commits that claimed otherwise. A number a human retypes is a number
-  // that drifts; this makes the drift fail rather than sit there being quietly wrong.
-  //
-  // The counts are the point of the sentence — "guarded on 26, 18 remain" is a shrinking gap somebody can
-  // hold to account, and "guarded on the five" describes a repo that no longer exists.
+test("CLAUDE.md states the real guarded count, and that nothing is exempt", () => {
+  // I updated this number by hand three times and TWICE the edit silently did not match, so the doc read
+  // "Guarded on the five" through several commits whose messages said otherwise. A number a human retypes
+  // is a number that drifts — this repo's own rule, which I broke while applying it elsewhere.
   const doc = readFileSync(join(REPO, "CLAUDE.md"), "utf8");
-  const stated = doc.match(/Guarded on \*\*(\d+)\*\*/);
-  const remaining = doc.match(/The other\s*\n?\s*\*\*(\d+)\*\* are an `UNGUARDED` list/);
-  assert.ok(stated && remaining,
-    "CLAUDE.md must state both counts as `Guarded on **N**` and `**N** are an `UNGUARDED` list`");
+  const stated = doc.match(/\*\*ALL (\d+) are guarded/);
+  assert.ok(stated, "CLAUDE.md must state the count as `**ALL N are guarded`");
   assert.equal(Number(stated[1]), Object.keys(GUARDED).length, "CLAUDE.md's guarded count is stale");
-  assert.equal(Number(remaining[1]), UNGUARDED.size, "CLAUDE.md's unguarded count is stale");
+  // And the claim that nothing is exempt must be true, not just written.
+  assert.equal(UNGUARDED.size, 0,
+    "CLAUDE.md says the exemption list is empty; if you add one, say so there and give a reason here");
 });
+

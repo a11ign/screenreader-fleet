@@ -14,6 +14,14 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * takes no flags: it brings every local guest to one baseline.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags([], { command: "npm run fleet:normalise" });
 
 // A SIBLING in this package, resolved from this module. It was the cwd-relative path `scripts/guest-run.mjs`,
 // which stopped existing when M8 moved the fleet tooling — and was only ever right when the cwd happened to be

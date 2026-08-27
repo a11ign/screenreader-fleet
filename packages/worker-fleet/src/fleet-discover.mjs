@@ -46,6 +46,14 @@ import { networkInterfaces } from "node:os";
 
 import { requestJson } from "./worker-http.mjs";
 import { WORKER_GROUP, groupPerLine } from "./fleet-env.mjs";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * `--enroll` WRITES to inventory.yml; mistyped, it scans and quietly enrols nothing.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--cidr=", "--port=", "--enroll", "--json"], { command: "npm run fleet:discover" });
 
 const DEFAULT_PORT = 8765;
 const PROBE_TIMEOUT_MS = 2_000;

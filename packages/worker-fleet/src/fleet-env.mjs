@@ -30,6 +30,14 @@ import { readFileSync } from "node:fs";
 
 import { assertWorkerUrl } from "./worker-http.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * its output is `eval`-ed by a shell, so a wrong shape is executed rather than read.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags(["--list"], { command: "npm run fleet:env" });
 
 export const DEFAULT_WORKER_PORT = 8765;
 

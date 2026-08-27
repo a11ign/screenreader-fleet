@@ -28,6 +28,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { inventoryHosts } from "./fleet-discover.mjs";
 import { requestJson } from "./worker-http.mjs";
+import { refuseUnknownFlags } from "./cli-flags.mjs";
+
+/**
+ * takes no flags: it wakes every box in the inventory.
+ *
+ * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ */
+refuseUnknownFlags([], { command: "npm run fleet:wake" });
 
 /** Port 9 (discard) by convention; nothing listens, the NIC's firmware matches the frame. */
 const WOL_PORT = 9;
