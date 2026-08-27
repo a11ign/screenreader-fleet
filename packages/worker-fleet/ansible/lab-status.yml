@@ -64,9 +64,14 @@
 
     - name: "Detail for {{ job | default('(no job named)') }}"
       when: job is defined
+      # `Description` FIRST, because it carries the COMMIT and every number below it is unreadable
+      # without one. `run-job.yml` stamps `<job> at <sha12>[ DIRTY]` there so systemd's own
+      # `Started <unit> - <Description>.` line opens the journal with it; reading it back here means
+      # `lab:status` answers "what code produced this?" without anyone comparing a timestamp to git log.
+      # That comparison is what turned an eleven-hour-stale `2.4.4` verdict into a reported contradiction.
       ansible.builtin.command:
-        argv: [systemctl, show, "-p", SubState, "-p", ActiveState, "-p", Result, "-p", ExecMainStatus,
-               "-p", ActiveEnterTimestamp, "a11y-job-{{ job }}"]
+        argv: [systemctl, show, "-p", Description, "-p", SubState, "-p", ActiveState, "-p", Result,
+               "-p", ExecMainStatus, "-p", ActiveEnterTimestamp, "a11y-job-{{ job }}"]
       register: detail
       changed_when: false
       failed_when: false

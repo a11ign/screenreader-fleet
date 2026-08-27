@@ -222,6 +222,55 @@ test("a job pulls the lab checkout, and records the commit it actually ran at", 
     "and the refusal must compare the READ-BACK commit against the RESOLVED ref");
 });
 
+test("the unit DESCRIPTION carries the commit, so a journal can never be read without one", () => {
+  // The fix for the defect this repo names most often, applied to the one artefact that still lacked it.
+  //
+  // `lab_commit` has been registered here since the launcher was written, and the task above PRINTS it --
+  // into Ansible's output, which belongs to whoever dispatched and is gone by the time anyone reads the
+  // result. `lab:status` and `lab:log` read the JOURNAL, which is the artefact that survives, and it
+  // carried a timestamp and no code identity at all.
+  //
+  // Measured 2026-08-27: a `rules:coverage` journal reading `2.4.4 ... 0 never on a REAL page` was quoted
+  // as a live contradiction against a local run saying `1 validated`. Same fixture, same pushed code. The
+  // lab was simply eleven hours stale, and proving that meant diffing a journal timestamp against
+  // `git log` by hand. CLAUDE.md's own table has six entries of exactly this shape, every one "a CORRECT
+  // value read from the wrong place".
+  //
+  // Asserted on the START task's argv specifically, parsed rather than grepped: a `--description=` string
+  // anywhere else in the file would satisfy a text search while systemd never saw it.
+  const tasks = parseYaml(read("tasks/run-job.yml")) as Array<{
+    name?: string; "ansible.builtin.command"?: { argv?: unknown };
+  }>;
+  const start = tasks.find((task) => (task.name ?? "").startsWith("Start it:"));
+  assert.ok(start, "the launcher must still have a task that starts the unit");
+  const argv = String(start["ansible.builtin.command"]?.argv ?? "");
+  assert.match(argv, /systemd-run/, "and that task is the systemd-run invocation");
+
+  assert.match(argv, /--description=/,
+    "systemd logs `Started <unit> - <Description>.`, so the description opens every journal");
+
+  // THE DESCRIPTION'S OWN SEGMENT, sliced out rather than matched across the whole argv. A regex spanning
+  // the list would pass on a `lab_commit` that belongs to some later element, and the first version of
+  // this test also pinned the ORDER of two terms inside one Jinja conditional -- which is a fact about
+  // how the expression reads, not about what it produces. Both are the "test asserts source text" trap.
+  const description = argv.slice(argv.indexOf("--description="), argv.indexOf("--working-directory="));
+  assert.match(description, /lab_commit\.stdout/,
+    "the description must carry the READ-BACK commit -- a journal whose code identity is missing is a "
+      + "number with nothing behind it");
+  // DIRTY is not decoration. The refusal above lets a dirty checkout run when it is ALREADY at the
+  // requested commit, so the SHA is true and the bytes are not. Without this marker those two runs are
+  // indistinguishable in the journal, which is the same ambiguity one layer along.
+  assert.match(description, /lab_dirty/, "and it must consult the dirty state");
+  assert.match(description, /DIRTY/,
+    "a dirty checkout at the right commit must SAY so; the SHA alone cannot express it");
+
+  // And it must be readable back deliberately, not only by spotting systemd's own line.
+  const status = executable(read("lab-status.yml"));
+  assert.match(status, /"-p", Description/,
+    "`lab:status` must report Description, or answering `what code produced this?` is still a manual "
+      + "comparison against git log");
+});
+
 test("a pull never runs into a checkout somebody or something else is using", () => {
   // `git pull` mid-job writes into the checkout a running job is EXECUTING FROM — a11y-bootstrap.service
   // documents that as "the one way this unit can be quietly wrong". The unit-name lock cannot see it: it

@@ -335,11 +335,34 @@
 # Jinja expression cost a pipeline run on 2026-08-25 — `#` is a syntax error there, and Ansible reported
 # `unexpected char '#' at 245`, which names the character and not the file. `lab-job.test.ts` asserted
 # only that the string was present, so it passed against a playbook that could not template.
+# `--description` PUTS THE COMMIT IN THE JOURNAL, and that is the point of it.
+#
+# systemd logs `Started <unit> - <Description>.` as the first line of every run, so whatever goes here is
+# the first thing `lab:log` and `lab:status` show and it cannot be separated from the output beneath it.
+# Until 2026-08-27 the commit was known here -- `lab_commit` is registered forty lines up, and the task
+# above prints it -- and went only into ANSIBLE's output, which is ephemeral and belongs to whoever
+# dispatched. The journal is the artefact that gets read later, by someone else, and it carried a
+# timestamp and no code identity.
+#
+# Measured cost, the day this was added: a `rules:coverage` journal reading `2.4.4 ... 0 never on a REAL
+# page` was quoted into a defect list as a live contradiction against a local run saying `1 validated`.
+# The lab was right and stale -- its run predated the fix by eleven hours -- and establishing that meant
+# comparing a journal timestamp against `git log` by hand. That is CLAUDE.md's oldest lesson pointed at
+# this file: a number is only as good as what it was computed from, so make every reported number carry
+# that. Six of the seven diagnostics in that table were correct values read from the wrong window.
+#
+# The dirty marker is here rather than left implicit because the refusal above lets a dirty checkout run
+# when it is ALREADY at the requested commit -- so `DIRTY` is the only signal that the bytes executed were
+# not the bytes at that SHA. No shell is involved: this is one more element in the argv list.
 - name: "Start it: {{ job_name }}"
   ansible.builtin.command:
     argv: >-
       {{ [
         "systemd-run", "--unit=" ~ job_unit, "--remain-after-exit",
+        "--description=" ~ job_name ~ " at "
+          ~ (lab_commit.stdout | trim | truncate(12, true, ""))
+          ~ (" DIRTY" if (lab_dirty.stdout | default("") | trim) != "" else "")
+          ~ " — " ~ (job_argv | join(" ")),
         "--working-directory=" ~ lab_repo_path,
         "--property=RuntimeMaxSec=" ~ (job_timeout | int),
         "--property=ReadWritePaths=" ~ lab_runs_path,

@@ -69,7 +69,15 @@
       # release back meant reconstructing its changeset by hand — a second spelling of the release note,
       # written by whoever happened to be doing it. The name is fixed by `promote:model`; `out` selects
       # which candidate produced it, exactly as the reports above do.
-      promoted-changeset: ".changeset/promote-{{ out | default('candidate') }}-4.md"
+      # A GLOB, and it has to be. This read `.changeset/promote-{{ out }}-4.md` -- a literal sequence
+      # number, true on the day it was written and wrong by the next promotion. The lab was holding
+      # `promote-candidate-6.md` while this looked for `-4`, so THE ONE ARTEFACT THIS ENTRY EXISTS TO
+      # RESCUE WAS UNFETCHABLE, and the comment above describing that rescue read as if it worked.
+      #
+      # The number is now a hash of the release (`promote-model.mjs`), because counting the directory
+      # made one promotion overwrite another's note. That is unguessable by design, so this resolves the
+      # newest match on the lab instead of predicting a name.
+      promoted-changeset: ".changeset/promote-*.md"
       promoted-training-report: "packages/scorer/models/screenreader-scorer/training-report.json"
       promoted-acceptance-report: "packages/scorer/models/screenreader-scorer/acceptance-report.json"
       acceptance-records: "runs/screenreader-acceptance/{{ repeat | default('repeat-1') }}.jsonl"
@@ -91,9 +99,36 @@
           Pass -e artifact=<name>, one of: {{ lab_artifacts.keys() | list | join(', ') }};
           optionally -e out=candidate|multidefect|scratch. Both are NAMES, never paths.
 
+    # RESOLVED ON THE LAB, never predicted here. `find` rather than a shell glob: no shell is involved,
+    # and it returns mtimes so "newest" is a fact rather than a sort of whatever order the FS gave back.
+    - name: Resolve a globbed artifact to the file it names
+      when: "'*' in lab_artifacts[artifact]"
+      ansible.builtin.find:
+        paths: "{{ lab_repo_path }}/{{ lab_artifacts[artifact] | dirname }}"
+        patterns: "{{ lab_artifacts[artifact] | basename }}"
+      register: lab_globbed
+
+    # A REFUSAL, not an empty fetch. Slurping a path that matched nothing fails with a file-not-found
+    # naming a pattern, which reads like a broken playbook rather than "that promotion left no changeset".
+    - name: There must be a file for a globbed artifact to name
+      when: "'*' in lab_artifacts[artifact]"
+      ansible.builtin.assert:
+        that: (lab_globbed.files | default([])) | length > 0
+        fail_msg: >-
+          nothing on the lab matches {{ lab_artifacts[artifact] }}. For promoted-changeset that means no
+          promotion has written one there -- run `lab:job -e job=promote` first, or the promotion you are
+          thinking of was already committed and fetched.
+
+    - name: Settle which path to read
+      ansible.builtin.set_fact:
+        lab_fetch_src: >-
+          {{ (lab_globbed.files | sort(attribute='mtime') | last).path
+             if ('*' in lab_artifacts[artifact])
+             else (lab_repo_path ~ '/' ~ lab_artifacts[artifact]) }}
+
     - name: "Read {{ artifact }}"
       ansible.builtin.slurp:
-        src: "{{ lab_repo_path }}/{{ lab_artifacts[artifact] }}"
+        src: "{{ lab_fetch_src }}"
       register: fetched
 
     # To a fixed local directory, named for the artifact and the model it describes — so two fetches of
@@ -111,7 +146,7 @@
       ansible.builtin.set_fact:
         lab_fetch_dest: >-
           {{ playbook_dir }}/../../../runs/fetched/{{ out | default('candidate') }}.{{ artifact
-             }}{{ (lab_artifacts[artifact] | splitext)[1] | default('.json', true) }}
+             }}{{ (lab_fetch_src | splitext)[1] | default('.json', true) }}
 
     - name: Write it locally
       ansible.builtin.copy:
