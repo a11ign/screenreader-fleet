@@ -1,3 +1,4 @@
+// @ts-check
 // Is every worker running the code in this checkout?
 //
 //   npm run worker:code
@@ -23,6 +24,7 @@ import { configuredWorkers, inventoryWorkerUrls } from "./fleet-env.mjs";
 // the same question before every run and a second copy of "is this worker stale" is a second answer.
 import { expectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { errorText } from "@a11y-witness/nvda-worker/error-text";
 
 /**
  * takes NO flags — it asks every worker what code it is running and compares. Any flag passed to it
@@ -76,9 +78,11 @@ function workerUrls() {
   const named = configuredWorkers();
   if (named.length) return named.map((w) => w.url);
   const pool = JSON.parse(execFileSync(CTL, ["pool"], { encoding: "utf8" }));
-  return pool.filter((vm) => vm.ip).map((vm) => `http://${vm.ip}:${vm.port}`);
+  return pool.filter((/** @type {{ip?: string}} */ vm) => vm.ip)
+    .map((/** @type {{ip: string, port: number}} */ vm) => `http://${vm.ip}:${vm.port}`);
 }
 
+/** @param {string} url */
 async function versionOf(url) {
   const response = await fetch(`${url.replace(/\/$/, "")}/health`, {
     signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
@@ -110,7 +114,7 @@ async function main() {
       // "absent" means the worker predates /health.code, which is itself a stale deploy.
       readings.push({ worker: url, code: await versionOf(url) });
     } catch (e) {
-      console.log(`  ${url}  unreachable (${e.message})`);
+      console.log(`  ${url}  unreachable (${errorText(e)})`);
       readings.push({ worker: url, code: null });
     }
   }
