@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Are the guests actually interchangeable?
  *
@@ -46,24 +47,44 @@ export const MUST_MATCH = [
       "it is already a cache key -- a split fleet shows up only as unexplained cache misses" },
 ];
 
+/**
+ * One field the guests disagree about, and the guests' values for it.
+ *
+ * Named once because it is produced by `fleetConsistency` and consumed by `describeMismatches`, and the
+ * two had already drifted apart the moment either was annotated — `object` on one side against
+ * `Record<string, unknown>` on the other, which typecheck caught in the test that calls them in sequence.
+ * Two spellings of one shape is the duplication this repo names as its most expensive recurring defect,
+ * and a typedef is the cheapest form of "delete a copy".
+ *
+ * @typedef {{field: string, why: string, values: Record<string, unknown>}} Mismatch
+ */
+
 /** Edge policy values every guest must agree on, checked separately because they come from /diagnostics. */
 export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"];
 
+/** @param {Record<string, unknown> | undefined} object @param {string} key */
 const get = (object, key) => (object ?? {})[key];
 
 /**
  * Compare guests field by field.
  *
- * @param {Array<{worker: string, environment?: object, policy?: object}>} guests
- * @returns {{consistent: boolean, mismatches: Array<{field: string, why: string, values: object}>}}
+ * @param {Array<{worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}>} guests
+ * @returns {{consistent: boolean, mismatches: Mismatch[]}}
  */
 export function fleetConsistency(guests) {
   const present = (guests ?? []).filter((g) => g && (g.environment || g.policy));
   // One guest is trivially consistent with itself, and zero is not a fleet. Neither is a finding.
   if (present.length < 2) return { consistent: true, mismatches: [] };
 
+  /** @type {Mismatch[]} */
   const mismatches = [];
+  /**
+   * @param {string} field
+   * @param {string} why
+   * @param {(guest: {worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}) => unknown} read
+   */
   const check = (field, why, read) => {
+    /** @type {Record<string, unknown>} */
     const values = {};
     for (const guest of present) {
       const value = read(guest);
@@ -82,7 +103,12 @@ export function fleetConsistency(guests) {
   return { consistent: mismatches.length === 0, mismatches };
 }
 
-/** One line per mismatch, naming the guests, so the report is actionable rather than just alarming. */
+/**
+ * One line per mismatch, naming the guests, so the report is actionable rather than just alarming.
+ *
+ * @param {Mismatch[]} mismatches
+ * @returns {string[]}
+ */
 export function describeMismatches(mismatches) {
   return (mismatches ?? []).map(({ field, values, why }) => {
     const label = labelWorkers(Object.keys(values));
@@ -102,20 +128,30 @@ export function describeMismatches(mismatches) {
  * So the short form is used only while it distinguishes, and the full host:port otherwise. Shortening is
  * a readability optimisation, and it must never cost the thing the line exists to convey.
  */
+/**
+ * @param {string[]} workers
+ * @returns {Map<string, string>}
+ */
 function labelWorkers(workers) {
   const short = new Map(workers.map((w) => [w, shortWorker(w)]));
   const counts = new Map();
   for (const name of short.values()) counts.set(name, (counts.get(name) ?? 0) + 1);
-  return new Map(workers.map((w) =>
-    [w, counts.get(short.get(w)) > 1 ? hostAndPort(w) : short.get(w)]));
+  return new Map(workers.map((w) => {
+    // `short.get(w)` cannot miss — every worker was put in the map on the line above — but TypeScript
+    // cannot know that, and `?? w` is the honest fallback rather than a non-null assertion: an unlabelled
+    // worker printed as its own URL is still a located mismatch, which is what this function is for.
+    const name = short.get(w) ?? w;
+    return [w, (counts.get(name) ?? 0) > 1 ? hostAndPort(w) : name];
+  }));
 }
 
-/** `http://REDACTED-INTERNAL-ADDRESS:8765` is noise in a table; `.4` is not. */
+/** `http://REDACTED-INTERNAL-ADDRESS:8765` is noise in a table; `.4` is not. @param {string} worker */
 function shortWorker(worker) {
   const host = /\/\/([^:/]+)/.exec(worker)?.[1] ?? worker;
   return host.includes(".") ? `.${host.split(".").pop()}` : host;
 }
 
+/** @param {string} worker */
 function hostAndPort(worker) {
   return /\/\/(.+?)\/?$/.exec(worker)?.[1] ?? worker;
 }

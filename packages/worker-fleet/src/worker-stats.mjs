@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Robust statistics for comparing workers, and an explicit refusal to call a difference real when the
  * samples do not support it.
@@ -19,12 +20,25 @@
  * workers. Interleaving round-robin makes drift common to all of them.
  */
 
+/**
+ * One worker's samples, summarised.
+ *
+ * Named as a typedef rather than repeated inline because four functions pass it around, and this module's
+ * whole purpose is refusing to claim a difference the samples do not support — so `q1`, `q3` and `iqr`
+ * travelling together, as one thing with one name, is the point rather than a formality.
+ *
+ * @typedef {{n: number, median: number, q1: number, q3: number, iqr: number,
+ *            min: number, max: number}} Summary
+ */
+
 /** Below this many rounds, report the numbers but never claim a difference. */
 const MIN_ROUNDS_FOR_A_VERDICT = 5;
 
+/** @param {number[]} values @returns {number[]} */
 const sorted = (values) => [...values].sort((a, b) => a - b);
 
 /** Linear-interpolated quantile. Fine for the sample sizes here and has no dependencies. */
+/** @param {number[]} values @param {number} q @returns {number|null} */
 export function quantile(values, q) {
   if (!values.length) return null;
   const s = sorted(values);
@@ -39,19 +53,26 @@ export function quantile(values, q) {
  * `iqr` is the spread that matters: half the runs fall inside it, so two workers whose IQRs overlap are
  * not distinguishable by these samples however different their medians look.
  */
+/**
+ * @param {number[]} values
+ * @returns {Summary|null}
+ */
 export function describe(values) {
   if (!values.length) return null;
-  const q1 = quantile(values, 0.25), q3 = quantile(values, 0.75);
+  // Non-null by construction: `quantile` returns null only for an empty list, and the guard above has
+  // already excluded that. Written as a local rather than an assertion so the reason is stated once.
+  const q1 = /** @type {number} */ (quantile(values, 0.25));
+  const q3 = /** @type {number} */ (quantile(values, 0.75));
   return {
     n: values.length,
-    median: quantile(values, 0.5),
+    median: /** @type {number} */ (quantile(values, 0.5)),
     q1, q3, iqr: q3 - q1,
     min: Math.min(...values),
     max: Math.max(...values),
   };
 }
 
-/** Do two interquartile ranges overlap at all? */
+/** Do two interquartile ranges overlap at all? @param {Summary} a @param {Summary} b */
 function overlaps(a, b) {
   return a.q1 <= b.q3 && b.q1 <= a.q3;
 }
@@ -66,10 +87,11 @@ function overlaps(a, b) {
  * which is a real answer, not a failure to find one.
  *
  * @param {Record<string, number[]>} samplesByWorker
- * @returns {{ stats: Record<string, object>, slowest: string|null, fastest: string|null,
+ * @returns {{ stats: Record<string, Summary>, slowest: string|null, fastest: string|null,
  *             distinguishable: boolean, verdict: string }}
  */
 export function compareWorkers(samplesByWorker) {
+  /** @type {Record<string, Summary>} */
   const stats = {};
   for (const [worker, values] of Object.entries(samplesByWorker)) {
     const description = describe(values);

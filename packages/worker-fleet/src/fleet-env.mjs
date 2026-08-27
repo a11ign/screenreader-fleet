@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * `A11Y_WORKERS`, derived from the Ansible inventory — so a machine is added in ONE place.
  *
@@ -97,11 +98,28 @@ const KEY_LINE = /^(\s*)([A-Za-z_][\w.-]*)\s*:/;
 export const WORKER_GROUP = "a11y_workers";
 
 /**
+ * One frame of the indentation stack: a key and the column it started at.
+ *
+ * @typedef {{indent: number, key: string}} Frame
+ */
+
+/**
+ * A host as the inventory declares it — the ADDRESS and the NAME together.
+ *
+ * They travel as one value because separating them is what sent `fleet:sleep` at the wrong machine: every
+ * tool that ACTS on a worker takes the name, every tool that REPORTS on one printed the address, and
+ * nothing mapped between them. `collectHost` explains the incident.
+ *
+ * @typedef {{name: string|undefined, host: string}} Host
+ */
+
+/**
  * The group a host sits in: the key directly beneath `children`.
  *
  * Ansible nests as `all.children.<group>.hosts.<name>`, so the group is positional rather than something
  * to pattern-match on a name. Reading it from the path means a group added later needs no change here.
  */
+/** @param {Array<string|undefined>} path @returns {string|undefined} */
 function groupOf(path) {
   const children = path.indexOf("children");
   return children === -1 ? undefined : path[children + 1];
@@ -114,6 +132,7 @@ function groupOf(path) {
  * plane must be able to read the fleet without installing anything. Indentation is sufficient because the
  * only question asked of the path is which group a host is in.
  */
+/** @param {Frame[]} stack @param {string} line */
 function descend(stack, line) {
   const match = line.match(KEY_LINE);
   if (!match) return;
@@ -135,6 +154,7 @@ function descend(stack, line) {
  * @returns {Array<string | undefined>}
  */
 export function groupPerLine(text) {
+  /** @type {Frame[]} */
   const stack = [];
   return text.split(/\r?\n/).map((line) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return groupOf(stack.map((f) => f.key));
@@ -154,7 +174,9 @@ export function groupPerLine(text) {
  * @returns {string[]}
  */
 export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
+  /** @type {Host[]} */
   const hosts = [];
+  /** @type {Frame[]} */
   const stack = [];
   text.split(/\r?\n/).forEach((line, index) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return;
@@ -188,7 +210,9 @@ export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group =
  * @returns {Record<string, string>}
  */
 export function workerNamesFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
+  /** @type {Host[]} */
   const hosts = [];
+  /** @type {Frame[]} */
   const stack = [];
   text.split(/\r?\n/).forEach((line, index) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return;
@@ -196,7 +220,11 @@ export function workerNamesFromInventory(text, { port = DEFAULT_WORKER_PORT, gro
     if (match) return collectHost(hosts, { match, index, stack, group });
     descend(stack, line);
   });
-  return Object.fromEntries(hosts.map(({ name, host }) => [`http://${host}:${port}`, name]));
+  // Falls back to the ADDRESS when the inventory nests a host without a name. That cannot happen in a
+  // well-formed inventory — Ansible keys hosts by name — but `undefined` reaching a report would print as
+  // the string "undefined", which is this repo's worst failure shape: a value that looks like an answer.
+  // An address is a worse label than a name and still identifies the machine, which is what this map is for.
+  return Object.fromEntries(hosts.map(({ name, host }) => [`http://${host}:${port}`, name ?? host]));
 }
 
 /**
@@ -205,6 +233,9 @@ export function workerNamesFromInventory(text, { port = DEFAULT_WORKER_PORT, gro
  * A host outside every group is the ambiguous case, and it gets an error rather than a default. Including
  * it recreates the phantom-worker bug; dropping it silently is how a fleet list comes up short — and this
  * module exists because both of those are invisible. So it says which line, and which group it expected.
+ *
+ * @param {Host[]} hosts
+ * @param {{match: RegExpMatchArray, index: number, stack: Frame[], group: string}} found
  */
 function collectHost(hosts, { match, index, stack, group }) {
   const found = groupOf(stack.map((frame) => frame.key));
@@ -228,6 +259,7 @@ function collectHost(hosts, { match, index, stack, group }) {
 }
 
 /** The port the group vars declare, so it is stated once and not guessed here. */
+/** @param {string} text @returns {number} */
 export function portFromGroupVars(text) {
   const match = text.match(/^\s*a11y_port\s*:\s*(\d+)\s*$/m);
   return match ? Number(match[1]) : DEFAULT_WORKER_PORT;

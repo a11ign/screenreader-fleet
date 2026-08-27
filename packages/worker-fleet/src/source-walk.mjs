@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Every source file under `packages/`, so a guard can be written over what EXISTS rather than over a list.
  *
@@ -29,7 +30,9 @@ export const PACKAGES = join(dirname(fileURLToPath(import.meta.url)), "..", ".."
  * @returns {Array<[string, string]>}
  */
 export function sourceFiles({ root = PACKAGES } = {}) {
+  /** @type {Array<[string, string]>} */
   const found = [];
+  /** @param {string} dir */
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
