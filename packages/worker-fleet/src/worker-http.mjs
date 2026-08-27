@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * HTTP to a capture worker, on a connection that may stay silent for ten minutes.
  *
@@ -136,7 +137,11 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
     const req = send(target, { method, headers: requestHeaders(payload) }, (res) => {
       collect(res).then((text) => {
         clearTimeout(deadline);
-        resolve({ status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, text, json: parse(text) });
+        // `?? 0` because node types `statusCode` optional -- it is set on every client response, and a 0
+        // would fall out of the 2xx range exactly as an absent one should, so the fallback cannot change
+        // an answer. Named once rather than read three times.
+        const status = res.statusCode ?? 0;
+        resolve({ status, ok: status >= 200 && status < 300, text, json: parse(text) });
       }, failWith);
     });
 
@@ -145,11 +150,16 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
     // never trips. The message says "timed out" so the prose fallback in isTransient still classifies it,
     // and the code says so too for anything that prefers codes.
     const deadline = setTimeout(() => {
-      const error = new Error(`Request to ${url} timed out after ${timeoutMs} ms`);
+      // Typed as an ErrnoException so the `code` this deliberately attaches is describable. Recovery in
+      // this repo is keyed on CODES and never on message text (`capture-faults.mjs`), so the field is
+      // load-bearing rather than decorative.
+      const error = /** @type {NodeJS.ErrnoException} */ (
+        new Error(`Request to ${url} timed out after ${timeoutMs} ms`));
       error.code = "ETIMEDOUT";
       req.destroy(error);
     }, timeoutMs);
 
+    /** @param {unknown} error */
     function failWith(error) {
       clearTimeout(deadline);
       reject(error);
@@ -161,6 +171,7 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
   });
 }
 
+/** @param {string | null} payload */
 function requestHeaders(payload) {
   if (payload === null) return { accept: "application/json" };
   return {
@@ -173,17 +184,24 @@ function requestHeaders(payload) {
   };
 }
 
+/**
+ * @param {import("node:http").IncomingMessage} res
+ * @returns {Promise<string>}
+ */
 function collect(res) {
   return new Promise((resolve, reject) => {
     let text = "";
     res.setEncoding("utf8");
-    res.on("data", (chunk) => { text += chunk; });
+    res.on("data", (/** @type {string} */ chunk) => { text += chunk; });
     res.on("end", () => resolve(text));
     res.on("error", reject);
   });
 }
 
-/** Parsed JSON, or undefined — a worker error page is not a parse failure worth throwing over. */
+/**
+ * Parsed JSON, or undefined — a worker error page is not a parse failure worth throwing over.
+ * @param {string} text
+ */
 function parse(text) {
   try {
     return JSON.parse(text);

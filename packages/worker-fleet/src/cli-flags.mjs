@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Refuse a flag this command does not read.
  *
@@ -27,7 +28,10 @@ import { pathToFileURL } from "node:url";
 /** How far apart two flags may be and still be worth suggesting. One typo, or one word. */
 const NEAR = 4;
 
-/** Levenshtein, small and iterative — the inputs are flag names, never long strings. */
+/**
+ * Levenshtein, small and iterative — the inputs are flag names, never long strings.
+ * @param {string} a @param {string} b @returns {number}
+ */
 function distance(a, b) {
   let previous = Array.from({ length: b.length + 1 }, (_unused, index) => index);
   for (let i = 1; i <= a.length; i += 1) {
@@ -41,7 +45,10 @@ function distance(a, b) {
   return previous[b.length];
 }
 
-/** The flag name alone: `--shard=0/4` and `--shard` both name `--shard`. */
+/**
+ * The flag name alone: `--shard=0/4` and `--shard` both name `--shard`.
+ * @param {string} argument @returns {string}
+ */
 export function nameOf(argument) {
   const equals = argument.indexOf("=");
   return equals === -1 ? argument : argument.slice(0, equals);
@@ -53,6 +60,9 @@ export function nameOf(argument) {
  * A bare `--` is npm's separator and never a flag. Anything not starting with `--` is positional — a URL,
  * a worker address, a page path — and is not this guard's business.
  */
+/**
+ * @param {string[]} argv @param {string[]} known @returns {string[]}
+ */
 export function unknownFlags(argv, known) {
   const accepted = new Set(known.map(nameOf));
   return argv
@@ -61,7 +71,10 @@ export function unknownFlags(argv, known) {
     .filter((flag) => !accepted.has(flag));
 }
 
-/** The closest known flag, when there is one close enough to be a likely typo rather than a guess. */
+/**
+ * The closest known flag, when there is one close enough to be a likely typo rather than a guess.
+ * @param {string} flag @param {string[]} known @returns {string | undefined}
+ */
 export function didYouMean(flag, known) {
   const ranked = known.map(nameOf)
     .map((candidate) => ({ candidate, gap: distance(flag, candidate) }))
@@ -81,7 +94,12 @@ export function didYouMean(flag, known) {
  *   `entry` is the caller's `import.meta.url`, and it is REQUIRED. `command` names the thing a HUMAN
  *   typed — the npm script, not the file — because that is what they will retype.
  */
-export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2), command } = {}) {
+// NO `= {}` DEFAULT, because `entry` is required and the docstring above has always said so. A default
+// that lets the whole options object be omitted contradicts that: it produces `entry === undefined`, and
+// the guard below decides whether THIS module is the command by comparing `entry` against argv[1] -- so a
+// caller who forgot it would get a guard that silently never fires. Types found the contradiction the
+// moment this file entered the program. Every one of the 60 real call sites passes it.
+export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2), command }) {
   // ONLY WHEN THIS MODULE IS THE COMMAND, never when it is imported.
   //
   // These calls sit at module top level, so they run on IMPORT — and then inspect the IMPORTING process's
@@ -105,7 +123,13 @@ export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2),
     const near = didYouMean(flag, known);
     console.error(`  ${name}: unknown flag ${flag}${near ? ` — did you mean ${near}?` : ""}`);
   }
-  console.error(`  It takes: ${[...known].map(nameOf).sort().join(" ")}`);
+  // "It takes: " with nothing after it is what a command taking NO flags printed, and that reads like the
+  // guard failed to find its own list rather than like an answer. First hit by `release:provenance`, the
+  // first zero-flag CLI here -- the branch existed for months with no caller to exercise it.
+  const accepted = [...known].map(nameOf).sort();
+  console.error(accepted.length === 0
+    ? "  It takes no flags at all."
+    : `  It takes: ${accepted.join(" ")}`);
   console.error("  Refusing rather than ignoring it: an ignored flag runs the default and reports success.");
   process.exit(2);
 }
