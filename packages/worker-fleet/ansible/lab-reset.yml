@@ -190,15 +190,34 @@
         # sequential statements and the refusal branch ran unconditionally — measured here, and the same
         # trap `lab-log.yml` hit an hour earlier with a pipeline. Multi-line shell needs `|`.
         cmd: |
+          before=$(printf '%s\n' "$LAB_DIRTY_BEFORE" | grep -F -- " {{ remove }}" | head -1 | cut -c1-2)
           if git status --porcelain -- "{{ remove }}" | grep -q '^??'; then
             rm -f -- "{{ remove }}" && echo "removed {{ remove }}"
+          elif [ -n "$before" ] && [ "$before" != "??" ]; then
+            echo "restored {{ remove }} (a TRACKED modification, discarded by the checkout above)"
           else
-            echo "REFUSED: {{ remove }} is not an untracked file"
+            echo "REFUSED: {{ remove }} was neither untracked nor a tracked modification"
             exit 1
           fi
         chdir: "{{ lab_repo_path }}"
+        # THE PRE-CHECKOUT PORCELAIN, handed to the shell rather than parsed in Jinja.
+        #
+        # It has to be the pre-checkout state: `git checkout -- .` above has already restored every
+        # tracked modification, including this one, so asking git here cannot tell "it was tracked and we
+        # just fixed it" from "it was never dirty". Those need opposite messages and one was printed for
+        # both.
+        #
+        # Classified with `grep -F` — a LITERAL match, no regex, nothing to escape. The Jinja version of
+        # this was written first and did not survive being run: `.split('\n')` inside a folded scalar
+        # does not split, so `select('search', ...)` matched the whole blob and reported every path as
+        # tracked. Measured with a three-line playbook, which is this repo's own rule for YAML+Jinja
+        # escaping — settled by RUNNING it, never by reading.
+      environment:
+        LAB_DIRTY_BEFORE: "{{ dirty.stdout | default('') }}"
       register: removed_named
-      changed_when: "'removed ' in (removed_named.stdout | default(''))"
+      changed_when: >-
+        {{ 'removed ' in (removed_named.stdout | default('')) 
+           or 'restored ' in (removed_named.stdout | default('')) }}
       # A refusal must REPORT, not abort. `exit 1` failed the play before the reporting tasks below, so
       # the operator saw an Ansible module error and no reason — three times on 2026-08-26 I read
       # "STILL DIRTY" about a file the play had just declined to explain. The task's own stdout carries
@@ -213,11 +232,21 @@
     - name: A named removal that refused must fail the play, having SAID why
       when: remove is defined and (apply | default(false) | bool)
       ansible.builtin.assert:
-        that: "'removed ' in (removed_named.stdout | default(''))"
+        # EITHER outcome is success, and conflating them reported a done thing as a refusal.
+        #
+        # Measured 2026-08-27: naming a TRACKED modification bypassed the refusal above (which is the
+        # documented, deliberate behaviour — "naming a path IS the decision the refusal asks for"),
+        # `git checkout -- .` restored it, the tree came back clean, and then this assert failed with
+        # "Nothing was deleted". The operator is told nothing happened by a play that had just acted,
+        # which is worse than either a failure or a success: it invites a second, blinder attempt.
+        that: >-
+          {{ 'removed ' in (removed_named.stdout | default(''))
+             or 'restored ' in (removed_named.stdout | default('')) }}
         fail_msg: >-
           {{ removed_named.stdout | default('the removal produced no output') | trim }}.
-          Nothing was deleted. `-e remove=` takes one UNTRACKED path relative to {{ lab_repo_path }};
-          `npm run lab:reset` with no -e remove reports what is dirty.
+          Nothing was changed. `-e remove=` takes ONE path that is dirty right now — either untracked
+          (it is deleted, if origin carries a copy) or a tracked modification (it is restored from
+          origin). `npm run lab:reset` with no -e remove reports what is dirty.
 
     - name: Say what happened to the untracked files
       when: (dirty.stdout | trim) != '' and (apply | default(false) | bool)
