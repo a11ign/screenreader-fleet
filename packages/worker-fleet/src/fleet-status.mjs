@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * What is every worker doing, right now?
  *
@@ -84,7 +85,7 @@ export function fleetToProbe() {
   } catch (error) {
     throw new Error(
       "No fleet to report on: A11Y_WORKERS is unset and the inventory could not be read "
-      + `(${error.message}). Set one, or add a host to packages/worker-fleet/ansible/inventory.yml.`,
+      + `(${/** @type {Error} */ (error).message}). Set one, or add a host to packages/worker-fleet/ansible/inventory.yml.`,
       { cause: error });
   }
 }
@@ -95,8 +96,13 @@ export function fleetToProbe() {
  * Unreachable is a RESULT, not a throw: a fleet report whose job is to say which box is missing must not
  * be taken down by the box that is missing.
  */
+/**
+ * @param {{ name: string, url: string }} worker
+ * @returns {Promise<{ name: string, url: string, reachable: boolean,
+ *                     health?: Record<string, any>, progress?: Record<string, any>, error?: string }>}
+ */
 export async function probeWorker({ name, url }) {
-  const ask = async (path) => {
+  const ask = async (/** @type {string} */ path) => {
     const response = await requestJson(`${url}${path}`, { timeoutMs: PROBE_TIMEOUT_MS });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json ?? {};
@@ -106,11 +112,15 @@ export async function probeWorker({ name, url }) {
     const [health, progress] = await Promise.all([ask("/health"), ask("/progress")]);
     return { name, url, reachable: true, health, progress };
   } catch (error) {
-    return { name, url, reachable: false, error: error.message ?? String(error) };
+    return { name, url, reachable: false, error: /** @type {Error} */ (error).message ?? String(error) };
   }
 }
 
 /** `ready`, `busy`, `warming` or `unreachable` — four states, because collapsing any two loses the point. */
+/**
+ * @param {WorkerProbe} probe
+ * @returns {string}
+ */
 export function stateOf(probe) {
   if (!probe.reachable) return "unreachable";
   if (probe.health?.busy) return "busy";
@@ -135,6 +145,10 @@ export function stateOf(probe) {
  * "404 and 202 are different answers" rule, applied to a status display: *finished* and *still going*
  * must never render the same.
  */
+/** @typedef {{ name: string, url: string, reachable: boolean, health?: Record<string, any>,
+ *               progress?: Record<string, any>, error?: string }} WorkerProbe */
+
+/** @param {WorkerProbe} probe */
 export function activityOf(probe) {
   const progress = probe.progress;
   // `progress.busy`, not `health.busy`: `capturing` comes from this same payload, and health and progress
@@ -153,6 +167,7 @@ export function activityOf(probe) {
   return `${elapsed}${phase}  ${shortUrl(progress.capturing)}`;
 }
 
+/** @param {string} url */
 function shortUrl(url) {
   try {
     const { pathname, host } = new URL(url);
@@ -163,6 +178,7 @@ function shortUrl(url) {
 }
 
 /** The per-worker rows, as data, so the renderer and `--json` cannot disagree about what was found. */
+/** @param {WorkerProbe[]} probes */
 export function summarise(probes) {
   return probes.map((probe) => {
     const vitals = probe.health?.vitals ?? null;
@@ -182,8 +198,18 @@ export function summarise(probes) {
   });
 }
 
+/**
+ * @typedef {ReturnType<typeof summarise>[number]} WorkerRow
+ *
+ * DERIVED from `summarise` rather than written out again. The renderer and `--json` must not disagree
+ * about what a row is -- which is what the docstring on `summarise` already says the rows exist for --
+ * and a second hand-written description of the same object is how those two come apart.
+ */
+
+/** @param {WorkerRow[]} rows */
 function renderTable(rows) {
-  const width = (pick) => Math.max(...rows.map((r) => String(pick(r) ?? "").length), 0);
+  const width = (/** @type {(row: WorkerRow) => unknown} */ pick) =>
+    Math.max(...rows.map((r) => String(pick(r) ?? "").length), 0);
   const nameWidth = Math.max(width((r) => r.name), "worker".length);
   const stateWidth = Math.max(width((r) => r.state), "state".length);
 
@@ -210,7 +236,10 @@ export async function fleetStatus() {
   const rows = summarise(probes);
   const guests = probes
     .filter((p) => p.reachable)
-    .map((p) => ({ worker: p.url, environment: p.health?.environment, policy: null }));
+    // `policy: undefined`, not null. `fleetConsistency` takes `policy?: Record<string, unknown>` -- an
+    // OPTIONAL field, meaning "this probe did not collect one", which is exactly true here since
+    // `/health` carries no policy block. `null` would be a claim that it collected an empty policy.
+    .map((p) => ({ worker: p.url, environment: p.health?.environment, policy: undefined }));
   const { consistent, mismatches } = fleetConsistency(guests);
   return { rows, consistent, mismatches, reachable: guests.length, total: workers.length };
 }
