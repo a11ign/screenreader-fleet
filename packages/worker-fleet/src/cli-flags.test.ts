@@ -85,6 +85,9 @@ const GUARDED: Record<string, string> = {
     "recaptures the eval fixtures; --ff-only appears in the file because it is passed to GIT",
   "packages/worker-fleet/src/compare-workers.mjs":
     "--runs= is a documented alias of --rounds=, so a guard listing one would refuse a spelling the code supports",
+  "packages/lab/scripts/check-dataset-distribution.mjs":
+    "a mistyped --data would silently check the DEFAULT export and report it clean, which is the "
+    + "examined-nothing failure this command exists to catch, committed by the command itself",
   "packages/lab/scripts/audit-corpus-urls.mjs":
     "a mistyped --timeout= silently uses 15s, and a slow government host then reports as MOVED when it "
     + "merely did not answer in time",
