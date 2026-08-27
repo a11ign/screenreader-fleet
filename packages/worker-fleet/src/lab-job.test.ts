@@ -264,11 +264,23 @@ test("the unit DESCRIPTION carries the commit, so a journal can never be read wi
   assert.match(description, /DIRTY/,
     "a dirty checkout at the right commit must SAY so; the SHA alone cannot express it");
 
-  // And it must be readable back deliberately, not only by spotting systemd's own line.
+  // AND IT MUST BE READ BACK FROM THE JOURNAL, never from the unit.
+  //
+  // `systemctl show -p Description` is the obvious companion and is a trap, measured rather than
+  // reasoned: the launcher stops the transient unit when the job ends, an unloaded unit has no
+  // description, and `show` answers with the unit NAME -- `Description=a11y-job-rules-coverage.service`
+  // on a finished job. That is a field printing a filename where a commit belongs, which is the defect
+  // the stamp exists to remove, reintroduced by the read-back meant to expose it.
   const status = executable(read("lab-status.yml"));
-  assert.match(status, /"-p", Description/,
-    "`lab:status` must report Description, or answering `what code produced this?` is still a manual "
-      + "comparison against git log");
+  assert.ok(!/"-p", Description/.test(status),
+    "an unloaded unit reports its NAME as its description, so this read-back answers confidently and "
+      + "wrongly for exactly the finished jobs anyone asks about");
+  assert.match(status, /What code produced this run/,
+    "`lab:status` must answer it outright, or the reader is back to comparing a timestamp to git log");
+  assert.match(status, /regex_findall/,
+    "`regex_search` throws INSIDE the filter on a non-match -- Ansible calls .group() on the None -- so "
+      + "no `| default` can save it, and a status command that crashes while reporting status is worse "
+      + "than one that says nothing");
 });
 
 test("a pull never runs into a checkout somebody or something else is using", () => {

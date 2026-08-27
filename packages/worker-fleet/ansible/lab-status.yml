@@ -64,13 +64,19 @@
 
     - name: "Detail for {{ job | default('(no job named)') }}"
       when: job is defined
-      # `Description` FIRST, because it carries the COMMIT and every number below it is unreadable
-      # without one. `run-job.yml` stamps `<job> at <sha12>[ DIRTY]` there so systemd's own
-      # `Started <unit> - <Description>.` line opens the journal with it; reading it back here means
-      # `lab:status` answers "what code produced this?" without anyone comparing a timestamp to git log.
-      # That comparison is what turned an eleven-hour-stale `2.4.4` verdict into a reported contradiction.
+      # NOT `-p Description`, and the reason is measured rather than assumed.
+      #
+      # `run-job.yml` stamps `<job> at <sha12>[ DIRTY]` into the unit description so systemd's own
+      # `Started <unit> - <Description>.` line opens the journal with the commit. Reading it back HERE
+      # looked like the obvious companion and is a trap: the launcher stops the transient unit when the
+      # job ends, an unloaded unit has no description, and `systemctl show` answers with the unit NAME.
+      # Measured 2026-08-27 on a finished job: `Description=a11y-job-rules-coverage.service` -- a field
+      # printing a filename where a commit belongs, which is the precise defect this stamp exists to
+      # remove, reintroduced by the read-back meant to expose it.
+      #
+      # So the JOURNAL is the source, below, and the commit is extracted from it.
       ansible.builtin.command:
-        argv: [systemctl, show, "-p", Description, "-p", SubState, "-p", ActiveState, "-p", Result,
+        argv: [systemctl, show, "-p", SubState, "-p", ActiveState, "-p", Result,
                "-p", ExecMainStatus, "-p", ActiveEnterTimestamp, "a11y-job-{{ job }}"]
       register: detail
       changed_when: false
@@ -120,6 +126,20 @@
              if (job_invocation.stdout | default('') | trim | length) > 0
              else 'ALL runs of this unit since boot, oldest first — the unit has been released, so systemd
                    no longer knows which invocation was last. Read the timestamps.' }}
+
+    # THE ONE-LINE ANSWER to "what code produced these numbers?", derived from the journal rather than
+    # asked of a unit that may no longer exist. `regex_findall` and never `regex_search`: on a non-match
+    # the latter throws INSIDE the filter -- Ansible calls `.group()` on the None -- so no `| default`
+    # afterwards can save the message, and a status command that crashes while reporting status is worse
+    # than one that says nothing. An empty list is the honest answer for a run predating the stamp.
+    - name: "What code produced this run"
+      when: job is defined
+      ansible.builtin.debug:
+        msg: >-
+          {{ (recent.stdout | default('') | regex_findall(job ~ ' at ([0-9a-f]{7,40}(?: DIRTY)?)'))
+             | unique | join(', ')
+             | default('NOT STATED — this journal predates the commit stamp, so the code behind these
+                        numbers is unknown. Re-run rather than quote it.', true) }}
 
     - name: "journal for {{ job | default('') }}"
       when: job is defined
