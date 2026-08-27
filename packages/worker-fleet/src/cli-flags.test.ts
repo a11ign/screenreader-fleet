@@ -37,6 +37,10 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "packages/lab/scripts/check-shipped-provenance.mjs":
+    "it takes NO flags, and that is the case worth guarding rather than the one to skip: an argument "
+    + "that looks like it narrows a release gate (`--allow-stale`, `--skip`) would be ignored, and the "
+    + "gate would report a pass having been asked for something it never did",
   "packages/lab/src/training/capture-screenreader-dataset.mjs":
     "a typo costs a full corpus run — `--resmue` silently means a fresh capture of 1,061 pairs",
   "packages/lab/src/training/capture-real-pages.mjs":
