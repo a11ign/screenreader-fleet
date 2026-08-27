@@ -74,6 +74,12 @@ export function didYouMean(flag, known) {
  * `command` names the thing a human typed — the npm script, not the file — because that is what they will
  * retype. Defaults to the script's basename, which is right for the ones invoked directly.
  */
+/**
+ * @param {string[]} known  Every flag this command reads, `--name` or `--name=`.
+ * @param {{argv?: string[], command?: string}} [options]  `command` names the thing a HUMAN typed — the
+ *   npm script, not the file — because that is what they will retype. Its absence from these types was
+ *   found by the first `// @ts-check` caller to pass it, which is the whole argument for checking `.mjs`.
+ */
 export function refuseUnknownFlags(known, { argv = process.argv.slice(2), command } = {}) {
   const unknown = unknownFlags(argv, known);
   if (unknown.length === 0) return;
