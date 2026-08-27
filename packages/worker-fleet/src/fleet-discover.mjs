@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Find every capture worker on the network, and reconcile it against the inventory.
  *
@@ -72,6 +73,7 @@ const LAST_HOST_IN_SUBNET = 254;
  * @returns {Array<{name: string, host: string, mac: string | null, line: number}>}
  */
 export function inventoryHosts(text) {
+  /** @type {{ name: string, host: string|null, mac: string|null, line: number }[]} */
   const hosts = [];
   let current = null;
   // Group per line from `fleet-env.mjs`, not a second group parser here. Without it this returned the lab
@@ -83,7 +85,10 @@ export function inventoryHosts(text) {
     if (groups[index] !== WORKER_GROUP) continue;
     const name = line.match(/^\s{8}([A-Za-z0-9][\w-]*):\s*$/);
     if (name) {
-      current = { name: name[1], host: null, mac: null, line: index + 1 };
+      // Declared, because `host` and `mac` are FILLED IN by the two lines below and inferred from this
+      // literal they are `null` and nothing else -- so the parser's whole job reads as a type error.
+      current = /** @type {{ name: string, host: string|null, mac: string|null, line: number }} */ (
+        { name: name[1], host: null, mac: null, line: index + 1 });
       hosts.push(current);
       continue;
     }
@@ -92,7 +97,11 @@ export function inventoryHosts(text) {
     const mac = line.match(/^\s*mac\s*:\s*(\S*)\s*$/);
     if (mac && current) current.mac = normaliseMac(mac[1].replace(/^["']|["']$/g, ""));
   }
-  return hosts.filter((h) => h.host);
+  // The filter guarantees `host`, and a filter cannot narrow -- so the cast states what the line above
+  // established rather than re-checking it. A host entry with no `ansible_host` is not a worker; that is
+  // the whole point of the filter and it is why the declared return says `string`.
+  return /** @type {{ name: string, host: string, mac: string|null, line: number }[]} */ (
+    hosts.filter((h) => h.host));
 }
 
 /**
@@ -108,11 +117,14 @@ export function normaliseMac(value) {
   if (!value) return null;
   const hex = String(value).replace(/[^0-9a-fA-F]/g, "").toLowerCase();
   if (hex.length !== 12) return null;
-  return hex.match(/.{2}/g).join(":");
+  // `?? []` because `String.match` is typed nullable, and the length check above already rules that
+  // out -- a twelve-character hex string always yields six pairs. Stated so the guarantee is visible
+  // rather than assumed at the one line that would throw if it ever stopped holding.
+  return (hex.match(/.{2}/g) ?? []).join(":");
 }
 
 /** The MAC the host's ARP table has for an address, or null. Populated by having just talked to it. */
-export function macOf(ip) {
+export function macOf(/** @type {any} */ ip) {
   try {
     const out = execFileSync("arp", ["-n", ip], { encoding: "utf8", timeout: 3000 });
     const found = out.match(/([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})/);
@@ -135,7 +147,7 @@ export function localSubnet() {
   return null;
 }
 
-async function probe(ip, port) {
+async function probe(/** @type {any} */ ip, /** @type {any} */ port) {
   try {
     const response = await requestJson(`http://${ip}:${port}/health`, { timeoutMs: PROBE_TIMEOUT_MS });
     if (!response.ok || !response.json) return null;
@@ -146,10 +158,12 @@ async function probe(ip, port) {
 }
 
 /** Everything answering /health on the subnet. */
-export async function scan(subnet, port = DEFAULT_PORT) {
+export async function scan(/** @type {any} */ subnet, port = DEFAULT_PORT) {
   const addresses = Array.from({ length: LAST_HOST_IN_SUBNET }, (_, i) => `${subnet}.${i + 1}`);
   const found = await Promise.all(addresses.map((ip) => probe(ip, port)));
-  return found.filter(Boolean);
+  // A cast rather than a predicate: `probe` answers null for an address that does not respond, and
+  // the filter is what makes the declared return true. Stated once, where it is established.
+  return /** @type {any[]} */ (found.filter((entry) => entry !== null));
 }
 
 /**
@@ -201,9 +215,12 @@ export function reconcile(declared, discovered) {
  */
 export function nextWorkerName(existingNames) {
   const used = existingNames
-    .map((name) => name.match(/^a11y-worker-(\d+)$/))
-    .filter(Boolean)
-    .map((match) => Number(match[1]));
+    // `flatMap` rather than map-filter-map: a filter cannot narrow away the null for the `match[1]`
+    // two lines down, and matching then deciding in one place needs no narrowing to explain.
+    .flatMap((/** @type {string} */ name) => {
+      const match = name.match(/^a11y-worker-(\d+)$/);
+      return match ? [Number(match[1])] : [];
+    });
   return `a11y-worker-${(used.length ? Math.max(...used) : 0) + 1}`;
 }
 
@@ -218,6 +235,10 @@ export function nextWorkerName(existingNames) {
  * alternative leaves a real machine in no file at all, which is the quiet failure.
  *
  * @param {{name: string, ip: string, mac: string|null, health: object, today: string}} entry
+ */
+/**
+ * @param {{ name: string, ip: string, mac?: string|null, health?: Record<string, any>|null,
+ *           today: string }} entry
  */
 export function enrolmentBlock({ name, ip, mac, health, today }) {
   const env = health?.environment ?? {};
@@ -288,12 +309,12 @@ export function enrol(text, unknowns, today) {
  * tail of the block are left BELOW the insertion, because a trailing comment there belongs to the group
  * rather than to the last host in it.
  */
-function insertIntoWorkerGroup(text, blocks) {
+function insertIntoWorkerGroup(/** @type {any} */ text, /** @type {any} */ blocks) {
   const body = text.endsWith("\n") ? text : `${text}\n`;
   if (!blocks.length) return body;
 
   const lines = body.split("\n");
-  const start = lines.findIndex((line) => new RegExp(`^(\\s*)${WORKER_GROUP}\\s*:\\s*$`).test(line));
+  const start = lines.findIndex((/** @type {any} */ line) => new RegExp(`^(\\s*)${WORKER_GROUP}\\s*:\\s*$`).test(line));
   if (start === -1) {
     throw new Error(
       `inventory.yml declares no \`${WORKER_GROUP}:\` group, so there is nowhere to enrol a capture worker.\n`
@@ -315,7 +336,7 @@ function insertIntoWorkerGroup(text, blocks) {
 }
 
 /** A worker's identity in one line, so two boxes can be told apart at a glance. */
-function describe(health) {
+function describe(/** @type {any} */ health) {
   const e = health?.environment ?? {};
   if (!health?.code && !e.screenReaderVersion) {
     // The retired Proxmox VM answers exactly this. Saying so beats printing a row of dashes.
@@ -325,7 +346,7 @@ function describe(health) {
     + `${e.browser ?? "?"} ${e.browserVersion ?? "?"} ${e.windowsVersion ?? "?"}/${e.architecture ?? "?"}`;
 }
 
-function render(findings) {
+function render(/** @type {any} */ findings) {
   const lines = [];
   for (const f of findings) {
     if (f.state === "ok") {
@@ -378,7 +399,7 @@ function writeEnrolments(inventoryPath, unknowns) {
 }
 
 async function main() {
-  const arg = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) ?? "").split("=")[1];
+  const arg = (/** @type {any} */ name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) ?? "").split("=")[1];
   const subnet = arg("cidr") || localSubnet();
   if (!subnet) {
     process.stderr.write("Could not work out which /24 to scan. Pass --cidr=192.168.1\n");
@@ -397,12 +418,13 @@ async function main() {
     process.stdout.write(`${JSON.stringify({ subnet, port, findings }, null, 2)}\n`);
   } else {
     process.stdout.write(`\n${render(findings).join("\n")}\n\n`);
-    const counts = findings.reduce((acc, f) => ({ ...acc, [f.state]: (acc[f.state] ?? 0) + 1 }), {});
+    const counts = findings.reduce((/** @type {Record<string, number>} */ acc, /** @type {any} */ f) =>
+    ({ ...acc, [f.state]: (acc[f.state] ?? 0) + 1 }), {});
     process.stdout.write(`  ${declared.length} declared, ${discovered.length} answering — `
       + `${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")}\n`);
   }
   const enrolled = process.argv.includes("--enroll")
-    ? writeEnrolments(inventoryPath, findings.filter((f) => f.state === "unknown"))
+    ? writeEnrolments(inventoryPath, /** @type {any[]} */ (findings.filter((f) => f.state === "unknown")))
     : { added: [], skipped: [] };
 
   // Exit 1 only on a MISMATCH — a moved or unknown worker is something to act on. An absent one is not:

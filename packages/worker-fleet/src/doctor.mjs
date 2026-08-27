@@ -1,3 +1,4 @@
+// @ts-check
 // Can I run right now? One command, one answer.
 //
 //   npm run doctor            human-readable, with the fix for anything broken
@@ -53,17 +54,26 @@ const SCORER_MODEL_DIR = fileURLToPath(new URL("../../scorer/models/screenreader
 const DATASET = resolve(process.cwd(), "runs/screenreader-dataset");
 const PROBE_TIMEOUT_MS = 8000;
 
+/** @type {any[]} */
+/** @type {{ name: string, ok: boolean, detail: string, fix: string|null }[]} */
 const checks = [];
+/**
+ * One check's verdict, and its FIX. Every parameter is typed here rather than inferred, because `fix`
+ * defaulting to `null` infers as exactly `null` -- so the argument that matters most, the sentence
+ * telling a reader what to do about a failed check, was the one the compiler refused.
+ *
+ * @param {string} name @param {boolean} ok @param {string} detail @param {string|null} [fix]
+ */
 const add = (name, ok, detail, fix = null) => checks.push({ name, ok, detail, fix });
 
-function commandError(error) {
-  const observed = [error?.stderr, error?.stdout, error?.message]
+function commandError(/** @type {any} */ error) {
+  const observed = [error?.stderr, error?.stdout, /** @type {any} */ (error)?.message]
     .map((value) => String(value ?? "").trim())
     .find(Boolean) || "unknown command failure";
   return observed.replace(/\s+/g, " ").slice(0, 400);
 }
 
-function workerControlFix(observed) {
+function workerControlFix(/** @type {any} */ observed) {
   if (/no VM named|no worker VM registered/i.test(observed)) {
     return "UTM has no registered worker VM; re-register the existing a11y-worker*.utm bundles in UTM, then re-run " + `${CTL} pool`;
   }
@@ -72,12 +82,12 @@ function workerControlFix(observed) {
     : `${CTL} pool   # launches UTM if it is installed`;
 }
 
-async function shell(cmd, args, timeout = 30000) {
+async function shell(/** @type {any} */ cmd, /** @type {any} */ args, timeout = 30000) {
   const { stdout } = await run(cmd, args, { timeout, encoding: "utf8" });
   return stdout.trim();
 }
 
-async function httpJson(url) {
+async function httpJson(/** @type {any} */ url) {
   const response = await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
@@ -141,14 +151,14 @@ async function checkWorker() {
       "UTM has no registered worker VM; re-register an existing a11y-worker*.utm bundle, or build one from docs/getting-started.md");
   }
 
-  const running = pool.filter((vm) => vm.state === "started");
-  const healthy = pool.filter((vm) => vm.healthy);
-  const brokenlyRunning = running.filter((vm) => !vm.healthy);
-  const summary = pool.map((vm) => `${vm.name}=${vm.healthy ? vm.ip : vm.state}`).join(" ");
+  const running = pool.filter((/** @type {any} */ vm) => vm.state === "started");
+  const healthy = pool.filter((/** @type {any} */ vm) => vm.healthy);
+  const brokenlyRunning = running.filter((/** @type {any} */ vm) => !vm.healthy);
+  const summary = pool.map((/** @type {any} */ vm) => `${vm.name}=${vm.healthy ? vm.ip : vm.state}`).join(" ");
 
   // A VM that is RUNNING but not answering is a genuine fault. One that is stopped is not.
   if (brokenlyRunning.length) {
-    add("worker", false, `${summary} — ${brokenlyRunning.map((v) => v.name).join(", ")} running but not answering`,
+    add("worker", false, `${summary} — ${brokenlyRunning.map((/** @type {any} */ v) => v.name).join(", ")} running but not answering`,
       "Start-ScheduledTask -TaskName a11ysrv on that guest, or " + `${CTL} stop && ${CTL} up`);
   } else if (healthy.length) {
     add("worker", true, `${healthy.length}/${pool.length} ready — ${summary}`);
@@ -158,14 +168,14 @@ async function checkWorker() {
   // Same shape as a configured fleet, so the two diagnostics below have ONE implementation. They were
   // pure functions over /health JSON that only the UTM branch could reach, which meant a bare-metal
   // fleet -- the direction this project is going -- got neither.
-  const reachable = pool.filter((v) => v.healthy && v.ip)
-    .map((v) => ({ name: v.name, url: `http://${v.ip}:${v.port}` }));
+  const reachable = pool.filter((/** @type {any} */ v) => v.healthy && v.ip)
+    .map((/** @type {any} */ v) => ({ name: v.name, url: `http://${v.ip}:${v.port}` }));
   await checkDegradedWorkers(reachable);
   await checkFleetConsistency(reachable);
   checkHostCapacity(pool);
-  const busy = pool.filter((vm) => vm.busy);
+  const busy = pool.filter((/** @type {any} */ vm) => vm.busy);
   if (busy.length) {
-    add("contention", false, `${busy.map((v) => v.name).join(", ")} busy with a capture — another shell or agent is using the pool`,
+    add("contention", false, `${busy.map((/** @type {any} */ v) => v.name).join(", ")} busy with a capture — another shell or agent is using the pool`,
       "wait for it, or you will both see the other's restarts as breakage");
   }
 }
@@ -180,18 +190,18 @@ async function checkWorker() {
  * workers are sitting idle and ready, which is the exact mistake the comment above checkWorker
  * describes for a stopped VM.
  */
-async function checkConfiguredFleet(workers) {
+async function checkConfiguredFleet(/** @type {any} */ workers) {
   const probed = [];
   for (const w of workers) {
     try {
       probed.push({ ...w, health: await httpJson(`${w.url}/health`) });
     } catch (e) {
-      probed.push({ ...w, health: null, error: e.message });
+      probed.push({ ...w, health: null, error: /** @type {any} */ (e).message });
     }
   }
   const reachable = probed.filter((p) => p.health);
   const ready = reachable.filter((p) => p.health.ready);
-  const state = (p) => {
+  const state = (/** @type {any} */ p) => {
     if (!p.health) return "unreachable";
     if (p.health.busy) return "busy";
     return p.health.ready ? "ready" : "not-ready";
@@ -230,7 +240,7 @@ async function checkConfiguredFleet(workers) {
 // none, so this never surfaced anywhere. Measured on this pool: one worker needed a recovery on 4 of 4
 // captures (nvdaStart 19.1s each, WALL 122.9s) beside one that needed none (WALL 40.6s). Reported, not
 // failed: a degraded worker is slow, not broken, and pulling it costs more throughput than it saves.
-async function checkDegradedWorkers(workers) {
+async function checkDegradedWorkers(/** @type {any} */ workers) {
   for (const w of workers) {
     let health;
     try {
@@ -259,12 +269,12 @@ async function checkDegradedWorkers(workers) {
  * Never a FAIL. A run on slightly mismatched guests is worse than one on matched guests and far better
  * than no run, and a diagnostic must not be the thing that takes the pool offline.
  */
-async function checkFleetConsistency(workers) {
+async function checkFleetConsistency(/** @type {any} */ workers) {
   const guests = [];
   for (const w of workers) {
     try {
       const health = await httpJson(`${w.url}/health`);
-      guests.push({ worker: w.url, environment: health.environment, policy: null });
+      guests.push({ worker: w.url, environment: health.environment, policy: undefined });
     } catch {
       continue; // unreachable is the worker check's business, not this one
     }
@@ -285,12 +295,12 @@ async function checkFleetConsistency(workers) {
 // alternative is invisible. Three guests on this 36 GB Mac made every capture 1.6x slower than one
 // and produced mute-NVDA failures, and from outside that reads as "the workers are degrading" rather
 // than "the host is out of memory" — which is exactly how it was misread for a day.
-function checkHostCapacity(pool) {
+function checkHostCapacity(/** @type {any} */ pool) {
   const availableMb = availableHostMemoryMb();
   if (availableMb === null || !pool.length) return;
   // Guests already up have paid for their memory and are not counted in `availableMb`, so they are
   // added back — otherwise a running worker makes the host look smaller than it is.
-  const running = pool.filter((vm) => vm.state === "started").length;
+  const running = pool.filter((/** @type {any} */ vm) => vm.state === "started").length;
   const poolSize = pool.length;
   const limit = workersHostCanRun({ availableMb, alreadyRunning: running });
   const detail = `~${availableMb} MB available — room for ${Math.min(limit, poolSize)} of ${poolSize} worker(s)`;

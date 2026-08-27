@@ -126,7 +126,12 @@ export function assertWorkerUrl(value, { source = "--worker" } = {}) {
  *
  * @param {string} url
  * @param {{ method?: string, body?: unknown, timeoutMs?: number }} [options]
- * @returns {Promise<{ status: number, ok: boolean, text: string, json: unknown }>}
+ * @returns {Promise<{ status: number, ok: boolean, text: string, json: any }>}
+ *   `json: any`, not `unknown`. This is a JSON body off the wire, and every caller reads named fields
+ *   from it -- `body.error`, `body.fault`, `health.busy`, `body.transcript`. `unknown` makes each of
+ *   those a cast, and a cast written to satisfy a checker asserts a shape nobody verified, which is
+ *   strictly worse than saying the value is untyped. The SHAPE that matters is checked where it is
+ *   defined: `capture-core`'s `Capture` typedef, and the worker's own `/health` contract.
  */
 export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = {}) {
   const target = new URL(url);
