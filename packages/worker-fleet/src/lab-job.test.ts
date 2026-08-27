@@ -582,6 +582,34 @@ test("a job that answers in exit codes says what they mean", () => {
   }
 });
 
+test("only a job that reports progress has a progress root, and it is declared", () => {
+  // THE ROOT CAUSE, after two fixes that each covered the case somebody had just hit. `training:status`
+  // reads DATASET_ROOT and reports whatever run that corpus last held, so a job that does not capture at
+  // all — `export`, `rules-gate`, `train` — showed the DATASET capture's `captured: 29, total: 1431`
+  // under its own name. Fixing `acceptance`, then `real-pages`, left the other 31 jobs reporting a
+  // stranger's run: the assumption was never the mapping, it was that EVERY JOB CAPTURES.
+  //
+  // Five do. They declare where, beside the command, the same shape as `params:`. The rest get no
+  // progress block and say so — "this job does not report progress" and "here are some numbers" are
+  // different answers and only one of them is true.
+  const withProgress = Object.entries(PLAY_VARS.lab_jobs)
+    .filter(([, entry]) => (entry as { progress?: string }).progress)
+    .map(([name]) => name).sort();
+  assert.deepEqual(withProgress,
+    ["capture", "capture-acceptance", "capture-acceptance-2", "capture-only", "capture-real-pages"],
+    "exactly the jobs whose script calls beginRun() may declare a progress root");
+  // And every declared root must be a corpus directory, not a stray path.
+  for (const name of withProgress) {
+    const root = (PLAY_VARS.lab_jobs[name] as { progress?: string }).progress ?? "";
+    assert.match(root, /^runs\/[a-z-]+$/, `${name}'s progress root looks wrong: ${root}`);
+  }
+  const status = executable(read("lab-status.yml"));
+  assert.match(status, /does not report progress/,
+    "a job with no progress root must SAY so rather than fall through to another corpus");
+  assert.ok(!/lab_progress_roots/.test(status),
+    "the substring map is replaced by the job's own declaration — one source, beside the command");
+});
+
 test("lab:status reads the progress file of the corpus the job writes", () => {
   // Three variants of one defect, and the first two fixes each covered only the case somebody hit.
   // `training:status` reads DATASET_ROOT, which defaults to the training corpus — so an ACCEPTANCE job
@@ -592,12 +620,13 @@ test("lab:status reads the progress file of the corpus the job writes", () => {
   // An open set needs a MAP. A chain of `if`s only ever covers the cases already hit, which is how this
   // reached a third variant.
   const status = executable(read("lab-status.yml"));
-  assert.match(status, /lab_progress_roots:/,
-    "the corpus root must be declared per job, not selected by a two-way if");
-  for (const [job, root] of [["acceptance", "runs/screenreader-acceptance"],
-                             ["real-pages", "runs/real-page-corpus"]]) {
-    assert.match(status, new RegExp(`${job}:\\s*${root.replace(/\//g, "\\/")}`),
-      `a job matching '${job}' must read ${root}`);
+  assert.match(status, /lab_job_entry\.progress/,
+    "the root comes from the job's own declaration, read from the catalogue that defines it");
+  for (const [job, root] of [["capture-acceptance", "runs/screenreader-acceptance"],
+                             ["capture-real-pages", "runs/real-page-corpus"],
+                             ["capture", "runs/screenreader-dataset"]]) {
+    assert.equal((PLAY_VARS.lab_jobs[job] as { progress?: string }).progress, root,
+      `${job} must read ${root}`);
   }
   // Every job that WRITES a progress file must have a root here, or its status reads someone else's.
   const writers = ["capture", "capture-only", "capture-real-pages", "capture-acceptance"];

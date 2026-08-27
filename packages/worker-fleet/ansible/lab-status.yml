@@ -125,6 +125,16 @@
     # read this and reports `eta_minutes` and a `next_command`; this surfaces it without needing a shell on
     # the box. Exit codes are its contract — 0 clean, 1 finished with failures, 2 no run, 3 wedged — so a
     # non-zero here is information rather than a fault, hence `failed_when: false`.
+    - name: What that job is, read from the catalogue that defines it
+      # `lab_jobs` lives in `lab-job.yml`'s vars and is NOT in scope here — this is a separate playbook.
+      # Read once into a fact rather than inline at each use: four copies of the same lookup is four
+      # places to get the path wrong, and the first version of this change used `lab_jobs[job]` directly,
+      # which is silently undefined and made every job look like one that reports no progress.
+      ansible.builtin.set_fact:
+        lab_job_entry: "{{ ((lookup('file', playbook_dir ~ '/lab-job.yml') | from_yaml)[0].vars.lab_jobs
+                            | default({}))[job] | default({}) }}"
+      when: job is defined
+
     - name: The run's own progress report
       ansible.builtin.command:
         argv: [npm, run, "--silent", "training:status", "--", "--json"]
@@ -138,32 +148,39 @@
       # ACCEPTANCE job ran, this reported the last training run's finished numbers (`captured: 4,
       # total: 1303`) as if they were the live one. Two runs, one progress file consulted, and the wrong
       # answer looked entirely plausible.
-      # DECLARED PER CORPUS, not a two-way `if`. The comment above records this exact defect for
-      # ACCEPTANCE and the fix covered only that one — so when `capture-real-pages` ran, this reported the
-      # DATASET run's `captured: 29, total: 1431` for a 50-page job, under the real-page job's name.
-      # Measured 2026-08-26, and it is the same misdiagnosis one variant further on: two runs, one
-      # progress file consulted, and the wrong answer entirely plausible.
+      # ONLY FOR A JOB THAT REPORTS PROGRESS, and the job says whether it does.
       #
-      # An open set needs a map, not a chain of ifs — a chain only ever covers the cases somebody hit.
+      # `training:status` reads DATASET_ROOT and happily reports whatever run that corpus last held. So a
+      # job that does not capture at all — `export`, `rules-gate`, `train` — showed the DATASET capture's
+      # `captured: 29, total: 1431` under its own name. Two earlier fixes each covered the case somebody
+      # had just hit (acceptance, then real-pages) and left every other job reporting a stranger's run.
+      #
+      # The root cause was not the mapping, it was the ASSUMPTION that every job captures. Five do, and
+      # they declare where — `progress:` beside the command, the same shape as `params:`. Everything else
+      # gets no progress block and says so, because "this job does not report progress" and "here are some
+      # numbers" are different answers and only one of them is true.
       environment:
-        DATASET_ROOT: "{{ lab_progress_roots
-                          | dict2items
-                          | selectattr('key', 'in', job | default(''))
-                          | map(attribute='value')
-                          | list
-                          | default(['runs/screenreader-dataset'], true)
-                          | first }}"
-      vars:
-        # Keyed on a substring of the JOB NAME, longest-first so `capture-acceptance` cannot match the
-        # bare `capture` entry. Anything unmatched is the training corpus, which is what most jobs read.
-        lab_progress_roots:
-          acceptance: runs/screenreader-acceptance
-          real-pages: runs/real-page-corpus
+        DATASET_ROOT: "{{ lab_job_entry.progress | default('') }}"
+      when: lab_job_entry.progress is defined
       register: progress
       changed_when: false
       failed_when: false
 
+    - name: This job does not report progress
+      # SAID, not left blank. A job with no progress block used to fall through to the training corpus and
+      # print its numbers; saying nothing instead would be an improvement and still not an answer. The
+      # useful line names WHY there is nothing to show, so the reader stops looking for it.
+      ansible.builtin.debug:
+        msg: >-
+          {{ job }} does not report progress — only a capture job does, and this one is
+          {{ (lab_job_entry.argv | default(['?']))[0:3] | join(' ') | truncate(60) }}.
+          systemd's view above is the whole answer; its output is `npm run lab:log -- -e job={{ job }}`.
+      when:
+        - job is defined
+        - lab_job_entry.progress is not defined
+
     - name: What the run says about itself
+      when: lab_job_entry.progress is defined
       ansible.builtin.debug:
         # Guarded on the stdout LOOKING like JSON, not merely on being non-empty. `training:status` prints
         # prose on some paths — a warning, a next_command hint — and `from_json` throws on those, which
