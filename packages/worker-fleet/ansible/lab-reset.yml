@@ -115,10 +115,28 @@
           the lab, or look at them before deciding — this play will not throw away work that exists
           nowhere else. To drop ONE of them deliberately: -e remove=<path> -e apply=true.
 
-    - name: Report only, unless asked to apply
+    - name: Report only, unless asked to apply — and FAIL, so a caller can use this as a precondition
+      # EXIT NON-ZERO ON A DIRTY TREE, because "I looked and it is dirty" and "it is clean" were the same
+      # status and that cost a dispatch.
+      #
+      # Measured 2026-08-27: I ran bare `lab:reset` as a precondition before dispatching `everything`,
+      # read exit 0 as "the lab is clean", and dispatched into a checkout still holding an uncommitted
+      # baseline. `run-job.yml` refused correctly at the far end — the system worked — but the whole point
+      # of a precondition is to find that out before spending a dispatch on it.
+      #
+      # This matches every other audit here: `corpus:urls` exits 1 when a URL has moved, `evidence:check`
+      # exits 1 or 2 rather than reporting drift on a zero, and `rules:real-pages` exits 2 when it cannot
+      # measure. A report that finds something says so in its status, or callers cannot act on it.
+      #
+      # `-e apply=true` is unaffected and still exits 0 on success: acting on the finding is the outcome
+      # this refuses to let you skip by accident, not the one it punishes.
       when: (dirty.stdout | trim) != '' and not (apply | default(false) | bool)
-      ansible.builtin.debug:
-        msg: "Report only. Re-run with -e apply=true to discard."
+      ansible.builtin.fail:
+        msg: >-
+          {{ lab_repo_path }} is DIRTY and nothing was discarded — this was a report.
+          {{ (dirty.stdout | trim | replace('\n', '; ')) }}.
+          Re-run with `-e apply=true` to discard what origin already carries, or commit it from the lab.
+          A job dispatched into this checkout will be refused at the far end, having spent the dispatch.
 
     - name: Discard the tracked changes
       # `git checkout --` is the command that once destroyed release-eligible weights in this repo, which
