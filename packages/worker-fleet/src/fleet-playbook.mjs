@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Run a fleet playbook from the one machine allowed to run it.
  *
@@ -85,6 +86,7 @@ const SERIAL_PATTERN = /^(0|[1-9][0-9]?)$/;
  * fleet key. Containment by SHAPE, the same rule `isValidCaptureId` follows: `;rm -rf /` is inexpressible
  * rather than rejected.
  */
+/** @param {string} ref */
 function validRef(ref) {
   return /^[0-9a-zA-Z._/-]{1,64}$/.test(ref) && !ref.includes("..");
 }
@@ -101,9 +103,22 @@ function validRef(ref) {
  * The budget is a CEILING, not a cost: a deadline that expires early turns "still working" into "failed",
  * which is the rule `run-interactive.yml` and `run-job.yml` already state.
  */
+/**
+ * Per-playbook ceilings; anything absent takes the default below.
+ *
+ * `Record<string, number>` and not the inferred one-key object: a lookup keyed by the CHOSEN playbook is
+ * the whole point, and the inferred type made every other playbook name a type error at the lookup while
+ * the runtime happily returned undefined and fell through to the default.
+ *
+ * @type {Record<string, number>}
+ */
 const PLAYBOOK_TIMEOUT_MS = { "provision-role.yml": 4 * 60 * 60 * 1000 };
 const DEFAULT_PLAYBOOK_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * @param {string} command
+ * @param {{ capture?: boolean, timeoutMs?: number }} [options]
+ */
 function ssh(command, { capture = false, timeoutMs = DEFAULT_PLAYBOOK_TIMEOUT_MS } = {}) {
   const args = ["-i", CONTROL_KEY, "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
     // The connection must survive a long silent stretch: an NVDA install prints nothing for minutes and a
@@ -128,7 +143,7 @@ function localBranch() {
   return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
 }
 
-const argOf = (name) =>
+const argOf = (/** @type {string} */ name) =>
   process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
 /**
@@ -141,7 +156,7 @@ const argOf = (name) =>
  * @returns {{chosen: string, limitFlag: string|undefined, serialFlag: string|undefined, ref: string}}
  */
 function parseArgs() {
-  const refuse = (message) => {
+  const refuse = (/** @type {string} */ message) => {
     process.stderr.write(`${message}\n`);
     process.exit(2);
   };
@@ -216,9 +231,12 @@ function main() {
       + (serialFlag !== undefined ? ` -e worker_provision_serial=${serialFlag}` : ""),
     { timeoutMs: PLAYBOOK_TIMEOUT_MS[chosen] ?? DEFAULT_PLAYBOOK_TIMEOUT_MS });
   } catch (cause) {
-    process.stderr.write(`\n  ${chosen} FAILED (ansible exit ${cause.status ?? "?"}). The PLAY RECAP above `
+    // `execFileSync` throws an Error carrying the child's exit status, which node's types do not describe.
+    // The status is what this block exists to surface AND to exit with, so it is load-bearing.
+    const failure = /** @type {{ status?: number }} */ (cause);
+    process.stderr.write(`\n  ${chosen} FAILED (ansible exit ${failure.status ?? "?"}). The PLAY RECAP above `
       + "names which hosts; nothing was rolled back, so re-running is safe.\n");
-    process.exit(cause.status ?? 1);
+    process.exit(failure.status ?? 1);
   }
   process.stdout.write(`\n  ${chosen} completed; the PLAY RECAP above is the per-host result.\n`);
 }

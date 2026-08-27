@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Wake the fleet, from the LAB, without holding any credential.
  *
@@ -84,6 +85,7 @@ export function sendMagicPacket(mac, broadcast = "255.255.255.255") {
   });
 }
 
+/** @param {string} url */
 async function answering(url) {
   try {
     const response = await requestJson(`${url}/health`, { timeoutMs: HEALTH_TIMEOUT_MS });
@@ -98,6 +100,15 @@ async function answering(url) {
  *
  * Returns per-worker outcomes rather than throwing on the first failure: a fleet where one box has a
  * flat firmware setting should still bring the other eleven up, and the report should name which.
+ *
+ * DECLARED rather than inferred. With no `@param` here TypeScript builds the options type from the
+ * DEFAULTS, so `broadcast` -- the one option with no default -- was simply absent from it, and `log`
+ * inferred as zero-arg from `() => {}` while every call passes a string. An options bag documented by
+ * its own defaults describes exactly the options that need documenting least.
+ *
+ * @param {{ name: string, host: string, mac?: string | null }[]} workers
+ * @param {{ port?: number, broadcast?: string, deadlineMs?: number,
+ *           log?: (line: string) => void }} [options]
  */
 export async function wakeFleet(workers, { port = 8765, broadcast, deadlineMs = 300_000, log = () => {} } = {}) {
   const results = await Promise.all(workers.map(async (w) => {

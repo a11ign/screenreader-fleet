@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * What the HOST was doing while a measurement ran: CPU, disk, memory.
  *
@@ -40,8 +41,8 @@ const BYTES_PER_MB = 1024 * 1024;
 export function parseVmStat(output) {
   const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
   if (!Number.isFinite(pageSize)) return null;
-  const pages = (label) => Number(new RegExp(`${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
-  const mb = (label) => Math.round((pages(label) * pageSize) / BYTES_PER_MB);
+  const pages = (/** @type {string} */ label) => Number(new RegExp(`${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
+  const mb = (/** @type {string} */ label) => Math.round((pages(label) * pageSize) / BYTES_PER_MB);
   return {
     freeMb: mb("Pages free"),
     activeMb: mb("Pages active"),
@@ -81,7 +82,10 @@ export function parseIostat(output) {
   })).filter((d) => Number.isFinite(d.mbPerSecond));
 }
 
-/** Load averages, or null. */
+/**
+ * Load averages, or null.
+ * @param {string} output
+ */
 export function parseLoadAverage(output) {
   const m = /([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(String(output));
   return m ? { one: Number(m[1]), five: Number(m[2]), fifteen: Number(m[3]) } : null;
@@ -94,13 +98,17 @@ export function parseLoadAverage(output) {
  * @param {string} match substring of the command to keep
  */
 export function parseProcessMemory(psOutput, match) {
-  return String(psOutput).trim().split(/\r?\n/)
-    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
-    .filter((m) => m && m[3].includes(match))
-    .map((m) => ({ pid: Number(m[1]), residentMb: Math.round(Number(m[2]) / 1024), command: m[3] }));
+  // `flatMap` rather than map -> filter -> map. The old shape checked `m &&` and was correct at runtime,
+  // but a filter cannot narrow a type for the two lines after it, so every field access read as a
+  // possible null. Doing the match and the decision in one place needs no narrowing to explain.
+  return String(psOutput).trim().split(/\r?\n/).flatMap((line) => {
+    const fields = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+    if (!fields || !fields[3].includes(match)) return [];
+    return [{ pid: Number(fields[1]), residentMb: Math.round(Number(fields[2]) / 1024), command: fields[3] }];
+  });
 }
 
-const run = (cmd, args) => {
+const run = (/** @type {string} */ cmd, /** @type {string[]} */ args) => {
   try {
     return execFileSync(cmd, args, { encoding: "utf8", timeout: 15_000 });
   } catch {
@@ -137,11 +145,33 @@ export function sampleHost({ processMatch = "QEMU" } = {}) {
  */
 // Every `?.` and `??` is a branch, so six inlined reads of a possibly-absent snapshot pushed diffHost
 // to a complexity of 21 against a limit of 15 -- without being any clearer than naming the read once.
+/**
+ * @typedef {{ memory?: Record<string, number>, processes?: { residentMb: number }[] }} HostSnapshot
+ *
+ * Named because the first attempt at annotating this called it `Record<string, number>` -- flat numbers,
+ * which is what the CALL SITES read out of it and not what it is. A shape guessed from its uses is the
+ * same defect as a type inferred from its defaults, one file over.
+ */
+
+/**
+ * @param {HostSnapshot} snapshot
+ * @param {string} field
+ * @param {number | null} fallback
+ * @returns {number | null}
+ */
 const reading = (snapshot, field, fallback) => snapshot?.memory?.[field] ?? fallback;
 
+/**
+ * @param {HostSnapshot} before
+ * @param {HostSnapshot} after
+ */
 export function diffHost(before, after) {
-  const pageouts = reading(after, "pageouts", 0) - reading(before, "pageouts", 0);
-  const pageins = reading(after, "pageins", 0) - reading(before, "pageins", 0);
+  // `?? 0` at the call, so these two stay plain numbers: a delta of two absent readings is 0, which is
+  // what "the host did not swap" has always meant here. `compressorMb` and `freeMb` below keep null,
+  // because an ABSENT reading and a reading of zero are different facts about the host and this file's
+  // whole purpose is that a number carries what it was computed from.
+  const pageouts = (reading(after, "pageouts", 0) ?? 0) - (reading(before, "pageouts", 0) ?? 0);
+  const pageins = (reading(after, "pageins", 0) ?? 0) - (reading(before, "pageins", 0) ?? 0);
   return {
     pageoutsDelta: pageouts,
     pageinsDelta: pageins,
