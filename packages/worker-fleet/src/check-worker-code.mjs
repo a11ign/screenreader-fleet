@@ -71,15 +71,52 @@ function protocolBumpNote() {
   return "";
 }
 
-function workerUrls() {
+/**
+ * Which workers to ask, AND WHERE THAT LIST CAME FROM — the second half is not decoration.
+ *
+ * This used to answer the local UTM pool or nothing, and print "no worker is running — nothing to compare"
+ * when it found neither. Measured 2026-08-28 with five bare-metal workers serving `/health` and all five
+ * STALE against this checkout: the bare command reported nothing to compare, and the same command with
+ * `A11Y_WORKERS` set reported `5 stale worker(s)`. One env var apart, and the quiet answer was the wrong one.
+ *
+ * That is `lab:inventory`'s lesson at a different layer — *"'none here' and 'none anywhere' are different
+ * answers, and it now refuses to turn the first into the second"* — and it lands harder here, because this
+ * command exists to stop a corpus being captured on the wrong code. A false clean from it is the failure it
+ * was written to prevent, delivered by the tool itself.
+ *
+ * The inventory was already imported and already read, twelve lines below, to print the REMEDY. So the
+ * command could name the five workers it should have checked while insisting it had none to check.
+ *
+ * Reading it here is safe in a way it would not be for a capture run: this probes `/health` and starts
+ * nothing, so the rule that naming workers means you are managing them does not apply.
+ */
+export function workerUrls({
+  named = configuredWorkers, local = localPoolUrls, inventory = inventoryWorkerUrls,
+} = {}) {
   // This preferred A11Y_WORKER while doctor preferred A11Y_WORKERS, so with both set the two commands
   // described different machines -- and "doctor is happy" / "a worker is stale" could be about disjoint
   // sets. One parser now, in fleet-env.mjs, which also owns the inventory.
-  const named = configuredWorkers();
-  if (named.length) return named.map((w) => w.url);
-  const pool = JSON.parse(execFileSync(CTL, ["pool"], { encoding: "utf8" }));
-  return pool.filter((/** @type {{ip?: string}} */ vm) => vm.ip)
-    .map((/** @type {{ip: string, port: number}} */ vm) => `http://${vm.ip}:${vm.port}`);
+  const configured = named();
+  if (configured.length) return { urls: configured.map((w) => w.url), source: "A11Y_WORKER(S)" };
+
+  const pool = local();
+  if (pool.length) return { urls: pool, source: "the local UTM pool" };
+
+  return { urls: inventory(), source: "inventory.yml" };
+}
+
+/** The local UTM pool, or none — `utmctl` is absent on a machine that never had one. */
+function localPoolUrls() {
+  try {
+    const pool = JSON.parse(execFileSync(CTL, ["pool"], { encoding: "utf8" }));
+    return pool.filter((/** @type {{ip?: string}} */ vm) => vm.ip)
+      .map((/** @type {{ip: string, port: number}} */ vm) => `http://${vm.ip}:${vm.port}`);
+  } catch (e) {
+    // Never silent: "there is no UTM here" and "utmctl failed" are different, and the second is the one
+    // that would otherwise send somebody to the inventory believing the local pool was empty.
+    if (process.env.A11Y_DEBUG) console.log(`  (local pool unavailable: ${errorText(e)})`);
+    return [];
+  }
 }
 
 /** @param {string} url */
@@ -97,12 +134,15 @@ async function versionOf(url) {
  */
 async function main() {
   const expected = expectedWorkerCode();
-  const urls = workerUrls();
+  const { urls, source } = workerUrls();
   console.log(`this checkout: ${expected}`);
   if (!urls.length) {
-    console.log("no worker is running — nothing to compare (start one, or a run will)");
+    console.log("no worker configured, running locally, or listed in inventory.yml — nothing to compare");
     process.exit(0);
   }
+  // Say which list this is. A reading of "all current" means nothing until you know whether it examined
+  // the fleet you are about to capture on or the empty pool on your laptop.
+  console.log(`checking ${urls.length} worker(s) from ${source}`);
 
   // Read first, CLASSIFY second, and the classifier is the one the capture preflight uses. This loop used
   // to decide staleness itself with `actual === expected` — the same judgement in a second place, which is
