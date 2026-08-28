@@ -139,9 +139,16 @@ function captureClients(): string[] {
       if (!entry.endsWith(".mjs")) continue;
       const path = `${dir}/${entry}`;
       const source = readFileSync(`${REPO}${path}`, "utf8");
-      // The POST is the signature: reading `/capture/<id>` to recover a lost response is not dispatching
-      // work, and a module that merely mentions the route is not a client of it.
-      if (/["'`][^"'`]*\/capture["'`][^]{0,120}?method:\s*["']POST["']/.test(source)) found.push(path);
+      // DISPATCHING WORK is the signature, and it now has two spellings: a literal POST, or a call to the
+      // shared `captureTolerantly`. Matching only the first found four clients after nine moved behind the
+      // shared one -- a discovery walk quietly describing less than half the codebase, which is the exact
+      // rot this test's own count assertion exists to catch.
+      //
+      // Still NOT matched: reading `/capture/<id>` to recover a lost response. That is asking for work
+      // already done, not dispatching it, and a module that merely mentions the route is not a client.
+      const dispatches = /["'`][^"'`]*\/capture["'`][^]{0,120}?method:\s*["']POST["']/.test(source)
+        || /\bcaptureTolerantly\(/.test(source);
+      if (dispatches) found.push(path);
     }
   }
   return found.sort();
