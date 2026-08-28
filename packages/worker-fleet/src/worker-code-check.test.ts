@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { codeDrift, describeCodeDrift, expectedWorkerCode } from "./worker-code-check.mjs";
+import { codeDrift, describeCodeDrift, describeEmptyPool, expectedWorkerCode } from "./worker-code-check.mjs";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const FLEET = ["http://REDACTED-INTERNAL-ADDRESS:8765", "http://REDACTED-INTERNAL-ADDRESS:8765", "http://REDACTED-INTERNAL-ADDRESS:8765"];
@@ -179,4 +179,25 @@ test("the corpus writers are real files, so the list cannot rot into a no-op", (
     assert.ok(readFileSync(`${REPO}${path}`, "utf8").length > 0, `${path} does not exist`);
   }
   assert.ok(captureClients().length >= CORPUS_WRITERS.length, "discovery found fewer clients than are listed");
+});
+
+test("an EMPTY pool is refused, not vouched for", () => {
+  // `assertFleetRunsThisCheckout([])` printed "Fleet runs this checkout (worker code …, 0 worker(s)
+  // checked)" and returned — an affirmative claim about a fleet it had not looked at. The count being in
+  // the sentence is the only reason that was ever arguable, and "0 worker(s) checked" under a heading
+  // saying the fleet is fine is how "verified" comes to mean "unexamined".
+  //
+  // Refused rather than reported-and-continued, unlike the pre-push hook's loud skip: `runs/` being absent
+  // is legitimate, an empty pool at a capture boundary never is.
+  const refusal = describeEmptyPool([], CURRENT)!;
+  assert.match(refusal, /REFUSING to vouch/);
+  assert.match(refusal, /broken invocation/);
+  assert.ok(refusal.includes(CURRENT), "name the checkout nothing was compared against");
+});
+
+test("a pool with workers in it is NOT refused, so the guard cannot block a real run", () => {
+  // The control. A refusal that fires on the healthy case is worse than none — it gets bypassed, and
+  // `A11Y_SKIP_VERIFY=1` was reached for six times in one evening after exactly that.
+  assert.equal(describeEmptyPool(FLEET, CURRENT), null);
+  assert.equal(describeEmptyPool([FLEET[0]], CURRENT), null);
 });

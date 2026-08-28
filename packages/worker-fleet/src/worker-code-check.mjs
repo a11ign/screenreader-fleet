@@ -205,6 +205,33 @@ export function workerSourceDirty() {
 }
 
 /**
+ * AN EMPTY POOL IS NOT A CLEAN FLEET — the refusal, as a value, so it can be tested without exiting.
+ *
+ * `assertFleetRunsThisCheckout([])` used to print "Fleet runs this checkout (worker code …, 0 worker(s)
+ * checked)" and return: an affirmative claim about a fleet it had not looked at. The count sitting in the
+ * sentence is the only reason that was ever arguable, and "0 worker(s) checked" under a heading saying the
+ * fleet is fine is precisely how "verified" comes to mean "unexamined".
+ *
+ * REFUSED, not reported-and-continued. The pre-push hook's loud skip is right for `runs/`, whose absence is
+ * legitimate; an empty pool at a capture boundary never is. Both callers pass a pool a capture is about to
+ * dispatch to, so failing here with a named cause beats failing later as "0 captured".
+ *
+ * Returned rather than written, and that split is this file's own convention: the classification and the
+ * message are pure and driven directly by the tests, because a function that calls `process.exit` cannot be
+ * asserted on without stubbing the runtime out from under it.
+ *
+ * @param {string[] | undefined} workers
+ * @param {string} expected
+ * @returns {string | null} the refusal, or null when there is a pool to check
+ */
+export function describeEmptyPool(workers, expected) {
+  if (workers?.length) return null;
+  return "REFUSING to vouch for the fleet: no workers were given, so nothing was compared against this "
+    + `checkout (${expected}). A capture dispatches to workers, so an empty pool is a broken invocation `
+    + "rather than a clean fleet — check A11Y_WORKER(S), the local pool, or inventory.yml.\n";
+}
+
+/**
  * Refuse to capture with a fleet that is not running this checkout.
  *
  * Called at the boundary of every capture entry point, for the reason `assertWorkerUrl` is: the
@@ -226,7 +253,12 @@ export async function assertFleetRunsThisCheckout(workers, options = {}) {
     return;
   }
   const expected = expectedWorkerCode();
-  const readings = await Promise.all((workers ?? []).map(async (worker) =>
+  const empty = describeEmptyPool(workers, expected);
+  if (empty) {
+    process.stderr.write(empty);
+    process.exit(3);
+  }
+  const readings = await Promise.all(workers.map(async (worker) =>
     ({ worker, code: await read(worker) })));
   const drift = codeDrift(expected, readings);
   const refusal = describeCodeDrift(drift, { when, bareMetalUrls, sourceDirty: workerSourceDirty() });
