@@ -37,6 +37,9 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "packages/lab/scripts/emit-unclosable-vetoes.mjs":
+    "it takes NO flags, and an ignored one would emit the wrong set silently — a veto report that "
+    + "forgave the wrong pairs reads as a shorter work list rather than as an error",
   "packages/lab/scripts/check-shipped-provenance.mjs":
     "it takes NO flags, and that is the case worth guarding rather than the one to skip: an argument "
     + "that looks like it narrows a release gate (`--allow-stale`, `--skip`) would be ignored, and the "

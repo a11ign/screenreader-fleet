@@ -103,7 +103,15 @@
       # question a candidate exists to settle. Reads files already on disk; no worker, seconds.
       shortcuts:
         params: {out: optional}
-        argv: ["{{ lab_python }}", "packages/lab/scripts/audit-scorer-shortcuts.py",
+        # `npm run`, not the interpreter directly, so the unclosable-veto map is emitted first — the
+        # audit reads `runs/unclosable-vetoes.json` to tell a veto worth corpus work from one nothing can
+        # close, and that file is gitignored and derived. A box that never emitted it would forgive
+        # nothing and report a longer work list than exists.
+        #
+        # The chain lives in the npm script, exactly as `corpus:grants-audit` puts its `corpus:grants-map`
+        # there. NOT `/bin/sh -c` here: this file's own rule is that a shell reintroduces the quoting
+        # class that sent four capture shards at `--worker=http://:8765` for 29 minutes.
+        argv: ["/usr/bin/npm", "run", "--silent", "scorer:shortcuts", "--",
                "--model", "runs/model-{{ out | default('candidate') }}",
                "--data", "runs/screenreader-dataset/with-realism.jsonl",
                "--no-baseline"]
