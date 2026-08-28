@@ -68,6 +68,19 @@ import { request as httpsRequest } from "node:https";
 export const CAPTURE_CLIENT_TIMEOUT_MS = 560_000;
 
 /**
+ * How long a capture's silent connection may idle before the OS proves it is still there.
+ *
+ * Chosen to sit UNDER the shortest thing that reaps idle connections rather than over the longest: common
+ * NAT idle timeouts start around 30 s, and Wi-Fi power-save can be shorter still. 15 s costs two small
+ * packets a minute on a link that is otherwise carrying a screen reader's entire output.
+ *
+ * EXPORTED so its test can key on the exact value. Node's own HTTP SERVER calls `setKeepAlive(true, 5000)`
+ * on every socket it accepts, so a test that merely looked for "keepalive with a plausible delay" matched
+ * the server's call and passed with this hook DELETED — found by mutation, not by reading.
+ */
+export const KEEPALIVE_DELAY_MS = 15_000;
+
+/**
  * A worker address, validated at the BOUNDARY where it enters the program.
  *
  * `requestJson` already calls `new URL(url)`, which throws `ERR_INVALID_URL` on a malformed address — so an
@@ -169,6 +182,33 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
       clearTimeout(deadline);
       reject(error);
     }
+
+    // KEEPALIVE, because a capture's connection carries ZERO BYTES for its whole duration.
+    //
+    // The worker writes status and body together at the END (`send(res, 200, {...})`), so between the
+    // request and the answer the socket is completely silent for 12-520 s. To every NAT, firewall and
+    // Wi-Fi power-save between here and the box, that is an IDLE connection, and idle connections get
+    // reaped. This host reaches the fleet over Wi-Fi (`en0`).
+    //
+    // MEASURED 2026-08-28, and the asymmetry is what identifies it: across 242 captures the WORKERS
+    // reported 1 failure (a deliberate dead-port test) and 0 recoveries, while the client lost ~9
+    // responses in a single gate run. The work completed every time; only the answer was lost. Short
+    // requests are unaffected -- 12 consecutive round trips in 3-11 ms -- which is exactly the signature
+    // of an idle-timeout rather than a flaky link.
+    //
+    // The comment on the deadline above ALREADY names the silence ("a worker holding a connection open
+    // while NVDA reads a page never trips [the inactivity timeout]") and uses it only to explain why that
+    // timeout is useless. The same fact makes the connection droppable, and nothing acted on it -- this
+    // repo's "a comment that names an ambiguity, above code that resolves it by assumption".
+    //
+    // The default idle is 7200 s on macOS, so the delay MUST be passed: without it this call enables
+    // keepalive that would first probe two hours after every capture has finished.
+    req.on("socket", (socket) => {
+      socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
+      // Nagle would batch the request itself; a capture POST is one small write followed by a long wait,
+      // so there is nothing to batch and delaying it only adds latency to the request that starts the work.
+      socket.setNoDelay(true);
+    });
 
     req.on("error", failWith);
     if (payload !== null) req.write(payload);
