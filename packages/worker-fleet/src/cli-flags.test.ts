@@ -37,6 +37,11 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "packages/lab/scripts/gate-probe-order.mjs":
+    "a mistyped `--pages=` would silently fall back to localhost:5050 and compare a DIFFERENT set of "
+    + "pages from the one asked for, then report PASS. This gate exists to prove the tool gives the same "
+    + "answer twice; a pass over pages nobody requested is that claim made about the wrong subject, which "
+    + "is the exact defect it was written to catch",
   "packages/lab/scripts/emit-unclosable-vetoes.mjs":
     "it takes NO flags, and an ignored one would emit the wrong set silently — a veto report that "
     + "forgave the wrong pairs reads as a shorter work list rather than as an error",
