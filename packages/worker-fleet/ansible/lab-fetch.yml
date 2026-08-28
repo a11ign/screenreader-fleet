@@ -32,6 +32,19 @@
       false-positives: "runs/model-{{ out | default('candidate') }}/false-positives.json"
       abstention-sweep: "runs/real-page-corpus/abstention-sweep.json"
       capture-progress: "runs/screenreader-dataset/capture-progress.json"
+      # ONE CORPUS CAPTURE, by case id. Added 2026-08-28, when `rules:gate` named two conformant records it
+      # had failed -- `keyboard-trap-modal-cycle.good` and one of its variants -- and nothing could show what
+      # the rule SAW on them. The same capture taken from a laptop was clean, so the lab's differed, and the
+      # difference WAS the defect. There was no way to look.
+      #
+      # That is this file's own reason for existing, one artifact further in: a report that names a failing
+      # page and cannot produce that page's evidence has the same hole as a job that can start a 4-hour run
+      # and cannot return its report. The comment on `grants-audit` says exactly this about held-out records.
+      #
+      # `-e capture=<case>.<variant>`, validated as a NAME: letters, digits, dot, plus and dash only, so
+      # `../../etc/passwd` is inexpressible rather than rejected -- the shape `isValidCaptureId` uses, whose
+      # test says "path traversal is the reason this check exists".
+      capture: "runs/screenreader-dataset/captures/{{ capture | default('') }}.json"
       # THE HELD-OUT RECORDS THEMSELVES. Added 2026-08-25, when an acceptance false positive named a page
       # and nothing could show what the model SAW on it -- which is this file's own reason for existing,
       # one artifact further in: "a job interface that can start a 4-hour training run and cannot return
@@ -88,6 +101,19 @@
       ansible.builtin.assert:
         that: repeat in ['repeat-1', 'repeat-2']
         fail_msg: "-e repeat= must be repeat-1 or repeat-2. It is a name, not a path."
+
+    # A CASE ID IS A NAME, NEVER A PATH. `regex_findall` rather than `regex_search`: a non-match makes
+    # Ansible call `.group()` on None and throw INSIDE the filter, so no `| default` afterwards can save the
+    # message -- a guard that stops the job and explains nothing gets distrusted, then bypassed.
+    - name: A capture id must be a name, so a path cannot be expressed
+      when: artifact | default('') == 'capture'
+      ansible.builtin.assert:
+        that:
+          - capture | default('') | length > 0
+          - (capture | regex_findall('^[A-Za-z0-9.+-]+$')) | length > 0
+        fail_msg: >-
+          -e capture=<case>.<variant> is required for artifact=capture, e.g.
+          keyboard-trap-modal-cycle.good. It is a NAME (letters, digits, dot, plus, dash), never a path.
 
     - name: The artifact must be one we have, and the model directory a name
       ansible.builtin.assert:
