@@ -164,11 +164,34 @@ const UNGUARDED = new Set<string>([
   // deleting it would remove the only place a future exemption has to justify itself.
 ]);
 
-/** Does this file take a command line? The guard itself reads argv, and is the implementation. */
+/**
+ * Does this file take a command line? The guard itself reads argv, and is the implementation.
+ *
+ * COMMENTS ARE STRIPPED FIRST, and that is not a nicety. This matched the raw source, so a module that
+ * merely MENTIONED `process.argv` in a comment was classified as a CLI — which happened on 2026-08-29 to
+ * `gates/dispatch.mjs`, a library whose comment said it deliberately does NOT read `process.argv`. The
+ * test's own subject, in the test: this repo's rule is that a check must not derive its expectations from
+ * source TEXT, because text includes the prose about the code as well as the code.
+ *
+ * The direction of the change is safe: stripping comments can only REMOVE a file from the set, and a file
+ * whose only mention is in prose is not a command line. Verified against the real tree — the discovered
+ * set is unchanged apart from `dispatch.mjs`, which is the false positive.
+ */
 function isCommandLine(rel: string): boolean {
   if (!rel.endsWith(".mjs")) return false;
-  const source = readFileSync(join(REPO, rel), "utf8");
+  const source = withoutComments(readFileSync(join(REPO, rel), "utf8"));
   return source.includes("process.argv") && !source.includes("export function refuseUnknownFlags");
+}
+
+/**
+ * Source with `//` and block comments removed.
+ *
+ * Deliberately crude — this is a classifier, not a parser, and a `//` inside a string literal costs at
+ * worst one file's classification, which the EXEMPT list can then state with a reason. A real parser here
+ * would be more machinery than the question deserves.
+ */
+function withoutComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
 /** Every `.mjs` that reads argv — DISCOVERED, so a new one cannot arrive unnoticed. */
