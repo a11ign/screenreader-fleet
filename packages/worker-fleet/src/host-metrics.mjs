@@ -24,7 +24,26 @@
  * resident. Three guests showing 5.8 GB each — 17.4 GB "used" — held **3.8 GB of actual RAM** between
  * them, with 7.8 GB sitting in the compressor. The capacity model reserved roughly four times what a
  * worker occupies and concluded the Mac could only run two. Resident size is reported here for exactly
- * that reason; footprint is reported alongside it so the gap between them stays visible.
+ * that reason.
+ *
+ * **FOOTPRINT IS NOT REPORTED, and this header claimed it was.** The sentence used to end "footprint is
+ * reported alongside it so the gap between them stays visible", and `parseProcessMemory`'s own docstring
+ * promised "Resident size AND footprint per process". Neither is true: the source is
+ * `ps -o pid=,rss=,comm=`, which has no footprint column, and the returned records carry only `residentMb`.
+ * A documented remedy that was never implemented, vouched for by two comments.
+ *
+ * That matters because RSS is the reading that lies in the one state worth detecting: a starved guest
+ * showed `rss=0.4 GB` while its `phys_footprint` was 8.1 GB, its pages being in swap. So `residentMbTotal`
+ * FALLS as a host gets sicker — the same self-defeating shape as reading `vm_stat` for available memory.
+ *
+ * Do not read it alone. `compressorMb` and the pageout DELTA come from `vm_stat` in the same snapshot and
+ * are not distorted that way: low resident WITH a large compressor is a host absorbing pressure, and a
+ * non-zero pageout delta is one that is swapping. `compare-workers.mjs` prints all three together and
+ * labels the RSS column "<- RSS, not phys_footprint", which is why the missing field never misled anyone.
+ *
+ * Adding footprint means `top -l 1 -o mem -stats mem`, which costs a second and a fragile parse; the
+ * pairing above answers the same question from a snapshot already being taken. Recorded rather than done,
+ * so the next reader is not told a field exists that does not.
  */
 import { execFileSync } from "node:child_process";
 
@@ -92,7 +111,8 @@ export function parseLoadAverage(output) {
 }
 
 /**
- * Resident size AND footprint per process, so the gap between them is never invisible again.
+ * RESIDENT size per process. Not footprint — `ps` has no such column; see this module's header for why
+ * that is a deliberate limit rather than an oversight, and what to read beside it.
  *
  * @param {string} psOutput output of `ps -o pid=,rss=,comm=`
  * @param {string} match substring of the command to keep
