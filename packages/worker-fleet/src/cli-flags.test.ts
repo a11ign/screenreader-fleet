@@ -37,6 +37,12 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "packages/lab/scripts/explain-capture.mjs":
+    "it exists BECAUSE a mistyped question gets a confident wrong answer. Every enquiry into a capture "
+    + "used to be ssh plus hand-written Python plus a guess at the JSON shape, and that produced four "
+    + "wrong answers in one session — a wrapper read instead of `capture` reported 0 of 20 tab stops. A "
+    + "tool built to end that class must not join it: an unrecognised flag here would run the default "
+    + "report and look like the one that was asked for",
   "packages/lab/scripts/gate-probe-order.mjs":
     "a mistyped `--pages=` would silently fall back to localhost:5050 and compare a DIFFERENT set of "
     + "pages from the one asked for, then report PASS. This gate exists to prove the tool gives the same "
