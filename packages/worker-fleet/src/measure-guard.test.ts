@@ -8,6 +8,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 
@@ -76,4 +78,27 @@ test("one busy box in a fleet refuses the whole measurement, and says which", as
         return true;
       });
   } finally { await free.close(); await busy.close(); }
+});
+
+/**
+ * DISCOVERY: a guard that nothing calls is a guard that never runs.
+ *
+ * `refuseIfBusy` was written for four measured incidents — a transport probe against a box running a gate
+ * read 12 straight 429s as timings — and then wired to NOTHING. Its only reference was this file, which
+ * is the `scorer:verify` shape exactly: a security check that existed and that no script, playbook or
+ * module ever invoked.
+ *
+ * Found by scanning for modules no production file imports, which is the same scan that found
+ * `completeness.ts` duplicating C2. Both were invisible to every test and every gate.
+ */
+test("a MEASUREMENT tool refuses a busy box, rather than sampling it", () => {
+  const root = resolve(import.meta.dirname, "../../..");
+  const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  // Tools whose whole output is per-worker timing. A number taken from a busy box is not slow, it is wrong.
+  const MEASURERS = ["packages/worker-fleet/src/compare-workers.mjs"];
+  const unguarded = MEASURERS.filter((file) =>
+    !/\brefuseIfBusy\s*\(/.test(strip(readFileSync(resolve(root, file), "utf8"))));
+  assert.deepEqual(unguarded, [],
+    "a tool that reports per-worker timings must refuse a worker that is not `ready`, or its numbers "
+    + "describe whatever else that box was doing");
 });

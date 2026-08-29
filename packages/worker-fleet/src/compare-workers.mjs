@@ -25,6 +25,7 @@
 // It also refuses to declare a difference the samples do not support -- see `./worker-stats.mjs`.
 // "Not distinguishable" is a real answer, and it is the one that was missing.
 import { writeFileSync, mkdirSync } from "node:fs";
+import { refuseIfBusy } from "./measure-guard.mjs";
 import { pathToFileURL } from "node:url";
 import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";
 import { sampleHost, diffHost } from "./host-metrics.mjs";
@@ -130,6 +131,12 @@ async function main() {
     process.stderr.write("usage: npm run worker:compare -- <page-url> <worker> <worker> [--rounds=6]\n");
     process.exit(2);
   }
+
+  // REFUSE A BUSY BOX BEFORE MEASURING IT. This whole tool exists to answer "which worker is the
+  // problem", and four separate measurement errors came from sampling a box that was doing something
+  // else — including 12 straight 429s read as timings. `refuseIfBusy` was written for exactly this and
+  // was wired to nothing, which is the `scorer:verify` shape: a guard that exists and never runs.
+  await refuseIfBusy(workers, { what: `worker:compare against ${page}` });
 
   // Per worker: the three series this comparison exists to print, plus the last run's diagnostics.
   // Declared because every array here is empty at construction and inferred `never[]`, so each push --
