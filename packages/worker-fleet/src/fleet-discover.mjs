@@ -167,6 +167,20 @@ export async function scan(/** @type {any} */ subnet, port = DEFAULT_PORT) {
 }
 
 /**
+ * Do two MACs contradict each other?
+ *
+ * Absent on either side means UNKNOWN, not different: an inventory entry with no `mac:` is normal, and
+ * `macOf` returns null whenever ARP has no entry for an address it just talked to. Treating either as a
+ * mismatch would report every un-enrolled box absent.
+ *
+ * @param {string|null|undefined} declared @param {string|null|undefined} discovered
+ */
+function macsAgree(declared, discovered) {
+  if (!declared || !discovered) return true;
+  return declared === discovered;
+}
+
+/**
  * Compare what answered against what the inventory claims.
  *
  * Pure, and separated from the scan so the interesting cases can be tested without a network — which
@@ -180,7 +194,27 @@ export function reconcile(declared, discovered) {
   const claimed = new Set();
 
   for (const entry of declared) {
-    const atItsAddress = discovered.find((d) => d.ip === entry.host);
+    // AN ADDRESS MATCH IS NOT AN IDENTITY MATCH. This module's header says so -- "Identity is the MAC ...
+    // Matching on IP is what broke" -- and this loop then matched on IP alone, so the one check the file
+    // exists to perform was skipped whenever the address happened to line up.
+    //
+    // The reachable case is the documented one running twice. DHCP moved a worker from .83 to .102; if
+    // the freed .83 is later leased to another worker while the first box is powered down, then:
+    //
+    //   w1 declared .10 (mac ..01), powered OFF     -> reported "ok", carrying w2's health
+    //   w2 declared .20 (mac ..02), now at .10      -> reported "moved to .10"
+    //
+    // So a dead machine reads as healthy, and ONE physical box produces TWO findings -- which is the
+    // exact fault the "a moved worker is not ALSO reported as unknown" test below was written against:
+    // "otherwise one machine produces two findings and the count is a lie."
+    //
+    // Worse than the staleness this file was built for: that one made the fleet quieter, this makes it
+    // falsely LOUDER, reporting a worker that is not there.
+    //
+    // Verified only when BOTH sides have a MAC. A declared entry with no `mac:` is the inventory's normal
+    // state for a box nobody has read the address off, and ARP misses happen -- so an absent MAC must
+    // mean "cannot check", never "does not match", or every un-enrolled box would read as absent.
+    const atItsAddress = discovered.find((d) => d.ip === entry.host && macsAgree(entry.mac, d.mac));
     if (atItsAddress) {
       claimed.add(atItsAddress.ip);
       findings.push({ state: "ok", name: entry.name, ip: entry.host, health: atItsAddress.health });

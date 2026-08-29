@@ -30,6 +30,46 @@ test("a worker that MOVED is matched by MAC, not by address", () => {
   assert.equal(found[0].foundAt, "REDACTED-INTERNAL-ADDRESS");
 });
 
+test("a box at a worker's declared address with a DIFFERENT mac is NOT that worker", () => {
+  // DHCP moved a worker from .83 to .102 once; if the freed address is later leased to another worker
+  // while the first box is powered down, an IP-only match reports the DEAD machine as healthy, carrying
+  // the other box's /health. Measured before the fix: w1 "ok", w2 "moved to REDACTED-INTERNAL-ADDRESS" -- one physical
+  // box, two findings, and the healthy-looking one does not exist.
+  //
+  // The pre-existing "at its declared address is OK" test passes a MATCHING mac, so it pinned the shape
+  // the code produced and could never see this. That is why the case is here and not folded into it.
+  const found = reconcile(
+    [{ name: "w1", host: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:01" },
+     { name: "w2", host: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:02" }],
+    [{ ip: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:02", health }]);
+  const w1 = found.find((f) => f.name === "w1");
+  const w2 = found.find((f) => f.name === "w2");
+  assert.equal(w1?.state, "absent");
+  assert.equal(w2?.state, "moved");
+  assert.equal(w2?.foundAt, "REDACTED-INTERNAL-ADDRESS");
+  assert.equal(found.length, 2, "one physical box must not produce a third finding");
+});
+
+test("a declared worker with NO mac still matches on address", () => {
+  // An inventory entry with no `mac:` is the normal state for a box nobody has read the address off --
+  // inventory.yml says so, and enrolment deliberately records such a box. So an absent MAC must mean
+  // "cannot check", never "does not match": the strict version of the fix above reported every
+  // un-enrolled worker absent, which is the fleet going quiet, the fault this module exists to prevent.
+  const found = reconcile(
+    [{ name: "w1", host: "REDACTED-INTERNAL-ADDRESS", mac: null }],
+    [{ ip: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:09", health }]);
+  assert.equal(found[0].state, "ok");
+});
+
+test("ARP missing the mac of a box that just answered still matches on address", () => {
+  // `macOf` returns null whenever ARP has no entry, which happens. The unknown side is the DISCOVERED
+  // one here rather than the declared one, and it must be just as forgiving.
+  const found = reconcile(
+    [{ name: "w1", host: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:01" }],
+    [{ ip: "REDACTED-INTERNAL-ADDRESS", mac: null, health }]);
+  assert.equal(found[0].state, "ok");
+});
+
 test("a worker that is off is ASLEEP, not a failure", () => {
   // This fleet is meant to be powered down between runs; doctor already refuses to call that a fault.
   const found = reconcile([{ name: "w1", host: "REDACTED-INTERNAL-ADDRESS", mac: "aa:bb:cc:dd:ee:01" }], []);
