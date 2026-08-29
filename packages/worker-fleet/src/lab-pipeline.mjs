@@ -360,6 +360,8 @@ const CONTROL_KEY = process.env.A11Y_PVE_KEY || `${process.env.HOME}/.ssh/a11y-p
  * sequencing there worth doing at all.
  */
 const CONTROL_TO_LAB_KEY = "/root/.ssh/a11y-lab_ed25519";
+/** Where the checkout lives on control. Absolute, so a nested `cd` cannot land somewhere else. */
+const CONTROL_CHECKOUT = "/root/a11y-witness";
 
 /**
  * Run the whole sequence ON THE CONTROL PLANE, unless asked to run here.
@@ -383,17 +385,44 @@ function dispatchToControlUnlessLocal() {
     return;
   }
   const args = process.argv.slice(2).filter((a) => a !== "--local");
-  process.stdout.write(`sequencing on the control plane (${CONTROL_PLANE}); --local runs it here\n`);
-  const remote = `cd a11y-witness && git fetch --quiet origin && git checkout --quiet ${branchArg(args)} `
-    + `&& git merge --quiet --ff-only origin/${branchArg(args)} `
-    // The lab key by ENV, because `group_vars/a11y_lab.yml` reads `A11Y_PVE_KEY` with a default that is
-    // this laptop's path -- correct here and absent there. One variable, two machines, no second spelling.
-    + `&& A11Y_PVE_KEY=${CONTROL_TO_LAB_KEY} npm run --silent lab:pipeline -- ${args.join(" ")} --local`;
-  const r = spawnSync("ssh", ["-i", CONTROL_KEY, "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
-    // A pipeline is hours of mostly-silent output; without keepalives a quiet stage reads as a dead link.
-    "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=20", `root@${CONTROL_PLANE}`, remote],
-    { stdio: "inherit" });
-  process.exit(r.status ?? 2);
+  const ref = branchArg(args);
+  // DETACHED UNDER SYSTEMD, not run over the SSH connection — and the first version of this DID run it
+  // over the connection, which moved the fault to a better host instead of removing it. Proved by killing
+  // the ssh after 100 s: the sequence died with it, which is the same "the orchestration did not survive
+  // while every unit did" that made this item necessary. `--remain-after-exit` so the exit code is
+  // readable afterwards; `--collect` would unload the unit and discard it at the moment it matters.
+  const unit = `a11y-pipeline-${(args.find((a) => a.startsWith("--pipeline="))
+    ?.slice("--pipeline=".length) || "run").replace(/[^a-z0-9-]/gi, "")}`;
+  // ABSOLUTE, because the second `cd` below runs from inside the first when they are relative — which is
+  // exactly how the first attempt failed, with `cd: a11y-witness: No such file or directory`.
+  const remote = `cd ${CONTROL_CHECKOUT} && git fetch --quiet origin && git checkout --quiet ${ref} `
+    + `&& git merge --quiet --ff-only origin/${ref} `
+    + `&& systemctl reset-failed ${unit} 2>/dev/null; `
+    // The unit name is the LOCK, exactly as it is for a lab job: a second operator dispatching the same
+    // pipeline is REFUSED rather than silently running it twice against one fleet. That property is why
+    // this belongs on one host and not on N laptops.
+    + `cd ${CONTROL_CHECKOUT} && systemd-run --unit=${unit} --remain-after-exit `
+    + `--working-directory=${CONTROL_CHECKOUT} `
+    // PATH IS SET EXPLICITLY, and this is not defensive. A systemd unit gets a minimal PATH --
+    // `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` -- and `ansible-playbook` lives in
+    // `/root/.local/bin` (pipx). npm and node are in /usr/bin and were fine; every lab-job stage shells
+    // out to ansible-playbook and was not. Measured: the first detached run exited 127 for exactly this,
+    // which reads as "the pipeline is broken" rather than "a path is missing".
+    + `--setenv=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin `
+    + `--setenv=A11Y_PVE_KEY=${CONTROL_TO_LAB_KEY} --setenv=PYTHONUNBUFFERED=1 `
+    + `npm run --silent lab:pipeline -- ${args.join(" ")} --local`;
+  const started = spawnSync("ssh", ["-i", CONTROL_KEY, "-o", "StrictHostKeyChecking=no",
+    "-o", "ConnectTimeout=10", `root@${CONTROL_PLANE}`, remote], { stdio: "inherit" });
+  if (started.status !== 0) process.exit(started.status ?? 2);
+  process.stdout.write(`\nstarted as ${unit} on ${CONTROL_PLANE}. It now outlives this terminal.\n`
+    + `  follow:  ssh root@${CONTROL_PLANE} journalctl -fu ${unit}\n`
+    + `  state:   ssh root@${CONTROL_PLANE} systemctl show -p SubState -p Result ${unit}\n`
+    + "  SubState is the authoritative field: Result and ExecMainStatus are populated WHILE a unit runs "
+    + "and mean nothing until SubState leaves 'running'.\n");
+  // Following the journal is the OPERATOR's choice, and killing the follow must never kill the run --
+  // which is the whole point of detaching. Exit 0: the dispatch succeeded, and the pipeline's own verdict
+  // is read from the unit.
+  process.exit(0);
 }
 
 /** The ref the remote should stand on. Defaults to this checkout's branch, as `fleet:deploy` does. */
