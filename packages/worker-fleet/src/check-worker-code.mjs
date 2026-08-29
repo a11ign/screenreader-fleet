@@ -19,7 +19,7 @@ import { resolve } from "node:path";
 // which throws at import on any host without a screen reader.
 import { workerSourceDir } from "@a11y-witness/nvda-worker/code-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
-import { configuredWorkers, inventoryWorkerUrls } from "./fleet-env.mjs";
+import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
 // the same question before every run and a second copy of "is this worker stale" is a second answer.
 import { expectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
@@ -93,16 +93,11 @@ function protocolBumpNote() {
 export function workerUrls({
   named = configuredWorkers, local = localPoolUrls, inventory = inventoryWorkerUrls,
 } = {}) {
-  // This preferred A11Y_WORKER while doctor preferred A11Y_WORKERS, so with both set the two commands
-  // described different machines -- and "doctor is happy" / "a worker is stale" could be about disjoint
-  // sets. One parser now, in fleet-env.mjs, which also owns the inventory.
-  const configured = named();
-  if (configured.length) return { urls: configured.map((w) => w.url), source: "A11Y_WORKER(S)" };
-
-  const pool = local();
-  if (pool.length) return { urls: pool, source: "the local UTM pool" };
-
-  return { urls: inventory(), source: "inventory.yml" };
+  // ONE PRECEDENCE, in fleet-env.mjs. This function held its own -- named, then the LOCAL UTM POOL, then
+  // the inventory -- while `doctor` went named then inventory, so on any Mac with a registered guest the
+  // two commands described different fleets. That is the divergence the comment here used to claim it had
+  // closed; it closed the NAMED half only.
+  return resolveWorkerPool({ named, inventory, local });
 }
 
 /** The local UTM pool, or none — `utmctl` is absent on a machine that never had one. */

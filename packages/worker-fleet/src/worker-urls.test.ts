@@ -22,12 +22,39 @@ test("an explicitly named worker wins — naming one means you are managing it",
   assert.equal(source, "A11Y_WORKER(S)");
 });
 
-test("the local pool beats the inventory, because a VM on this Mac is the one you are about to use", () => {
+test("the INVENTORY beats the local pool — the local guests are deprecated", () => {
+  // REVERSED 2026-08-29, and the old assertion is worth recording because it was correct when written.
+  // It read "the local pool beats the inventory, because a VM on this Mac is the one you are about to
+  // use" — true while the local UTM guests WERE the fleet. They were a testing arrangement and are
+  // deprecated; capture runs on the bare metal in `inventory.yml`, which ADR 0012 calls the single source
+  // of truth.
+  //
+  // Left as it was, this is the divergence measured the same day: `doctor` (named -> inventory) reported
+  // five bare-metal boxes while `worker:code` (named -> local -> inventory) reported a laptop VM, on the
+  // same machine at the same moment. A stale-code check that examines the wrong fleet is a false clean,
+  // which is the exact failure this command exists to prevent.
   const { urls, source } = workerUrls({
     named: NONE, local: two("http://local:8765"), inventory: two("http://inv:8765"),
   });
+  assert.deepEqual(urls, ["http://inv:8765"]);
+  assert.match(source, /inventory\.yml/);
+});
+
+test("with an inventory AND no local VM, the local pool is never even asked", () => {
+  // Reading it means shelling out to `utmctl`, which on a Mac with UTM closed reports a healthy VM's
+  // state as `unknown` and costs seconds. A deprecated path should not be on the fast path.
+  let asked = false;
+  workerUrls({ named: NONE, local: () => { asked = true; return []; }, inventory: two("http://inv:8765") });
+  assert.equal(asked, false, "the inventory answered, so the deprecated pool must not be consulted");
+});
+
+test("with NO inventory the local pool still works, and says it is deprecated", () => {
+  // A contributor with one Mac and no hardware is a supported setup — `docs/getting-started.md` builds
+  // exactly that. Deprecated means "not first", never "removed", and the source string must say so or an
+  // operator cannot tell which of the two they are looking at.
+  const { urls, source } = workerUrls({ named: NONE, local: two("http://local:8765"), inventory: NONE });
   assert.deepEqual(urls, ["http://local:8765"]);
-  assert.equal(source, "the local UTM pool");
+  assert.match(source, /DEPRECATED/);
 });
 
 test("with no env and no local VM it asks the INVENTORY, rather than reporting nothing to compare", () => {

@@ -316,6 +316,59 @@ export function namedInventoryWorkers() {
   }
 }
 
+/**
+ * WHICH WORKERS TO USE, AND WHERE THAT LIST CAME FROM — the one precedence, in one place.
+ *
+ * THREE MODULES HELD THREE DIFFERENT ANSWERS, and one of them carried a comment saying they had been
+ * unified. Measured 2026-08-29:
+ *
+ *   doctor.mjs                        named -> inventory
+ *   check-worker-code.mjs             named -> LOCAL UTM POOL -> inventory
+ *   capture-screenreader-dataset.mjs  named -> LOCAL UTM POOL -> single-VM lease   (never reads inventory)
+ *
+ * The corpus capture path's own comment reads "One parser, in fleet-env.mjs. This copy and doctor's and
+ * check-worker-code's had drifted apart on precedence, which meant a diagnostic could describe a different
+ * fleet from the one about to run." That unification covered the NAMED half only; the fallback order below
+ * it stayed three separate answers, so the sentence describes a fix that was half applied.
+ *
+ * The consequence is the one the comment predicted: on a Mac with any registered UTM guest, `worker:code`
+ * reports the local VM while `doctor` reports the five bare-metal boxes, and a capture dispatches to
+ * whichever the entry point happened to prefer.
+ *
+ * ## THE LOCAL UTM POOL IS LAST, and that is a deprecation, not a preference
+ *
+ * The local guests were a testing arrangement and are deprecated; `inventory.yml` is the fleet, and ADR
+ * 0012 already calls it the single source of truth. So the pool is a fallback for a checkout with NO
+ * inventory — a supported setup for an outside contributor with one Mac and no hardware — and never a
+ * contender with one. Any other order reproduces the divergence above on every Mac that still has a bundle
+ * registered.
+ *
+ * `local` is injected rather than imported: reading the UTM pool means shelling out to `utmctl`, and this
+ * module is imported by everything that needs a worker list, including on Linux. A caller that has no
+ * local-pool reader simply omits it.
+ *
+ * @param {{ named?: () => {url: string}[], inventory?: () => string[], local?: () => string[] }} readers
+ * @returns {{ urls: string[], source: string }}
+ */
+export function resolveWorkerPool({
+  named = configuredWorkers, inventory = inventoryWorkerUrls, local = () => [],
+} = {}) {
+  const configured = named();
+  // Naming workers means you are managing them — nothing is started or stopped for you — so an explicit
+  // list always wins. That half was already consistent everywhere; it is the fallback below that was not.
+  if (configured.length) return { urls: configured.map((w) => w.url), source: "A11Y_WORKER(S)" };
+
+  const fleet = inventory();
+  if (fleet.length) return { urls: fleet, source: "inventory.yml" };
+
+  const pool = local();
+  if (pool.length) return { urls: pool, source: "the local UTM pool (DEPRECATED — see inventory.yml)" };
+
+  // Names what it LOOKED IN, never a bare "nothing found". `lab:inventory`'s rule: "'none here' and 'none
+  // anywhere' are different answers, and it now refuses to turn the first into the second."
+  return { urls: [], source: "A11Y_WORKER(S), inventory.yml and the local UTM pool — all empty" };
+}
+
 function main() {
   const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
   const workers = workersFromInventory(readFileSync(INVENTORY, "utf8"), { port });
