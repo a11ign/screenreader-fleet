@@ -15,9 +15,11 @@ import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { homedir } from "node:os";
 import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
+import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers } from "./fleet-env.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
@@ -56,6 +58,7 @@ const PROBE_TIMEOUT_MS = 8000;
 
 /** @type {any[]} */
 /** @type {{ name: string, ok: boolean, detail: string, fix: string|null }[]} */
+/** @type {{name: string, ok: boolean, detail: string, fix: string|null, advisory?: boolean}[]} */
 const checks = [];
 /**
  * One check's verdict, and its FIX. Every parameter is typed here rather than inferred, because `fix`
@@ -65,6 +68,19 @@ const checks = [];
  * @param {string} name @param {boolean} ok @param {string} detail @param {string|null} [fix]
  */
 const add = (name, ok, detail, fix = null) => checks.push({ name, ok, detail, fix });
+
+/**
+ * A finding that is REAL and does not stop a run — reported every time, never blocking.
+ *
+ * `doctor` exits 0 when a run can PROCEED, and that contract is load-bearing: agents are told to read
+ * `next_command` and act on it. An architectural debt is not a reason a capture cannot happen, so filing
+ * one as a failure would make `doctor` say NOT READY on a machine that is fine — and a readiness command
+ * that cries wolf is one people stop running, which is how the checks it does own stop being read.
+ *
+ * Distinct from `ok: true` for the opposite reason: silence is how ADR 0012 went years describing a system
+ * that did not exist. It is stated on every run and excluded from the verdict.
+ */
+const advise = (/** @type {string} */ name, /** @type {string} */ detail, /** @type {string|null} */ fix = null) => checks.push({ name, ok: true, advisory: true, detail, fix });
 
 function commandError(/** @type {any} */ error) {
   const observed = [error?.stderr, error?.stdout, /** @type {any} */ (error)?.message]
@@ -94,6 +110,40 @@ async function httpJson(/** @type {any} */ url) {
 }
 
 // --- the checks -----------------------------------------------------------
+
+/**
+ * IS THE FLEET KEY SITTING NEXT TO 100 MB OF PACKAGES NOBODY AUDITED? — ADR 0012, checked rather than
+ * asserted.
+ *
+ * Found on 2026-08-29 to be violated on BOTH machines the ADR is about: the control plane carried 56 MB
+ * and 121 packages beside the key, and this laptop carries 103 MB beside the same key plus the lab key.
+ * The document was accurate about the intent and described a system that did not exist — which is worse
+ * than no document, because it is read as a guarantee.
+ *
+ * Reported by `doctor` because that is the command whose whole promise is that every check names its own
+ * fix, and because a check nobody runs is one this repo has learned not to write.
+ */
+function checkControlPlaneIsolation() {
+  // `~` is a SHELL expansion, not a filesystem one: `existsSync("~/.ssh/...")` is always false, which
+  // would make this guard report every machine as compliant. The silent-pass failure mode, in the guard
+  // written because a document silently passed.
+  const raw = process.env.A11Y_SSH_KEY || "~/.ssh/a11y-witness_ed25519";
+  const keyPath = raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
+  const hasFleetKey = existsSync(keyPath);
+  const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+  const hasNodeModules = existsSync(resolve(root, "node_modules"));
+  // A workspace is a checkout with sources, which is what makes "delete node_modules" the wrong advice
+  // here and the right advice on a control plane.
+  const isWorkspace = existsSync(resolve(root, "packages")) && existsSync(resolve(root, "package.json"));
+  const verdict = controlPlaneIsolation({ hasNodeModules, hasFleetKey, isWorkspace });
+  // NOT a hard failure: this machine cannot do its job without the key today, and a doctor that refuses
+  // to say READY over an architectural debt would simply be ignored. It is reported every run so it stays
+  // visible, which is the difference between a known debt and a forgotten one.
+  if (!verdict.violated) return add("isolation", true, verdict.why);
+  advise("isolation", verdict.why,
+    "docs/control-plane-plan.md L3 — drive the control plane rather than holding its keys");
+}
+
 
 // The DEFAULT here was "codex", and every part of that was wrong. `judge.ts` has no codex case at all —
 // it offers local, anthropic and openai — so with JUDGE_BACKEND unset (the normal case) this told the
@@ -380,6 +430,7 @@ function nextCommand() {
  * spot, which is why these guards were placed by reading each file rather than by running a tool over them.
  */
 async function main() {
+  checkControlPlaneIsolation();
   await checkJudge();
   await checkWorker();
   await checkDatasetPages();
@@ -391,8 +442,8 @@ async function main() {
     console.log(JSON.stringify({ ready, next_command: nextCommand(), checks }, null, 2));
   } else {
     for (const c of checks) {
-      console.log(`${c.ok ? "OK  " : "FAIL"}  ${c.name.padEnd(11)} ${c.detail}`);
-      if (!c.ok && c.fix) console.log(`        fix: ${c.fix}`);
+      console.log(`${c.advisory ? "DEBT" : c.ok ? "OK  " : "FAIL"}  ${c.name.padEnd(11)} ${c.detail}`);
+      if ((!c.ok || c.advisory) && c.fix) console.log(`        fix: ${c.fix}`);
     }
     console.log(`\n${ready ? "READY" : "NOT READY — see the fixes above"}`);
     console.log(`next: ${nextCommand()}`);
