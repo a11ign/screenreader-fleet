@@ -208,3 +208,39 @@ test("a pool with workers in it is NOT refused, so the guard cannot block a real
   assert.equal(describeEmptyPool(FLEET, CURRENT), null);
   assert.equal(describeEmptyPool([FLEET[0]], CURRENT), null);
 });
+
+test("a fleet where NOTHING answered is refused, not vouched for", () => {
+  // `describeEmptyPool` makes this argument for an empty pool -- "an affirmative claim about a fleet it
+  // had not looked at" -- and the identical condition arrives by a second path when the pool is full and
+  // every box is silent: `stale` is empty because nothing was COMPARED, not because everything matched.
+  //
+  // Measured before the fix: five workers, all silent, `describeCodeDrift` -> null, and the caller
+  // printed "Fleet runs this checkout (worker code abc123, 0 of 5 worker(s) checked)".
+  const drift = codeDrift("abc123", FLEET.map((worker) => ({ worker, code: null })));
+  assert.equal(drift.answered, 0);
+  const refusal = describeCodeDrift(drift, {});
+  assert.ok(refusal, "a fleet nobody could reach must not read as clean");
+  assert.match(refusal ?? "", /NONE\s*\n?answered/, "it must say nothing answered");
+  assert.match(refusal ?? "", /unexamined one/);
+  for (const worker of FLEET) assert.ok(refusal?.includes(worker), `must name ${worker}`);
+});
+
+test("SOME silent workers are context, never a refusal on their own", () => {
+  // Silence is not a per-worker finding: a box asleep contributes no mismatch, and treating that as a
+  // fault is how a check earns a reputation for crying wolf. The judgement is about the WHOLE reading.
+  const drift = codeDrift("abc123", [
+    { worker: FLEET[0], code: null },
+    { worker: FLEET[1], code: "abc123" },
+  ]);
+  assert.equal(drift.answered, 1);
+  assert.equal(describeCodeDrift(drift, {}), null);
+});
+
+test("answered counts boxes that were read, not boxes that agreed", () => {
+  // The number exists to separate "nothing was wrong" from "nothing was examined", so a STALE worker
+  // must still count as answered -- it was reached and compared.
+  const drift = codeDrift("abc123", [{ worker: FLEET[0], code: "old999" }]);
+  assert.equal(drift.answered, 1);
+  assert.equal(drift.stale.length, 1);
+});
+

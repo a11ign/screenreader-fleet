@@ -75,22 +75,30 @@ export const expectedWorkerCode = () => codeVersion(workerSourceDir());
  * reputation for crying wolf. `"absent"` IS a finding — a worker predating `/health.code` is itself a
  * stale deploy.
  *
+ * `answered` is returned rather than left to be inferred from the two lists, because "nothing was wrong"
+ * and "nothing was examined" produce the SAME empty `stale` — and a caller with only the lists cannot
+ * distinguish 3 clean workers from 3 silent ones. Every number carrying what it was computed from is this
+ * file's parent rule; this is the one number that was missing.
+ *
  * @param {string} expected
  * @param {Array<{worker: string, code: string|null|undefined}>} readings
- * @returns {{expected: string, stale: Array<{worker: string, serving: string}>, unreachable: string[]}}
+ * @returns {{expected: string, stale: Array<{worker: string, serving: string}>, unreachable: string[],
+ *            answered: number}}
  */
 export function codeDrift(expected, readings) {
   const stale = [];
   const unreachable = [];
+  let answered = 0;
   for (const reading of readings ?? []) {
     const code = reading?.code;
     if (code === null || code === undefined) {
       unreachable.push(reading?.worker);
       continue;
     }
+    answered += 1;
     if (code !== expected) stale.push({ worker: reading.worker, serving: String(code) });
   }
-  return { expected, stale, unreachable };
+  return { expected, stale, unreachable, answered };
 }
 
 /**
@@ -138,11 +146,38 @@ export function remedyLines(staleUrls, bareMetalUrls) {
  * Every number it reports carries what it was computed from, which is this file's parent rule: the hash,
  * which side is dirty, and how many boxes were silent rather than merely absent from the count.
  *
- * @param {{expected: string, stale: Array<{worker: string, serving: string}>, unreachable: string[]}} drift
+ * @param {{expected: string, stale: Array<{worker: string, serving: string}>, unreachable: string[],
+ *           answered?: number}} drift
  * @param {{when?: string, bareMetalUrls?: string[], sourceDirty?: string}} options
  * @returns {string|null}
  */
 export function describeCodeDrift(drift, { when = "before the run", bareMetalUrls = [], sourceDirty = "" } = {}) {
+  // A FLEET NOBODY COULD REACH IS NOT A CLEAN FLEET. `describeEmptyPool` below makes exactly this
+  // argument for `workers.length === 0` -- "an affirmative claim about a fleet it had not looked at" --
+  // and the identical condition arrives by a second path when the pool is full and every box is silent:
+  // `stale` is empty because nothing was COMPARED, not because everything matched, so this returned null
+  // and the caller printed "Fleet runs this checkout (worker code …, 0 of 5 worker(s) checked)".
+  //
+  // A remedy that reaches one of several paths, in the module whose own header names that shape.
+  //
+  // Silence is NOT a per-worker finding -- a box asleep contributes no mismatch, and treating that as a
+  // fault is how a check earns a reputation for crying wolf. The judgement is about the WHOLE reading:
+  // some answered, so the ones that did not are context; none answered, so there is no reading at all.
+  if (drift?.answered === 0 && drift?.unreachable?.length) {
+    return [
+      "",
+      `REFUSING to vouch for the fleet ${when}: ${drift.unreachable.length} worker(s) were asked and NONE`,
+      `answered, so nothing was compared against this checkout (${drift.expected}).`,
+      ...drift.unreachable.map((w) => `  ${w}`),
+      "",
+      "This is not a clean fleet, it is an unexamined one. A capture is about to dispatch to these boxes,",
+      "so silence here is a broken invocation rather than a pass. Common causes: the fleet is powered",
+      "down (npm run fleet:status), or a deploy just rebooted it and nothing waited.",
+      "",
+      "Or pass --allow-stale-workers if you know something this check does not.",
+      "",
+    ].join("\n");
+  }
   if (!drift?.stale?.length) return null;
   const lines = [
     `\nFLEET IS NOT RUNNING THIS CHECKOUT ${when}.`,
