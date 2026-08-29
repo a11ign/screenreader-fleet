@@ -191,17 +191,39 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
       reject(error);
     }
 
-    // KEEPALIVE, AND THE ASYNC PATH NO LONGER DEPENDS ON IT — which is how the root fix was PROVED.
+    // KEEPALIVE, KEPT ON PRECAUTIONARY GROUNDS ONLY. ITS DIAGNOSIS WAS WRONG, AND THE REASON IS TOPOLOGY.
     //
-    // It was load-bearing under the synchronous protocol: that held a connection SILENT for a whole
-    // capture, so NAT and Wi-Fi power-save reaped it and 9 of 40 responses were lost. The async path
-    // removed the shape entirely, and the proof is arithmetic rather than a green result: a poll is
-    // milliseconds and a capture is 12-40 s, so at any delay at or above ~15 s the first probe never fires
-    // during a capture at all. `gate:stability` PASSED 8/8 on the async path with the delay at 60 s, where
-    // it provably did nothing.
+    // The story attached to this was: a capture holds a connection SILENT for minutes, so NAT and Wi-Fi
+    // power-save reap it as idle. It was argued from *High Performance Browser Networking* -- "Most mobile
+    // carriers set a 5-30 minute NAT connection timeout" -- and that passage is about MOBILE CARRIERS AND
+    // THE PUBLIC INTERNET.
     //
-    // Kept for `A11Y_SYNC_CAPTURE=1`, which still holds one socket open: a path that works only because
-    // nobody uses it is one that fails when it is reached for.
+    // THIS IS A LAN. The control plane is REDACTED-INTERNAL-ADDRESS/24 and every worker is 192.168.1.x/24; the route to
+    // them is `link#14`, direct on the link layer with no gateway hop. NAT happens at REDACTED-INTERNAL-ADDRESS on the
+    // way OUT. There is no translation table between these hosts, so there is nothing here that a NAT
+    // timeout could expire. The theory was inapplicable from the first line, and the mismatch went
+    // unnoticed because the quotation fitted the SYMPTOM.
+    //
+    // The measurements agree, which is how it was caught rather than believed. Keepalive explicitly OFF,
+    // ~26 s silent captures:
+    //
+    //     8 sequential on one box        0 lost
+    //     15 across five boxes at once   0 lost    <- the exact condition the 9/40 was measured under
+    //
+    // 0 of 23. At the old 22% rate P(0 in 23) = 0.78^23 = 0.4%, so the rate really did change -- and these
+    // trials ran WITHOUT the keepalive, so it is not shown to be why. Losses went 9/40 -> 0 when it landed
+    // and nobody tested removing it: "a green result vouches for the mechanism", committed inside the work
+    // that kept finding that trap elsewhere.
+    //
+    // So: the losses were REAL and their cause is UNKNOWN. NAT is excluded by topology; the worker's own
+    // `keepAliveTimeout` and `requestTimeout` were excluded by measurement; the boxes' NIC power settings
+    // were already correct. What is left is the Wi-Fi association itself or something transient, and this
+    // comment will not guess again.
+    //
+    // Item A is unaffected and that is the useful part: the async path holds no long connection at all, so
+    // it is immune whatever the mechanism was. A STRUCTURAL FIX DOES NOT DEPEND ON THE DIAGNOSIS BEING
+    // RIGHT, which is the strongest argument there is for preferring one.
+
     req.on("socket", (socket) => {
       socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
       // Nagle would batch the request itself; a capture POST is one small write followed by a wait, so
