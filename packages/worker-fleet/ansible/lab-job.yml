@@ -402,6 +402,33 @@
       # the corpus and catches a rule going quiet; nothing caught the opposite until 2026-08-25, when
       # eleven separate defects had done exactly that with every gate green. Needs the AUTHORITATIVE
       # real-page corpus, which only the lab has.
+      # THE TWO GATES THAT DRIVE WORKERS, RUN WHERE THE WORKERS ARE — control-plane-plan L1.
+      #
+      # These ran from a laptop, and that is where a transport fault came from: 9 of 40 responses lost
+      # while the machine drove five boxes over Wi-Fi on a battery falling 18% to 1%. The workers are wired
+      # and mains-powered and reported 0 failures across 242 captures throughout, so the only unreliable
+      # thing in the path was the host doing the asking.
+      #
+      # What makes this possible is a fact nobody had checked: ADR 0012's credential split appears to pin
+      # the laptop in place, because only it holds both fleet access and the `a11y-pve` key. But a GATE
+      # reaches workers over HTTP :8765, not SSH -- measured from the lab 2026-08-29, all five answered 200.
+      # The split governs deploy and provision, and has never governed this.
+      #
+      # No flags: both already default to every worker in `inventory.yml` and shard across the pool. And
+      # the page server they lease now runs HERE, so the workers fetch corpus pages from a wired host --
+      # moving the orchestration and leaving the traffic behind would be half a fix. `guestReachableUrl`
+      # needs no change for that: it derives the reachable address from `os.networkInterfaces()`, so on the
+      # lab it resolves to REDACTED-INTERNAL-ADDRESS exactly as it resolved to the laptop's address before.
+      #
+      # An hour each, because a gate is 8 canaries x 5 captures or 5 pages x 3, and a worker that has to
+      # cold-start NVDA costs ~25 s more. The unit name is the lock, so a second dispatch is refused rather
+      # than queued -- see lab-stop.yml if one must be ended.
+      gate-stability:
+        argv: ["{{ lab_tsx }}", "packages/lab/scripts/stability-gate.mjs"]
+        timeout: 3600
+      gate-probe-order:
+        argv: ["/usr/bin/node", "packages/lab/scripts/gate-probe-order.mjs"]
+        timeout: 3600
       rules-real-pages:
         argv: ["/usr/bin/npm", "run", "--silent", "rules:real-pages"]
         timeout: 900
