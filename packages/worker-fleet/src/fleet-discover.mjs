@@ -228,7 +228,15 @@ export function reconcile(declared, discovered) {
       continue;
     }
     // Absent is NOT a fault on a fleet that is meant to be powered down between runs.
-    findings.push({ state: "absent", name: entry.name, ip: entry.host, mac: entry.mac });
+    //
+    // But "not answering" and "a DIFFERENT box is answering here" are different answers, and the MAC
+    // check above turns the second into the first unless it is carried. An operator reading "ASLEEP?
+    // REDACTED-INTERNAL-ADDRESS not answering" beside a live worker at REDACTED-INTERNAL-ADDRESS is being told something false about the
+    // one address they are looking at -- the "diagnostic that cannot report itself" shape, introduced by
+    // the very fix that made the state correct.
+    const impostor = discovered.find((d) => d.ip === entry.host);
+    findings.push({ state: "absent", name: entry.name, ip: entry.host, mac: entry.mac,
+      occupiedBy: impostor ? impostor.mac : null });
   }
 
   for (const d of discovered) {
@@ -391,7 +399,12 @@ function render(/** @type {any} */ findings) {
       lines.push(`           inventory.yml says ${f.ip}. Fix it, and give this box a DHCP RESERVATION —`);
       lines.push("           a drifting address is the one staleness that looks exactly like a dead machine.");
     } else if (f.state === "absent") {
-      lines.push(`  ASLEEP?  ${f.name.padEnd(16)} ${f.ip.padEnd(15)} not answering`);
+      lines.push(`  ASLEEP?  ${f.name.padEnd(16)} ${f.ip.padEnd(15)} ${f.occupiedBy ? "A DIFFERENT BOX IS AT THIS ADDRESS" : "not answering"}`);
+      if (f.occupiedBy) {
+        lines.push(`           ${" ".repeat(32)} something answered at ${f.ip} with mac ${f.occupiedBy},`);
+        lines.push(`           ${" ".repeat(32)} which is not ${f.name}'s. See the MOVED or UNKNOWN row for it.`);
+        lines.push(`           ${" ".repeat(32)} DHCP has reissued this address; give both boxes reservations.`);
+      }
       lines.push(f.mac
         ? `           ${" ".repeat(32)} wake it: ansible-playbook wake.yml -l ${f.name}`
         : `           ${" ".repeat(32)} and it has NO mac in inventory.yml, so it cannot be woken either`);

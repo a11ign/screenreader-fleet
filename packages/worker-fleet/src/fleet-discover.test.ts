@@ -48,6 +48,10 @@ test("a box at a worker's declared address with a DIFFERENT mac is NOT that work
   assert.equal(w2?.state, "moved");
   assert.equal(w2?.foundAt, "REDACTED-INTERNAL-ADDRESS");
   assert.equal(found.length, 2, "one physical box must not produce a third finding");
+  // "not answering" would be FALSE of REDACTED-INTERNAL-ADDRESS — something is there, it is just not w1. Making the
+  // state correct while leaving the sentence wrong is this repo's "diagnostic that cannot report
+  // itself", so the finding carries what was found at the address.
+  assert.equal(w1?.occupiedBy, "aa:bb:cc:dd:ee:02");
 });
 
 test("a declared worker with NO mac still matches on address", () => {
