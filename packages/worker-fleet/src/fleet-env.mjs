@@ -291,6 +291,31 @@ export function inventoryWorkerUrls() {
   }
 }
 
+/**
+ * The bare-metal fleet as `{name, url}` — the shape a REPORT needs.
+ *
+ * `fleet-status.mjs` already pairs the two, and its comment records what the address alone cost: "this
+ * table named .224 as the box whose Edge had drifted, and .224 is a11y-worker-FIVE — so
+ * `fleet:sleep --limit=a11y-worker-4` put a healthy machine to sleep and left the drifted one serving. A
+ * report and a command that cannot be matched up is a report you have to translate, and translation is
+ * where the mistake goes."
+ *
+ * Here rather than in each reporter, because that is the same pairing and a second copy would drift.
+ *
+ * @returns {{name: string, url: string}[]} empty when no inventory is declared, like `inventoryWorkerUrls`
+ */
+export function namedInventoryWorkers() {
+  try {
+    const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
+    const inventory = readFileSync(INVENTORY, "utf8");
+    const names = workerNamesFromInventory(inventory, { port });
+    return workersFromInventory(inventory, { port })
+      .map((url) => ({ name: names[url] ?? url.replace(/^https?:\/\//, ""), url }));
+  } catch {
+    return [];
+  }
+}
+
 function main() {
   const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
   const workers = workersFromInventory(readFileSync(INVENTORY, "utf8"), { port });

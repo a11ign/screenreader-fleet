@@ -21,7 +21,7 @@ import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
 import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
-import { configuredWorkers } from "./fleet-env.mjs";
+import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
 
 /**
@@ -184,8 +184,24 @@ async function checkJudge() {
 // Ready means "a run can proceed", not "everything is already running".
 async function checkWorker() {
   if (WORKERS_ENV.length) return checkConfiguredFleet(WORKERS_ENV);
+  // THE INVENTORY IS A FLEET, and `doctor` could not see one.
+  //
+  // It resolved A11Y_WORKERS, then the local UTM pool, then gave up — so on a Mac with any registered VM
+  // it reported the DEPRECATED local guests and never `inventory.yml`, which every other fleet command
+  // treats as the source of truth. Measured 2026-08-29 on one machine, at one moment: `doctor` said
+  // "2 worker(s), all stopped — READY" while `worker:code` said "checking 5 worker(s) from inventory.yml"
+  // and `fleet:status` showed those five busy with a corpus run.
+  //
+  // Three commands describing three different fleets, and `doctor` is the one CLAUDE.md tells an agent to
+  // run FIRST. Its `next_command` said `training:capture`, which would have captured on the wrong machines.
+  //
+  // THE INVENTORY WINS OUTRIGHT. The local UTM pool is deprecated — it was a testing arrangement — so it
+  // is a fallback for a machine with no inventory, never a contender with one. Anything else reproduces
+  // the divergence above on any developer Mac that still has a bundle registered.
+  const inventory = namedInventoryWorkers();
+  if (inventory.length) return checkConfiguredFleet(inventory);
   if (process.platform !== "darwin" || !existsSync(CTL)) {
-    return add("worker", false, "no A11Y_WORKERS set and no local VM tooling here",
+    return add("worker", false, "no A11Y_WORKERS set, no inventory.yml fleet, and no local VM tooling here",
       "set A11Y_WORKERS=http://host:8765[,http://host2:8765], or see docs/getting-started.md");
   }
 
@@ -220,8 +236,9 @@ async function checkWorker() {
   // fleet -- the direction this project is going -- got neither.
   const reachable = pool.filter((/** @type {any} */ v) => v.healthy && v.ip)
     .map((/** @type {any} */ v) => ({ name: v.name, url: `http://${v.ip}:${v.port}` }));
-  await checkDegradedWorkers(reachable);
-  await checkFleetConsistency(reachable);
+  const probed = await probeAll(reachable);
+  await checkDegradedWorkers(probed);
+  checkFleetConsistency(probed, pool.length);
   checkHostCapacity(pool);
   const busy = pool.filter((/** @type {any} */ vm) => vm.busy);
   if (busy.length) {
@@ -240,7 +257,17 @@ async function checkWorker() {
  * workers are sitting idle and ready, which is the exact mistake the comment above checkWorker
  * describes for a stopped VM.
  */
-async function checkConfiguredFleet(/** @type {any} */ workers) {
+/**
+ * Ask every worker once, and keep the failures as data.
+ *
+ * Shared because both fleet branches feed the same two diagnostics, and because `doctor` used to probe
+ * `/health` THREE times per worker — once here, once for degradation, once for consistency — so the three
+ * sections could describe three different moments. A box that went busy between them was reported ready by
+ * one and silently skipped by the next.
+ *
+ * @param {{name: string, url: string}[]} workers
+ */
+async function probeAll(workers) {
   const probed = [];
   for (const w of workers) {
     try {
@@ -249,6 +276,11 @@ async function checkConfiguredFleet(/** @type {any} */ workers) {
       probed.push({ ...w, health: null, error: /** @type {any} */ (e).message });
     }
   }
+  return probed;
+}
+
+async function checkConfiguredFleet(/** @type {any} */ workers) {
+  const probed = await probeAll(workers);
   const reachable = probed.filter((p) => p.health);
   const ready = reachable.filter((p) => p.health.ready);
   const state = (/** @type {any} */ p) => {
@@ -273,8 +305,11 @@ async function checkConfiguredFleet(/** @type {any} */ workers) {
       + " — the run will dispatch to the rest");
   }
 
-  await checkDegradedWorkers(workers);
-  await checkFleetConsistency(workers);
+  // ONE PROBE, PASSED DOWN. These re-probed `/health` themselves, so `doctor` made three requests per
+  // worker and the three sections could describe three different moments — a box that went busy or
+  // unreachable between them was reported ready by one and silently skipped by the next.
+  await checkDegradedWorkers(probed);
+  await checkFleetConsistency(probed, workers.length);
 
   // Contention only matters when there is nowhere left to dispatch. One busy worker in a fleet of ten
   // is a run in progress, not a conflict -- flagging it would make doctor fail during normal use.
@@ -290,15 +325,10 @@ async function checkConfiguredFleet(/** @type {any} */ workers) {
 // none, so this never surfaced anywhere. Measured on this pool: one worker needed a recovery on 4 of 4
 // captures (nvdaStart 19.1s each, WALL 122.9s) beside one that needed none (WALL 40.6s). Reported, not
 // failed: a degraded worker is slow, not broken, and pulling it costs more throughput than it saves.
-async function checkDegradedWorkers(/** @type {any} */ workers) {
-  for (const w of workers) {
-    let health;
-    try {
-      health = await httpJson(`${w.url}/health`);
-    } catch {
-      continue; // unreachable is already the worker check's business
-    }
-    const { degraded, reason } = assessWorker(health.vitals);
+async function checkDegradedWorkers(/** @type {any} */ probed) {
+  for (const w of probed) {
+    if (!w.health) continue; // unreachable is already the worker check's business
+    const { degraded, reason } = assessWorker(w.health.vitals);
     if (degraded) {
       add(`worker ${w.name}`, true, `DEGRADED — ${reason}`,
         `re-provision ${w.name}: packages/worker-fleet/src/provisioning/provision-nvda-worker.ps1, elevated,`
@@ -319,20 +349,18 @@ async function checkDegradedWorkers(/** @type {any} */ workers) {
  * Never a FAIL. A run on slightly mismatched guests is worse than one on matched guests and far better
  * than no run, and a diagnostic must not be the thing that takes the pool offline.
  */
-async function checkFleetConsistency(/** @type {any} */ workers) {
-  const guests = [];
-  for (const w of workers) {
-    try {
-      const health = await httpJson(`${w.url}/health`);
-      guests.push({ worker: w.url, environment: health.environment, policy: undefined });
-    } catch {
-      continue; // unreachable is the worker check's business, not this one
-    }
-  }
+function checkFleetConsistency(/** @type {any} */ probed, /** @type {number} */ configured) {
+  const guests = probed.filter((/** @type {any} */ w) => w.health)
+    .map((/** @type {any} */ w) => ({ worker: w.url, environment: w.health.environment, policy: undefined }));
   const { consistent, mismatches } = fleetConsistency(guests);
   if (guests.length < 2) return;
   if (consistent) {
-    add("fleet", true, `${guests.length} guests agree on browser, screen reader, OS and protocol`);
+    // "OF N CONFIGURED", because agreement among a SUBSET is not agreement. Unreachable guests are
+    // skipped here — correctly, this check is not their business — so without the denominator "3 guests
+    // agree" reads as a whole fleet on a fleet of five, which is the examined-nothing shape one step in
+    // from zero.
+    add("fleet", true, `${guests.length} of ${configured} guests agree on browser, screen reader, OS `
+      + `and protocol${guests.length < configured ? " — the rest could not be asked" : ""}`);
     return;
   }
   add("fleet", true, `INCONSISTENT — ${describeMismatches(mismatches).join("; ")}`,

@@ -7,8 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
-  workersFromInventory, portFromGroupVars, DEFAULT_WORKER_PORT, configuredWorkers,
-} from "./fleet-env.mjs";
+  workersFromInventory, portFromGroupVars, DEFAULT_WORKER_PORT, configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
 
 test("hosts become worker URLs on the declared port", () => {
   const workers = workersFromInventory([
@@ -243,4 +242,29 @@ test("validation does NOT disturb the empty case, which is a normal state", () =
     if (workers === undefined) delete process.env.A11Y_WORKERS; else process.env.A11Y_WORKERS = workers;
     if (worker === undefined) delete process.env.A11Y_WORKER; else process.env.A11Y_WORKER = worker;
   }
+});
+
+test("THE INVENTORY IS A FLEET DOCTOR CAN SEE, and it is named", () => {
+  // `doctor` resolved A11Y_WORKERS, then the local UTM pool, then gave up — so on a Mac with any
+  // registered VM it reported the DEPRECATED local guests and never inventory.yml. Measured on one
+  // machine at one moment: doctor said "2 worker(s), all stopped — READY" while `worker:code` said
+  // "checking 5 worker(s) from inventory.yml" and `fleet:status` showed those five BUSY with a corpus
+  // run. Its next_command was `training:capture`, which would have captured on the wrong machines.
+  //
+  // Named, not numbered: `fleet-status.mjs` records what an address-only report cost — ".224 is
+  // a11y-worker-FIVE, so `fleet:sleep --limit=a11y-worker-4` put a healthy machine to sleep and left the
+  // drifted one serving".
+  const workers = namedInventoryWorkers();
+  assert.ok(workers.length > 0, "this checkout declares a bare-metal fleet; the reader must find it");
+  for (const { name, url } of workers) {
+    assert.match(url, /^https?:\/\/[^/]+:\d+$/, "every entry is a usable worker address");
+    assert.doesNotMatch(name, /^https?:\/\//,
+      "a name is a name — an address here means the inventory pairing was lost");
+    assert.doesNotMatch(name, /^inventory-\d+$/, "a positional label cannot be matched to a --limit flag");
+  }
+});
+
+test("and it answers EMPTY rather than throwing when no inventory is declared", () => {
+  // A checkout with no fleet is supported, and a hint must not fail the command it is advising.
+  assert.ok(Array.isArray(namedInventoryWorkers()));
 });
