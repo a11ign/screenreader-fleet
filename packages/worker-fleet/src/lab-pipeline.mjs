@@ -56,7 +56,7 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  * An unrecognised flag is otherwise IGNORED — every CLI here parses argv by looking for the flags it
  * knows — so it runs the default and reports success. See `cli-flags.mjs`.
  */
-refuseUnknownFlags(["--pipeline=", "--ref=", "--only=", "--list"],
+refuseUnknownFlags(["--pipeline=", "--ref=", "--only=", "--list", "--local"],
   { entry: import.meta.url, command: "npm run lab:pipeline" });
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
@@ -351,6 +351,58 @@ function usage() {
     + "  from origin, and the fleet and the lab are given the SAME ref rather than defaulting apart.\n";
 }
 
+/** Where the sequencing runs. Same address `fleet-playbook.mjs` already uses; named once, not twice. */
+const CONTROL_PLANE = process.env.A11Y_CONTROL_HOST || "REDACTED-INTERNAL-ADDRESS";
+const CONTROL_KEY = process.env.A11Y_PVE_KEY || `${process.env.HOME}/.ssh/a11y-pve_ed25519`;
+/**
+ * The key CONTROL uses to reach the LAB. Not the same key this laptop uses, deliberately: it was generated
+ * ON control so its private half has never been anywhere else, which is the property that makes moving the
+ * sequencing there worth doing at all.
+ */
+const CONTROL_TO_LAB_KEY = "/root/.ssh/a11y-lab_ed25519";
+
+/**
+ * Run the whole sequence ON THE CONTROL PLANE, unless asked to run here.
+ *
+ * THE SEQUENCING WAS THE LAST THING ON THE LAPTOP, and it was the piece that needed both credentials —
+ * a route to the fleet and a route to the lab — which is why it stayed. Control has had the first since it
+ * was built and the second since 2026-08-29.
+ *
+ * It matters more than a gate does, because a pipeline is HOURS: a corpus run is ~4 h and `everything` is
+ * longer. Sequencing that from a laptop means a closed lid, a dropped Wi-Fi association or a flat battery
+ * ends the ORCHESTRATION while each supervised stage survives — measured 2026-08-26, five local watchers
+ * killed during one capture, "each time the unit survived exactly as designed while the orchestration did
+ * not, so nothing after it ever started".
+ *
+ * `--local` remains for a working tree, and the friction of a pushed ref is the correct friction.
+ */
+function dispatchToControlUnlessLocal() {
+  if (process.argv.includes("--local")) {
+    process.stdout.write("running the sequence HERE (--local) — a dropped connection ends it; "
+      + "each dispatched stage still survives on its own host\n");
+    return;
+  }
+  const args = process.argv.slice(2).filter((a) => a !== "--local");
+  process.stdout.write(`sequencing on the control plane (${CONTROL_PLANE}); --local runs it here\n`);
+  const remote = `cd a11y-witness && git fetch --quiet origin && git checkout --quiet ${branchArg(args)} `
+    + `&& git merge --quiet --ff-only origin/${branchArg(args)} `
+    // The lab key by ENV, because `group_vars/a11y_lab.yml` reads `A11Y_PVE_KEY` with a default that is
+    // this laptop's path -- correct here and absent there. One variable, two machines, no second spelling.
+    + `&& A11Y_PVE_KEY=${CONTROL_TO_LAB_KEY} npm run --silent lab:pipeline -- ${args.join(" ")} --local`;
+  const r = spawnSync("ssh", ["-i", CONTROL_KEY, "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+    // A pipeline is hours of mostly-silent output; without keepalives a quiet stage reads as a dead link.
+    "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=20", `root@${CONTROL_PLANE}`, remote],
+    { stdio: "inherit" });
+  process.exit(r.status ?? 2);
+}
+
+/** The ref the remote should stand on. Defaults to this checkout's branch, as `fleet:deploy` does. */
+function branchArg(/** @type {string[]} */ args) {
+  const named = args.find((a) => a.startsWith("--ref="))?.slice("--ref=".length);
+  if (named) return named;
+  return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
+}
+
 async function main() {
   const name = process.argv.find((a) => a.startsWith("--pipeline="))?.slice("--pipeline=".length);
   // `--list` is a question that was answered, so it exits 0. A missing --pipeline is a malformed request
@@ -364,6 +416,10 @@ async function main() {
     process.stderr.write(usage());
     process.exit(2);
   }
+  // AFTER the two questions above, never before: `--list` and a malformed request are answered locally in
+  // milliseconds, and shipping them to another host would make asking what pipelines exist depend on the
+  // control plane being up.
+  dispatchToControlUnlessLocal();
   // Indexed by a name that came off the command line, which is the whole reason the refusal below
   // exists. The inferred type admits only the seven keys, so the lookup that CHECKS for an eighth is
   // itself the error -- a check must be able to express the case it is checking for.
