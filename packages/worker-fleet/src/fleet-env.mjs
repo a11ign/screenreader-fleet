@@ -75,8 +75,12 @@ export function configuredWorkers() {
     .map((url) => ({ name: url.replace(/^https?:\/\//, ""), url }));
 }
 
-const INVENTORY = fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url));
-const GROUP_VARS = fileURLToPath(new URL("../ansible/group_vars/a11y_workers.yml", import.meta.url));
+// THE INVENTORY LIVES IN `packages/control` NOW, because it describes the machines the CONTROL PLANE
+// drives and it is read by the ansible that runs there. Relative across the package boundary rather than
+// a package-name import, for the reason `packages/control` exists at all: control has no `node_modules`,
+// so nothing it touches may need one to resolve.
+const INVENTORY = fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url));
+const GROUP_VARS = fileURLToPath(new URL("../../control/ansible/group_vars/a11y_workers.yml", import.meta.url));
 
 /** A line that declares a host address, ignoring anything commented out. */
 const HOST_LINE = /^\s*ansible_host\s*:\s*(\S+)\s*$/;

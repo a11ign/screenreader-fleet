@@ -1,3 +1,0 @@
----
-# Windows-over-SSH support is ansible-core 2.18+, which the whole fleet already requires.
-requires_ansible: ">=2.18"

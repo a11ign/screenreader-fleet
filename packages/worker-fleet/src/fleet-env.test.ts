@@ -62,9 +62,9 @@ test("the port comes from the group vars, not from a second copy in here", () =>
 test("the REAL inventory in this repo parses, and agrees with the real group vars", () => {
   // The fixtures above prove the reader's rules; this proves the shipped files obey them. A reader that
   // only ever runs against its own fixtures is a reader that has never met the file it exists to read.
-  const inventory = readFileSync(fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url)), "utf8");
+  const inventory = readFileSync(fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url)), "utf8");
   const groupVars = readFileSync(
-    fileURLToPath(new URL("../ansible/group_vars/a11y_workers.yml", import.meta.url)), "utf8");
+    fileURLToPath(new URL("../../control/ansible/group_vars/a11y_workers.yml", import.meta.url)), "utf8");
 
   const workers = workersFromInventory(inventory, { port: portFromGroupVars(groupVars) });
   assert.ok(workers.length >= 1, "the shipped inventory should list at least the first bare-metal worker");

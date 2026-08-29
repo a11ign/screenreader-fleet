@@ -53,7 +53,7 @@ $ENVIRONMENT_FILES = @(
     'packages/worker-fleet/src/provisioning/provision-nvda-worker.ps1'
     'packages/nvda-worker/src/run-server.cmd'
     'packages/worker-fleet/src/provisioning/apply-foreground-lock-timeout.ps1'
-    'packages/worker-fleet/ansible/roles/worker/defaults/main.yml'
+    'packages/control/ansible/roles/worker/defaults/main.yml'
 )
 
 $hashes = foreach ($relative in $ENVIRONMENT_FILES) {

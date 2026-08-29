@@ -66,9 +66,9 @@ export function fleetToProbe() {
   const named = configuredWorkers();
   if (named.length) return named;
   try {
-    const inventory = readFileSync(fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url)), "utf8");
+    const inventory = readFileSync(fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url)), "utf8");
     const groupVars = readFileSync(
-      fileURLToPath(new URL("../ansible/group_vars/a11y_workers.yml", import.meta.url)), "utf8");
+      fileURLToPath(new URL("../../control/ansible/group_vars/a11y_workers.yml", import.meta.url)), "utf8");
     const port = portFromGroupVars(groupVars);
     // The INVENTORY NAME beside the address, because every command that acts on a worker takes the name
     // (`fleet:deploy --limit=a11y-worker-4`, `fleet:sleep`, `lab:job -e worker=`) while this report showed
@@ -85,7 +85,7 @@ export function fleetToProbe() {
   } catch (error) {
     throw new Error(
       "No fleet to report on: A11Y_WORKERS is unset and the inventory could not be read "
-      + `(${/** @type {Error} */ (error).message}). Set one, or add a host to packages/worker-fleet/ansible/inventory.yml.`,
+      + `(${/** @type {Error} */ (error).message}). Set one, or add a host to packages/control/ansible/inventory.yml.`,
       { cause: error });
   }
 }

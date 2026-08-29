@@ -285,7 +285,7 @@ try {
   } catch {
     Record 'ssh shell' "FAILED - $($_.Exception.Message)"
     Warn "Could not set ssh DefaultShell ($($_.Exception.Message)). Ansible plays will fail against this"
-    Warn 'box until it is set; see packages/worker-fleet/ansible/README.md for the one-liner.'
+    Warn 'box until it is set; see packages/control/ansible/README.md for the one-liner.'
   }
 
   # The operator's public key, if one was supplied. This is what turns "6-12 console visits" into one.
@@ -476,7 +476,7 @@ if (-not $handedOff) {
 
         ansible-playbook ssh-key.yml -l <host> -e a11y_operator_key="`$(cat ~/.ssh/id_ed25519.pub)"
 
-    Then add this box to packages/worker-fleet/ansible/inventory.yml -- the ONE place the fleet
+    Then add this box to packages/control/ansible/inventory.yml -- the ONE place the fleet
     is defined. "npm run fleet:env" derives A11Y_WORKERS from it.
 
   Auto-logon, so the interactive session survives a reboot:

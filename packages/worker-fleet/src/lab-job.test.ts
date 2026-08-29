@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 const read = (name: string) =>
-  readFileSync(fileURLToPath(new URL(`../ansible/${name}`, import.meta.url)), "utf8");
+  readFileSync(fileURLToPath(new URL(`../../control/ansible/${name}`, import.meta.url)), "utf8");
 
 /**
  * The file with its comments stripped.

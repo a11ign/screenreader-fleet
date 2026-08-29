@@ -28,7 +28,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
-const ANSIBLE = fileURLToPath(new URL("../ansible/", import.meta.url));
+const ANSIBLE = fileURLToPath(new URL("../../control/ansible/", import.meta.url));
 const OWN_NAME = /\b((?:lab|job)_[a-z0-9_]+)\b/g;
 
 type Task = Record<string, unknown>;

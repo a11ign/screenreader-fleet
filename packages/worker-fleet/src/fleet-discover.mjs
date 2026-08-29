@@ -407,7 +407,7 @@ async function main() {
   }
   const port = Number(arg("port") || DEFAULT_PORT);
 
-  const inventoryPath = fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url));
+  const inventoryPath = fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url));
   const declared = inventoryHosts(readFileSync(inventoryPath, "utf8"));
 
   process.stderr.write(`scanning ${subnet}.1-${LAST_HOST_IN_SUBNET} on :${port} ...\n`);

@@ -134,7 +134,7 @@ export async function wakeFleet(workers, { port = 8765, broadcast, deadlineMs = 
 
 async function main() {
   const wanted = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-  const inventory = fileURLToPath(new URL("../ansible/inventory.yml", import.meta.url));
+  const inventory = fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url));
   const declared = inventoryHosts(readFileSync(inventory, "utf8"));
   const workers = wanted.length ? declared.filter((w) => wanted.includes(w.name)) : declared;
 

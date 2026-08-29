@@ -188,8 +188,8 @@ fi
 # -p is load-bearing: ansible.cfg puts the repo's own collections path FIRST, so a bare install vendors
 # third-party collections into the git tree. Only a11y.worker belongs there.
 export PATH="$HOME/.local/bin:$PATH"
-if [ -f "$REPO_PATH/packages/worker-fleet/ansible/requirements.yml" ]; then
-  ansible-galaxy collection install -r "$REPO_PATH/packages/worker-fleet/ansible/requirements.yml" \
+if [ -f "$REPO_PATH/packages/control/ansible/requirements.yml" ]; then
+  ansible-galaxy collection install -r "$REPO_PATH/packages/control/ansible/requirements.yml" \
     -p "$HOME/.ansible/collections" >/dev/null
   ok 'collections installed (ansible.windows, community.windows, community.general)'
 else
@@ -350,13 +350,13 @@ cat <<EOF
 
   Find and adopt workers:
     npm run fleet:discover                 # scan, and reconcile against inventory.yml
-    \$EDITOR packages/worker-fleet/ansible/inventory.yml     # ansible_host + mac per box
+    \$EDITOR packages/control/ansible/inventory.yml     # ansible_host + mac per box
     eval "\$(npm run --silent fleet:env)"   # A11Y_WORKERS, derived from that inventory
 
   Build one:
     packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub
 
-  Manage them (from packages/worker-fleet/ansible):
+  Manage them (from packages/control/ansible):
     ansible-playbook provision-role.yml -l <host> --check --diff
     ansible-playbook deploy.yml
     ansible-playbook wake.yml / sleep.yml

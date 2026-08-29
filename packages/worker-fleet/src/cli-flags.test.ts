@@ -54,7 +54,7 @@ const GUARDED: Record<string, string> = {
   "packages/lab/src/training/capture-real-pages.mjs":
     "THE script that ran four shards against `--worker=http://:8765` for 29 minutes. Its `--shard=` "
     + "arrives through `parseShard`, so a regex over this file would not find it",
-  "packages/worker-fleet/src/lab-pipeline.mjs":
+  "packages/control/src/lab-pipeline.mjs":
     "a mistyped `--ref=` falls back to the local branch, which is how the fleet and the lab came to be "
     + "on different commits, failing with a hash mismatch that reads like a corrupted checkout",
   "packages/lab/scripts/promote-model.mjs":
@@ -80,7 +80,7 @@ const GUARDED: Record<string, string> = {
   "packages/worker-fleet/src/deploy-worker.mjs":
     "`--vm=` mistyped deploys to EVERY guest rather than the one named, and `--allow-protocol-change` "
     + "is the flag that lets a CAPTURE_PROTOCOL_VERSION bump ship, invalidating 2,122 cached captures",
-  "packages/worker-fleet/src/fleet-playbook.mjs":
+  "packages/control/src/fleet-playbook.mjs":
     "`--serial=` and `--limit=` decide how many of twelve machines an operation touches at once, and "
     + "`--ref=` decides what code they end up running",
   "packages/worker-fleet/src/check-worker-code.mjs":
