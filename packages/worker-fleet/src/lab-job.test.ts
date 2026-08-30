@@ -94,6 +94,39 @@ function catalogueJobs(): Record<string, { argv?: unknown }> {
   return jobs;
 }
 
+/**
+ * Scripts whose input is DERIVED by another command, and the npm script that derives it.
+ *
+ * `audit-scorer-shortcuts.py` classifies each veto against `runs/unclosable-vetoes.json`, which
+ * `corpus:unclosable-map` emits from `audit-corpus-starvation.mjs`. The audit REFUSES an absent map --
+ * "forgiving nothing is the honest fallback" -- and cannot see a STALE one, so a job that skips the
+ * derivation fails silently by construction.
+ */
+const DERIVED_INPUT: Record<string, string> = {
+  "audit-scorer-shortcuts.py": "scorer:shortcuts (or :candidate/:baseline) — emits runs/unclosable-vetoes.json",
+  "audit_grants.py": "corpus:grants-audit — emits runs/grants-map.json",
+};
+
+test("a job may not run a script whose input another command has to derive", () => {
+  // MEASURED 2026-08-30. `shortcuts-baseline` called `audit-scorer-shortcuts.py` directly while `shortcuts`
+  // went through npm, so the one job that WRITES the tracked baseline -- a release gate -- was the only one
+  // that never refreshed the classification it was recording. An entry extended from 5 features to 10 was
+  // pushed, the baseline re-recorded, and the recorded classification did not move. Nothing failed.
+  //
+  // The same shape as every other entry in this file: a remedy present at one of the call sites that need
+  // it. `lab-job.yml`'s own comment states the rule -- "the chain lives in the npm script".
+  const offenders: string[] = [];
+  for (const [name, job] of Object.entries(catalogueJobs())) {
+    const argv = (Array.isArray(job?.argv) ? job.argv : []).map(String);
+    if (argv[0]?.endsWith("npm")) continue;
+    for (const [script, chain] of Object.entries(DERIVED_INPUT)) {
+      if (argv.some((part) => part.endsWith(script))) offenders.push(`${name} runs ${script} directly — go via ${chain}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    "these jobs skip the command that derives their input, so they read whatever is on the lab's disk");
+});
+
 test("no job can be handed a worker URL — a worker is always resolved from the inventory", () => {
   // `--worker=http://:8765` cost 29 minutes. Resolving a NAME through the inventory makes a malformed
   // address inexpressible rather than merely rejected — the same shape as `isValidCaptureId`.
