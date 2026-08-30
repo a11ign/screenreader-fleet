@@ -111,6 +111,9 @@ const GUARDED: Record<string, string> = {
     + "merely did not answer in time",
   "packages/lab/scripts/audit-corpus-starvation.mjs":
     "takes no flags; any passed today is discarded",
+  "packages/lab/scripts/audit-observation-ambiguity.mjs":
+    "a mistyped --captures= silently audits the DEFAULT corpus root, so an answer about the wrong "
+    + "captures reads exactly like an answer about the right ones",
   "packages/lab/scripts/audit-size-sensitivity.mjs":
     "--evaluating and --stdin are passed ONWARD to the Python scorer, not read here",
   "packages/lab/scripts/bench-capture.mjs":
