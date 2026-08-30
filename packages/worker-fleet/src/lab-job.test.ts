@@ -6,7 +6,10 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+
+/** The lab's scripts directory, resolved the same way `read` resolves the playbooks. */
+const LAB_SCRIPTS = fileURLToPath(new URL("../../lab/scripts/", import.meta.url));
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
@@ -106,6 +109,31 @@ const DERIVED_INPUT: Record<string, string> = {
   "audit-scorer-shortcuts.py": "scorer:shortcuts (or :candidate/:baseline) — emits runs/unclosable-vetoes.json",
   "audit_grants.py": "corpus:grants-audit — emits runs/grants-map.json",
 };
+
+test("a gate that dispatches to the control plane must be told --local when the control plane runs it", () => {
+  // `dispatchUnlessLocal` makes the lab the DEFAULT and `--local` the escape hatch, which is right for an
+  // operator at a laptop. But a `lab-job.yml` entry IS the control plane's dispatch, so the default there
+  // makes the script dispatch again from inside the job it was dispatched into.
+  //
+  // MEASURED 2026-08-30: `gate-probe-order` died `sh: 1: ansible-playbook: not found`, exit 127 -- a
+  // message that reads like a broken lab rather than a job wired to call itself. `stability` had the same
+  // wiring. DISCOVERED here rather than listed, because "which scripts dispatch" is a fact about the
+  // source that a hand-written list goes stale against, exactly as the worker-file list did.
+  const dispatching = readdirSync(LAB_SCRIPTS)
+    .filter((file) => file.endsWith(".mjs"))
+    .filter((file) => readFileSync(LAB_SCRIPTS + file, "utf8").includes("gates/dispatch.mjs"));
+  assert.ok(dispatching.length >= 2,
+    `found ${dispatching.length} dispatching gates; the discovery is broken, not the catalogue clean`);
+
+  const offenders: string[] = [];
+  for (const [name, job] of Object.entries(catalogueJobs())) {
+    const argv = (Array.isArray(job?.argv) ? job.argv : []).map(String);
+    const script = dispatching.find((f) => argv.some((part) => part.endsWith(f)));
+    if (script && !argv.includes("--local")) offenders.push(`${name} runs ${script} without --local`);
+  }
+  assert.deepEqual(offenders, [],
+    "these jobs re-dispatch from inside the lab and die with `ansible-playbook: not found`");
+});
 
 test("a job may not run a script whose input another command has to derive", () => {
   // MEASURED 2026-08-30. `shortcuts-baseline` called `audit-scorer-shortcuts.py` directly while `shortcuts`
