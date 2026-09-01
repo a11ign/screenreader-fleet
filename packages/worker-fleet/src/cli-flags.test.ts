@@ -37,6 +37,10 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "packages/lab/scripts/collect-promotion.mjs":
+    "it OVERWRITES the shipped model weights, so an unrecognised flag running the default is not a "
+    + "wasted run but a promotion installed when somebody asked for --dry-run. It takes exactly one "
+    + "flag, which is the whole reason a typo is plausible",
   "packages/lab/scripts/explain-capture.mjs":
     "it exists BECAUSE a mistyped question gets a confident wrong answer. Every enquiry into a capture "
     + "used to be ssh plus hand-written Python plus a guess at the JSON shape, and that produced four "
