@@ -36,6 +36,9 @@ export const MUST_MATCH = [
   { path: "windowsVersion", why: "a second OS image would blend two corpora into one" },
   { path: "architecture", why: "ARM64 and x64 guests are not interchangeable evidence" },
   { path: "captureProtocol", why: "a guest on an older protocol produces evidence that means something else" },
+  { path: "screenReaderSettings", why: "a guest capturing with `reportLanguage` off is blind to 3.1.2 and " +
+      "one with it on is not — the same page yields different transcripts, so the two are not " +
+      "interchangeable evidence. It is in the cache key for the same reason" },
   // A CACHE KEY that was not a consistency field, which is the worst combination.
   //
   // `provisionRevision` records what the guest actually has -- NVDA's config, Edge's policies,
