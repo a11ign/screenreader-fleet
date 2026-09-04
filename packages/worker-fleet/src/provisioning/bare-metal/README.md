@@ -3,6 +3,33 @@
 PXE-boot a mini PC and it joins the fleet: Windows installs, `witness` logs in, sshd comes up with your
 key already installed, and the worker serves `/health`. **No console visit.**
 
+## Detach the network until first boot has pinned Edge
+
+**Learned on a11y-worker-7, 2026-09-04, and it cost a reimage.** Nothing in first boot mentioned Edge
+until then. The box installed Windows, came up with a network, and Edge updated itself to 152 while
+`npm install` was still running. `roles/worker/tasks/edge-version.yml` then refused, correctly:
+
+> a11y-worker-7 is on Edge 152.0.4191.62, NEWER than the pinned 151.0.4129.107. Chromium will not install
+> over a newer build and Windows will not let it be uninstalled, so this role cannot bring it back.
+
+`browserVersion` is FIRST in `fleet-consistency`'s MUST_MATCH list and part of the capture cache key, so a
+box on a different Edge build does not merely underperform — **every capture run refuses to start, on
+every box.** The only remedies are reimaging that one machine or moving the pin and recapturing the whole
+corpus.
+
+Bootstrap step 5 now stops the Edge updater and installs the pinned build, and it runs BEFORE the handoff
+to provisioning. That closes the window in the normal case. It cannot close it entirely: the box needs a
+network for step 3 to fetch the payload, and Edge can begin updating in the minutes before step 5 lands.
+
+So on a slow box, or one that sat at the desktop before you got to it, **check before assuming**:
+
+```powershell
+(Get-Item 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe').VersionInfo.ProductVersion
+```
+
+Newer than the pin means reimage now, while it is cheap. Step 5 says so itself rather than trying and
+reporting success.
+
 ## How a box gets installed, end to end
 
 ```

@@ -356,7 +356,86 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
   Record 'repo' 'cloned'
 }
 
-Step 5 'Hand off to the provisioning script'
+Step 5 'Pin Edge and stop its updater — BEFORE the box has time to update itself'
+# THE STEP THAT WAS MISSING, and a11y-worker-7 is what it cost.
+#
+# `browserVersion` is part of the capture cache key, so two Edge builds must never write into one corpus,
+# and `fleet-consistency` lists it FIRST in MUST_MATCH — a split there does not degrade one box, it makes
+# every capture run refuse to start.
+#
+# Until 2026-09-04 nothing in first boot mentioned Edge. The box installed Windows, came up with a
+# network, and Edge updated itself while `npm install` was still running. By the time
+# `roles/worker/tasks/edge-version.yml` ran it found a NEWER build than the pin and refused, correctly:
+# Chromium will not install over a newer build and Windows will not let Edge be uninstalled. One box,
+# reimaged, because a pin that arrives after the update is not a pin.
+#
+# So the same two levers the role uses, moved to the earliest moment they work. This is a PORT: keep it in
+# step with `edge-version.yml`, which is the tested copy and the one `provisionRevision` hashes.
+#
+# ORDER IS THE WHOLE OF IT. Stop the updater first, then install. Doing it the other way leaves a live
+# updater to finish the update it had already started, in the window between installing and believing it.
+$EdgeVersion = if ($env:A11Y_EDGE_VERSION) { $env:A11Y_EDGE_VERSION } else { '151.0.4129.107' }
+$EdgeExe     = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+$EdgeMsiUrl  = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/998bcf3d-e044-426d-9e9b-61da81399306/MicrosoftEdgeEnterpriseX64.msi'
+$EdgeMsiSha  = 'b75f03b87dfb0cbc85ba2c0858c632511b17355f42563a43fca5368100ffe0fe'
+
+# BY PREFIX, NOT BY NAME. The role learned this: a freshly installed guest carried a third task,
+# `MicrosoftEdgeUpdateBrowserReplacementTask`, sitting Ready while the two known ones were disabled. A task
+# called "browser replacement" is precisely what this exists to stop, and an enumerated list cannot see it.
+$tasks = Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdate*' -ErrorAction SilentlyContinue
+foreach ($t in $tasks) {
+  # STOP BEFORE DISABLE. `Disable-ScheduledTask` stops a task STARTING again; it does not terminate an
+  # instance already RUNNING. Measured on a11y-worker-5: the verify refused with "MicrosoftEdgeUpdateTask
+  # MachineCore is Running, expected Disabled" — on the one guest that had updated past the pin.
+  if ($t.State -eq 'Running')  { Stop-ScheduledTask    -TaskName $t.TaskName -TaskPath $t.TaskPath | Out-Null }
+  if ($t.State -ne 'Disabled') { Disable-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath | Out-Null }
+}
+OK "$(@($tasks).Count) Edge updater task(s) stopped and disabled"
+foreach ($svc in 'edgeupdate','edgeupdatem','MicrosoftEdgeElevationService') {
+  try {
+    $s = Get-Service -Name $svc -ErrorAction Stop
+    if ($s.Status -ne 'Stopped') { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue }
+    Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+  } catch { }   # absent on a box where Edge has not registered them yet; nothing to disable
+}
+OK 'Edge updater services stopped and disabled'
+
+# Read the build from the BINARY, never the registry. Edge's own ClientState `pv` read .101 while the file
+# read .93 on one box — the vendor's bookkeeping disagreeing with the file. Trust the binary.
+$have = if (Test-Path -LiteralPath $EdgeExe) { (Get-Item -LiteralPath $EdgeExe).VersionInfo.ProductVersion } else { '(absent)' }
+if ($have -eq $EdgeVersion) {
+  OK "Edge is already $EdgeVersion"
+  Record 'edge' 'already pinned'
+} elseif ($have -ne '(absent)' -and [version]$have -gt [version]$EdgeVersion) {
+  # The refusal the role makes, made here too — and made EARLY, where reimaging is cheap. Saying it at
+  # first boot is the difference between "reimage this box now" and "reimage it after provisioning".
+  Warn "Edge is $have, NEWER than the pin $EdgeVersion. Chromium will not install over a newer build and"
+  Warn 'Windows will not let Edge be uninstalled, so this cannot be brought back. REIMAGE this box with'
+  Warn 'the network detached until first boot, or move worker_edge_version and recapture the corpus.'
+  Record 'edge' "TOO NEW ($have)"
+} else {
+  $msi = Join-Path $env:TEMP "MicrosoftEdgeEnterpriseX64-$EdgeVersion.msi"
+  Invoke-WebRequest -UseBasicParsing -Uri $EdgeMsiUrl -OutFile $msi
+  $sha = (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLower()
+  # BY HASH, because the URL is a delivery endpoint and what it serves can change under a stable address.
+  if ($sha -ne $EdgeMsiSha) { throw "Edge MSI hash $sha does not match the pinned $EdgeMsiSha" }
+  Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Invoke-Native 'msiexec.exe' @('/i', $msi, '/quiet', '/norestart') 'install pinned Edge'
+  # THE MIDDLE STEP IS NOT OPTIONAL. A Chromium install stages the new launcher as `new_msedge.exe` and
+  # leaves `msedge.exe` alone, because the running browser holds it; the rename is a separate operation the
+  # updater performs later — and we have just disabled the updater. Measured on a11y-worker-3: win_package
+  # reported success, left the old build in place, and a FULL REBOOT did not complete it.
+  $setup = Get-ChildItem 'C:\Program Files (x86)\Microsoft\Edge\Application' -Filter setup.exe -Recurse `
+    -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+  if ($setup) {
+    Start-Process -FilePath $setup -ArgumentList '--rename-chrome-exe','--system-level' -Wait -NoNewWindow
+  } else { Warn 'no setup.exe found to complete the rename' }
+  $now = if (Test-Path -LiteralPath $EdgeExe) { (Get-Item -LiteralPath $EdgeExe).VersionInfo.ProductVersion } else { '(absent)' }
+  if ($now -eq $EdgeVersion) { OK "Edge pinned at $EdgeVersion"; Record 'edge' 'pinned' }
+  else { Warn "Edge reads $now after install, wanted $EdgeVersion"; Record 'edge' "wrong ($now)" }
+}
+
+Step 6 'Hand off to the provisioning script'
 # Located by SEARCH, not by a hardcoded path. This read 'scripts\provision-nvda-worker.ps1'
 # and the repo has since moved everything under packages/ -- so the bootstrap cloned
 # successfully and then died here with "Not found", after doing all the expensive work.
