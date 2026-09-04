@@ -79,11 +79,40 @@ test("the bootstrap completes the RENAME, which the installer does not", () => {
     + "failure that looks most like the pin working");
 });
 
-test("it REFUSES a box already newer than the pin, rather than trying", () => {
-  // The one outcome that cannot be repaired in place, so it must be said at first boot where reimaging is
-  // still cheap — not after provisioning, which is when a11y-worker-7 found out.
-  assert.match(BOOTSTRAP, /NEWER than the pin/,
-    "the bootstrap does not detect an Edge newer than the pin. Chromium will not install over a newer "
-    + "build and Windows will not let Edge be uninstalled, so a silent attempt reports success and leaves "
-    + "the box unfit for the fleet.");
+test("it ROLLS BACK a box already newer than the pin, rather than stranding it", () => {
+  // THIS TEST USED TO ASSERT THE OPPOSITE, and its own failure message carried the reason: "Windows will
+  // not let Edge be uninstalled". That is false. `ALLOWDOWNGRADE=1` is Microsoft's supported enterprise
+  // rollback, and the role's refusal message has listed it as remedy (2) since it was corrected — the
+  // bootstrap was ported from that message BEFORE the correction, and this test pinned the wrong half in
+  // place. A test can hold a refuted belief steady just as well as a correct one.
+  //
+  // What made it matter: `browserVersion` is first in `fleet-consistency`'s MUST_MATCH, so a box that
+  // loses the first-boot race — fresh Windows ships consumer Edge and it self-updates while `npm install`
+  // is still running — could never join the fleet. And "follow the pin forward" is not always available:
+  // measured 2026-09-04, one box came up at 152.0.4191.66 and the enterprise channel publishes no such
+  // build, so the preferred remedy did not exist.
+  assert.match(BOOTSTRAP, /\$rollingBack\s*=\s*\$have -ne '\(absent\)' -and \[version\]\$have -gt \[version\]\$EdgeVersion/,
+    "the bootstrap no longer detects an Edge newer than the pin by comparing VERSIONS. A string compare "
+    + "would read 152.0.4191.9 as newer than 152.0.4191.62.");
+  // A BARE /ALLOWDOWNGRADE=1/ ASSERTION WAS HERE AND IT WAS WORTHLESS. Mutation-checked by deleting the
+  // code that passes the flag: it still PASSED, because the word also appears in the comment explaining
+  // why the flag is used. It matched PROSE, not behaviour — this repo's "a test must not derive its
+  // expectations from source TEXT" rule, reproduced by the person who wrote the rule down. The assertion
+  // below matches the code construct and strictly implies it, so the bare one is deleted rather than kept
+  // as reassurance.
+
+  // THE FLAG MUST BE CONDITIONAL. Passing it unconditionally would work today and would hide the case it
+  // exists for: a fresh install and a rollback would become the same command, so nothing downstream could
+  // report which one happened — the repo's own "two faults must not print the same word" rule.
+  assert.match(BOOTSTRAP, /if \(\$rollingBack\) \{ \$msiArgs \+= 'ALLOWDOWNGRADE=1' \}/,
+    "ALLOWDOWNGRADE is not gated on actually rolling back, so a first install and a rollback are "
+    + "indistinguishable in the log.");
+
+  // And the refuted claim must not come back. This is the sentence that sent an operator to reimage a
+  // machine one flag fixes.
+  assert.doesNotMatch(BOOTSTRAP, /will not let Edge be uninstalled/,
+    "the bootstrap has regained the claim that a newer Edge cannot be brought back. It can: "
+    + "ALLOWDOWNGRADE=1, which this script now uses.");
+  assert.doesNotMatch(BOOTSTRAP, /REIMAGE this box/,
+    "the bootstrap tells the operator to reimage a box that a supported rollback repairs in place.");
 });

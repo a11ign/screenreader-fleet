@@ -365,9 +365,12 @@ Step 5 'Pin Edge and stop its updater — BEFORE the box has time to update itse
 #
 # Until 2026-09-04 nothing in first boot mentioned Edge. The box installed Windows, came up with a
 # network, and Edge updated itself while `npm install` was still running. By the time
-# `roles/worker/tasks/edge-version.yml` ran it found a NEWER build than the pin and refused, correctly:
-# Chromium will not install over a newer build and Windows will not let Edge be uninstalled. One box,
-# reimaged, because a pin that arrives after the update is not a pin.
+# `roles/worker/tasks/edge-version.yml` ran it found a NEWER build than the pin, and one box was
+# reimaged over it -- because a pin that arrives after the update is not a pin.
+#
+# The reimage was NOT necessary, and this comment used to say it was. Chromium declines to install over
+# a newer build BY DEFAULT; `ALLOWDOWNGRADE=1` is the supported way to say otherwise. See the version
+# check below, which now rolls back rather than refusing.
 #
 # So the same two levers the role uses, moved to the earliest moment they work. This is a PORT: keep it in
 # step with `edge-version.yml`, which is the tested copy and the one `provisionRevision` hashes.
@@ -406,21 +409,40 @@ $have = if (Test-Path -LiteralPath $EdgeExe) { (Get-Item -LiteralPath $EdgeExe).
 if ($have -eq $EdgeVersion) {
   OK "Edge is already $EdgeVersion"
   Record 'edge' 'already pinned'
-} elseif ($have -ne '(absent)' -and [version]$have -gt [version]$EdgeVersion) {
-  # The refusal the role makes, made here too — and made EARLY, where reimaging is cheap. Saying it at
-  # first boot is the difference between "reimage this box now" and "reimage it after provisioning".
-  Warn "Edge is $have, NEWER than the pin $EdgeVersion. Chromium will not install over a newer build and"
-  Warn 'Windows will not let Edge be uninstalled, so this cannot be brought back. REIMAGE this box with'
-  Warn 'the network detached until first boot, or move worker_edge_version and recapture the corpus.'
-  Record 'edge' "TOO NEW ($have)"
 } else {
+  # A NEWER BUILD IS ROLLED BACK HERE, NOT REFUSED -- AND THIS BRANCH USED TO SAY THE OPPOSITE.
+  #
+  # It said a newer Edge could not be brought back and the box had to be reimaged. That is false, and the
+  # phrase itself is banned by `edge-pin-parity.test.ts` -- a substring guard cannot tell a quotation from
+  # a claim, so the wrong sentence may not appear here even to be disowned.
+  # `ALLOWDOWNGRADE=1` is Microsoft's own supported enterprise rollback, and the role's
+  # refusal message has listed it as remedy (2) since it was corrected. This copy was ported from that
+  # message BEFORE the correction and kept the wrong half -- the fact-stated-twice shape, introduced by
+  # the very act of porting.
+  #
+  # First boot is also the one moment where a rollback is unambiguously free. The box has taken zero
+  # captures, so there is no corpus to invalidate and nothing to weigh against the documented risk
+  # ("exposure to known security issues"), which is a reason to prefer following a pin FORWARD on a box
+  # that is already working -- not a reason to leave a new box stranded.
+  #
+  # And stranded is what it was. `browserVersion` is first in `fleet-consistency`'s MUST_MATCH, so a box
+  # that loses the race -- fresh Windows ships consumer Edge and it self-updates while `npm install` is
+  # still running -- could never join the fleet. Measured 2026-09-04: three boxes won that race and came
+  # up at the pin, the fourth came up at 152.0.4191.66 and the enterprise channel does not publish .66 at
+  # all, so "follow it forward" was not merely expensive, it was UNAVAILABLE.
+  $rollingBack = $have -ne '(absent)' -and [version]$have -gt [version]$EdgeVersion
+  if ($rollingBack) { Warn "Edge is $have, newer than the pin $EdgeVersion -- rolling back" }
   $msi = Join-Path $env:TEMP "MicrosoftEdgeEnterpriseX64-$EdgeVersion.msi"
   Invoke-WebRequest -UseBasicParsing -Uri $EdgeMsiUrl -OutFile $msi
   $sha = (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLower()
   # BY HASH, because the URL is a delivery endpoint and what it serves can change under a stable address.
   if ($sha -ne $EdgeMsiSha) { throw "Edge MSI hash $sha does not match the pinned $EdgeMsiSha" }
   Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Invoke-Native 'msiexec.exe' @('/i', $msi, '/quiet', '/norestart') 'install pinned Edge'
+  # NOT `$args` -- that is a PowerShell automatic variable, and shadowing it inside a script is the kind
+  # of thing that works until something in this block calls a function.
+  $msiArgs = @('/i', $msi, '/quiet', '/norestart')
+  if ($rollingBack) { $msiArgs += 'ALLOWDOWNGRADE=1' }
+  Invoke-Native 'msiexec.exe' $msiArgs $(if ($rollingBack) { 'roll Edge back to the pin' } else { 'install pinned Edge' })
   # THE MIDDLE STEP IS NOT OPTIONAL. A Chromium install stages the new launcher as `new_msedge.exe` and
   # leaves `msedge.exe` alone, because the running browser holds it; the rename is a separate operation the
   # updater performs later — and we have just disabled the updater. Measured on a11y-worker-3: win_package
@@ -432,7 +454,13 @@ if ($have -eq $EdgeVersion) {
   } else { Warn 'no setup.exe found to complete the rename' }
   $now = if (Test-Path -LiteralPath $EdgeExe) { (Get-Item -LiteralPath $EdgeExe).VersionInfo.ProductVersion } else { '(absent)' }
   if ($now -eq $EdgeVersion) { OK "Edge pinned at $EdgeVersion"; Record 'edge' 'pinned' }
-  else { Warn "Edge reads $now after install, wanted $EdgeVersion"; Record 'edge' "wrong ($now)" }
+  else {
+    # A ROLLBACK THAT DID NOT LAND MUST SAY SO IN THOSE WORDS. "wrong (152.0.4191.66)" after a rollback
+    # attempt reads as an install that half-worked; it means msiexec declined the downgrade, which is a
+    # different fault with a different remedy.
+    Warn "Edge reads $now after $(if ($rollingBack) { 'rollback' } else { 'install' }), wanted $EdgeVersion"
+    Record 'edge' "$(if ($rollingBack) { 'ROLLBACK REFUSED' } else { 'wrong' }) ($now)"
+  }
 }
 
 Step 6 'Hand off to the provisioning script'
