@@ -319,3 +319,25 @@ test("every call site passes its own import.meta.url", () => {
   assert.deepEqual(offenders, [],
     "these pass no `entry`, so if anything imports them their guard inspects the importer's flags");
 });
+
+test("a SINGLE-DASH flag is refused, because an ansible-shaped argument silently vanished", () => {
+  // Measured 2026-09-05. `npm run fleet:provision -- -e worker_edge_allow_downgrade=true` passed this
+  // guard untouched (it inspected only `--` arguments), was not forwarded by the wrapper (which builds
+  // ansible's argv itself), and a 14-minute whole-fleet provision ran WITHOUT the authorisation the
+  // operator believed they had given. The role then refused with a message naming the flag just passed.
+  //
+  // Several commands here wrap `ansible-playbook`, whose own arguments are single-dash, so this shape is
+  // the one an operator is most likely to reach for by analogy — and it was the one shape not checked.
+  assert.deepEqual(unknownFlags(["-e", "job=train"], ["--ref="]), ["-e"]);
+  assert.deepEqual(unknownFlags(["-l", "a11y-worker-3"], ["--limit="]), ["-l"]);
+});
+
+test("positionals are still not this guard's business", () => {
+  // The reason the filter cannot simply be `startsWith("-")`: these commands take URLs, worker addresses
+  // and page paths, and refusing one would break correct usage — the failure mode the derived-flag-list
+  // note in CLAUDE.md records for five other commands. `-` followed by a LETTER is the discriminator.
+  assert.deepEqual(unknownFlags(["https://example.com"], ["--ref="]), []);
+  assert.deepEqual(unknownFlags(["/pages/index.html"], ["--ref="]), []);
+  assert.deepEqual(unknownFlags(["--"], ["--ref="]), []);          // npm's separator
+  assert.deepEqual(unknownFlags(["-5"], ["--ref="]), []);          // a negative number is not a flag
+});

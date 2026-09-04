@@ -57,8 +57,22 @@ export function nameOf(argument) {
 /**
  * Which of `argv` are flags this command does not know. PURE, so it is testable without a process.
  *
- * A bare `--` is npm's separator and never a flag. Anything not starting with `--` is positional — a URL,
+ * A bare `--` is npm's separator and never a flag. Anything not starting with `-` is positional — a URL,
  * a worker address, a page path — and is not this guard's business.
+ *
+ * SINGLE-DASH FLAGS ARE INSPECTED TOO, AND THE OMISSION COST A 14-MINUTE FLEET OPERATION.
+ *
+ * This read `startsWith("--")`, on the reasoning that only long flags are ever this repo's own. But an
+ * ANSIBLE-shaped argument is single-dash, and several of these commands wrap `ansible-playbook` — so
+ * `npm run fleet:provision -- -e worker_edge_allow_downgrade=true` passed straight through the guard,
+ * was never forwarded by the wrapper, and the whole fleet was provisioned WITHOUT the authorisation the
+ * operator believed they had given. Measured 2026-09-05. The role then refused, correctly, with a message
+ * telling the operator to pass the very flag they had just passed.
+ *
+ * That is precisely the defect this file exists to prevent — "an ignored flag runs the default and reports
+ * success" — surviving inside its own remedy, because the remedy was written to match one flag SHAPE
+ * rather than the idea of a flag. `-e` is not a URL and not a page path; nothing positional here begins
+ * with a dash followed by a letter, which is what makes this safe to refuse rather than merely warn on.
  */
 /**
  * @param {string[]} argv @param {string[]} known @returns {string[]}
@@ -66,7 +80,7 @@ export function nameOf(argument) {
 export function unknownFlags(argv, known) {
   const accepted = new Set(known.map(nameOf));
   return argv
-    .filter((argument) => argument.startsWith("--") && argument !== "--")
+    .filter((argument) => argument !== "--" && (argument.startsWith("--") || /^-[A-Za-z]/.test(argument)))
     .map(nameOf)
     .filter((flag) => !accepted.has(flag));
 }
