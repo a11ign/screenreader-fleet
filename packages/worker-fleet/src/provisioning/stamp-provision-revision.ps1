@@ -56,13 +56,37 @@ $ENVIRONMENT_FILES = @(
     'packages/control/ansible/roles/worker/defaults/main.yml'
 )
 
+# LINE ENDINGS ARE NORMALISED BEFORE HASHING, AND THE PREVIOUS VERSION'S OMISSION WAS A LATENT SPLIT.
+#
+# This used to be `Get-FileHash`, which hashes the file's BYTES -- so the stamp depended on how git had
+# checked the file out. Windows git converts to CRLF by default and nothing in this repo pins that: there
+# is no `.gitattributes`. Measured 2026-09-04, the same four blobs at one commit:
+#
+#     CRLF  dbb7d33409a9341d      <- what the whole fleet reported
+#     LF    1052b80ca42398c7      <- what a checkout with core.autocrlf=false would report
+#
+# `provisionRevision` is a capture cache key AND a `fleet-consistency` MUST_MATCH field, compared for
+# EQUALITY. So one box cloned with a different `core.autocrlf` would read INCONSISTENT for ever, block
+# every capture run, and -- this is the part that makes it worth fixing rather than documenting --
+# RE-PROVISIONING COULD NOT CONVERGE IT, because the box would faithfully recompute the same wrong hash.
+# It is the one drift in this fleet with no remedy at the operator's disposal.
+#
+# The header above says what the stamp is for: "two guests with different NVDA/Edge configuration cannot
+# share a cache entry". A line ending is not configuration, so hashing it is not merely risky, it is
+# measuring the wrong thing -- the same argument that already excludes the git SHA and the task files.
+#
+# Normalising costs one stamp move, paid once, and it was bundled with a move happening anyway.
 $hashes = foreach ($relative in $ENVIRONMENT_FILES) {
     $full = Join-Path $RepoPath ($relative -replace '/', '\')
     if (-not (Test-Path -LiteralPath $full)) {
         throw "provision stamp: $relative is missing under $RepoPath. Refusing to write a stamp that " +
               "describes less than it claims -- fix the path or the checkout."
     }
-    (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash
+    # ReadAllText also drops a UTF-8 BOM, which is the same class of difference arriving by another door:
+    # a file re-saved by an editor that adds one would otherwise move the stamp for no reason.
+    $text = [IO.File]::ReadAllText($full) -replace "`r`n", "`n"
+    $sha  = [Security.Cryptography.SHA256]::Create()
+    ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text))) -replace '-', '')
 }
 
 $bytes = [Text.Encoding]::UTF8.GetBytes(($hashes -join ''))
