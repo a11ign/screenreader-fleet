@@ -54,6 +54,33 @@ $ENVIRONMENT_FILES = @(
     'packages/nvda-worker/src/run-server.cmd'
     'packages/worker-fleet/src/provisioning/apply-foreground-lock-timeout.ps1'
     'packages/control/ansible/roles/worker/defaults/main.yml'
+    # SPEECH VIEWER, added 2026-09-05, and it is the same shape as `apply-foreground-lock-timeout.ps1`
+    # above: a script that carries its own hardcoded ENVIRONMENT value rather than reading one from
+    # `defaults/main.yml`. Hashing the script is how such a value gets into the stamp at all.
+    #
+    # WHY IT MATTERS MORE THAN THE OTHERS. This module's own header calls `showSpeechViewerAtStartup`
+    # "the highest-value setting on a worker and the one that fails most quietly": with it ON, every
+    # interaction probe returns "NVDA Speech Viewer" instead of the page's response. A whole corpus
+    # would be captured, complete and wrong.
+    #
+    # AND IT IS A REMEDY THAT REACHED ONE PATH AND NOT THE OTHER -- this repo's most expensive shape,
+    # found INSIDE the mechanism built to catch it. `provision-nvda-worker.ps1` (hashed since forever)
+    # inlines the identical `showSpeechViewerAtStartup = True -> False` fix at its Step 5, and throws if
+    # it did not take. The Ansible path does the same work in this module and was hashed by nothing, so
+    # a regression there -- or a fresh box shipping guidepup's default ON -- would leave the stamp
+    # unmoved, `fleet-consistency` reading the fleet as fine, and every capture silently unusable.
+    #
+    # Checked against every other cache-key field before adding it, rather than assumed: not in
+    # `CAPTURE_SETTINGS` (which has one entry, `speech.reportLanguage`, and `getSettings()` does not
+    # touch this section of `nvda.ini`), not in `/health`, and unrelated to `browserVersion`,
+    # `guidepupVersion`, `windowsVersion`, `architecture` or `captureProtocol`. Only `/diagnostics`
+    # reports it, on demand, outside `environmentKey()` entirely. Nothing else catches it.
+    #
+    # THE STRONGER FIX IS RECORDED AND NOT DONE HERE: reading the LIVE value out of `nvda.ini` onto
+    # `/health` and folding it into `screenReaderSettings` would verify the setting is IN EFFECT rather
+    # than that provisioning INTENDED it -- this file's own distinction, and the better one. It changes
+    # `environmentKey()`, so it must ride a deliberate cache-key change rather than land mid-recapture.
+    'packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_speech_viewer.ps1'
 )
 
 # LINE ENDINGS ARE NORMALISED BEFORE HASHING, AND THE PREVIOUS VERSION'S OMISSION WAS A LATENT SPLIT.

@@ -53,12 +53,28 @@ const ROLE = fileURLToPath(new URL("../../control/ansible/roles/worker/", import
 const MODULES = fileURLToPath(
   new URL("../../control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/", import.meta.url));
 
-/** `$ENVIRONMENT_FILES` from the stamp's own source — never a restated copy of the list. */
+/**
+ * `$ENVIRONMENT_FILES` from the stamp's own source — never a restated copy of the list.
+ *
+ * TERMINATED ON A LINE-INITIAL `)`, not on the first one found. Slicing to `indexOf(")")` truncated the
+ * list the moment a COMMENT inside the array contained a parenthesis — which happened the first time
+ * anyone documented an entry, and the symptom was this file reporting a hashed file as unclassified.
+ * A parser that silently returns a SHORT list makes a present entry look absent, which is the direction
+ * that costs: it accuses a decision that was already made, and the obvious "fix" is to make the comment
+ * blander rather than the parser correct.
+ */
 function hashedFiles(): string[] {
   const stamp = readFileSync(
     fileURLToPath(new URL("./provisioning/stamp-provision-revision.ps1", import.meta.url)), "utf8");
-  const list = stamp.slice(stamp.indexOf("$ENVIRONMENT_FILES = @("), stamp.indexOf(")", stamp.indexOf("$ENVIRONMENT_FILES = @(")));
-  return [...list.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const start = stamp.indexOf("$ENVIRONMENT_FILES = @(");
+  const end = stamp.indexOf("\n)", start);
+  assert.ok(start !== -1 && end > start,
+    "could not find $ENVIRONMENT_FILES in the stamp script — the parser has drifted from the source, "
+    + "and every assertion below would examine an empty list");
+  const list = stamp.slice(start, end);
+  const files = [...list.matchAll(/^\s*'([^']+)'\s*$/gm)].map((m) => m[1]);
+  assert.ok(files.length >= 4, `parsed ${files.length} hashed file(s); the stamp declares at least four`);
+  return files;
 }
 
 /** Every task file `main.yml` imports — the whole of what the Ansible path can DO to a guest. */
@@ -146,22 +162,10 @@ const EXEMPT: Record<string, string> = {
     + "cache-key fields — the same reasoning as edge-version.yml above.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_nvda.py":
     "Documentation for a11y_nvda.ps1 (see that entry). No independent runtime effect.",
-  // --- THE FINDING. Not silently covered by anything else; not silently added to the hash either. ---
-  "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_speech_viewer.ps1":
-    "GAP, recorded 2026-09-06, not yet remedied: writes showSpeechViewerAtStartup, and NOTHING else in "
-    + "the cache key covers it. Not in CAPTURE_SETTINGS (nvda-logging.mjs has exactly one entry, "
-    + "speech.reportLanguage), not in /health (only on-demand /diagnostics reports it), not related to "
-    + "browserVersion/guidepupVersion/windowsVersion/architecture/captureProtocol. If this module ever "
-    + "regressed (or a fresh box shipped guidepup's default ON), the stamp would not move, fleet-consistency "
-    + "would read the fleet as fine, and every interaction probe on that guest would silently return "
-    + "\"NVDA Speech Viewer\" instead of the page's response. provision-nvda-worker.ps1 (already hashed) "
-    + "applies the IDENTICAL fix inline at its own Step 5, so the Ansible path's copy is the one call site "
-    + "the remedy did not reach. This exemption exists so the gap is visible in source rather than silently "
-    + "absent from consideration; whether to hash this file (or move its value into defaults/main.yml the "
-    + "way every Edge policy already is) is a decision for whoever owns the live recapture, made deliberately "
-    + "rather than as a side effect of this test passing.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_speech_viewer.py":
-    "Documentation for a11y_speech_viewer.ps1. See that entry for the actual finding.",
+    "Documentation for a11y_speech_viewer.ps1 (see the hash site). Ansible requires the .py/.ps1 pair and "
+    + "only the .ps1 has runtime effect, so hashing the docstring would churn the capture cache for a "
+    + "prose edit — the same reason every other .py pair here is exempt.",
   "packages/control/ansible/roles/worker/files/intel-e1d/e1d.inf":
     "Intel NIC driver. Wake-on-LAN and reachability, never capture content.",
   "packages/control/ansible/roles/worker/files/intel-e1d/e1d.sys":
@@ -169,7 +173,10 @@ const EXEMPT: Record<string, string> = {
   "packages/control/ansible/roles/worker/files/intel-e1d/e1d.cat":
     "Intel NIC driver catalogue (signature). Wake-on-LAN and reachability, never capture content.",
   "packages/control/ansible/roles/worker/files/intel-e1d/e1dmsg.dll":
-    "Intel NIC driver message resource. Wake-on-LAN and reachability, never capture content.",
+    "Intel NIC driver messages. Wake-on-LAN and reachability, never capture content.",
+  // THE FINDING WAS HERE, and it is REMEDIED: `a11y_speech_viewer.ps1` is now in `$ENVIRONMENT_FILES`.
+  // Deliberately no entry — a file cannot be both hashed and exempt, and the test below refuses that
+  // contradiction. The reasoning lives at the hash site, beside the value it protects.
 };
 
 function discovered(): string[] {
@@ -202,10 +209,29 @@ test("every EXEMPT entry names a file that still exists, so the list cannot rot 
   }
 });
 
-test("the speech-viewer gap is named explicitly, not folded into a generic reason", () => {
-  // A guard against someone "tidying" the finding away by giving it the same boilerplate reason as its
-  // safe siblings, which would make this test pass while quietly deciding the open question.
-  const reason = EXEMPT["packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_speech_viewer.ps1"];
-  assert.match(reason, /^GAP,/, "the speech-viewer exemption must say plainly that it is an open gap, "
-    + "not a vindicated exclusion");
+test("the speech-viewer setting is HASHED — the one gap this audit found is closed, not reworded", () => {
+  // It writes `showSpeechViewerAtStartup`, which its own header calls "the highest-value setting on a
+  // worker and the one that fails most quietly": with it ON, every interaction probe returns "NVDA Speech
+  // Viewer" instead of the page's response, so an accessible page and an inaccessible one become
+  // indistinguishable and a whole corpus is captured complete and wrong.
+  //
+  // Pinned by NAME because this is the one file where "somebody removed it from the hash" and "somebody
+  // reclassified it as vindicated" look identical in a diff.
+  assert.ok(hashedFiles().some((f) => f.endsWith("a11y_speech_viewer.ps1")),
+    "a11y_speech_viewer.ps1 must be in $ENVIRONMENT_FILES. Nothing else in the cache key covers it: not "
+    + "CAPTURE_SETTINGS, not /health, not browserVersion/guidepupVersion/windowsVersion/architecture. "
+    + "provision-nvda-worker.ps1 applies the identical fix inline and IS hashed, so removing this puts "
+    + "the remedy back on one of two provisioning paths.");
+});
+
+test("no file is both HASHED and EXEMPT — the contradiction the last fix nearly left behind", () => {
+  // Caught on this test's own first day: the speech-viewer file was added to the hash while its GAP
+  // exemption stayed, and every assertion still passed. An exemption saying "not yet remedied" beside a
+  // hash that remedies it is worse than either alone, because a reader trusts the prose.
+  const hashed = new Set(hashedFiles());
+  for (const exempt of Object.keys(EXEMPT)) {
+    assert.ok(!hashed.has(exempt),
+      `${exempt} is in $ENVIRONMENT_FILES AND in EXEMPT. One of them is wrong, and whichever a reader `
+      + "happens to consult decides what they believe.");
+  }
 });
