@@ -75,10 +75,23 @@ export function configuredWorkers() {
     .map((url) => ({ name: url.replace(/^https?:\/\//, ""), url }));
 }
 
-// THE INVENTORY LIVES IN `packages/control` NOW, because it describes the machines the CONTROL PLANE
-// drives and it is read by the ansible that runs there. Relative across the package boundary rather than
-// a package-name import, for the reason `packages/control` exists at all: control has no `node_modules`,
-// so nothing it touches may need one to resolve.
+// THE INVENTORY LIVES IN `packages/control`, because it describes the machines the CONTROL PLANE drives
+// and it is read by the ansible that runs there. `packages/worker-fleet` is PUBLISHED, and `control` is
+// never published (ADR 0012), so this constant is a real cycle -- audit §3.2 -- and NOT the sanctioned
+// direction: `control` reaching `worker-fleet` by relative import is fine (control has no
+// `node_modules`); this file, reaching back into a package that will not exist in an installed
+// `node_modules/@a11y-witness/worker-fleet`, is what the audit calls "ships code whose data file lives in
+// a package that is never published".
+//
+// FIXED 2026-09-06 by injection, not by moving this module: `doctor.mjs` and `check-worker-code.mjs` are
+// PUBLISHED bins that must keep resolving a bare-metal fleet correctly when run as `npm run doctor` from
+// this checkout, so the functions below take the path as an optional PARAMETER, defaulting to this
+// constant. The default is not a fix in itself -- an installed tarball still ships one that points at a
+// package it will never find -- but `inventoryWorkerUrls`/`namedInventoryWorkers` already catch that and
+// return `[]`, which is this project's own supported "no bare-metal fleet declared here" answer (see their
+// own comments). What injection buys is that the assumption is now a NAMED, overridable default rather
+// than a hidden module constant -- a caller outside this monorepo (or a test) can supply its own path
+// instead of silently inheriting one that can only ever resolve here.
 const INVENTORY = fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url));
 const GROUP_VARS = fileURLToPath(new URL("../../control/ansible/group_vars/a11y_workers.yml", import.meta.url));
 
@@ -279,11 +292,16 @@ export function portFromGroupVars(text) {
  * discover the tool was describing a different kind of machine.
  *
  * Reads the same file through the same parser as `main()`, rather than a second copy of the knowledge.
+ *
+ * `inventoryPath`/`groupVarsPath` are INJECTED, defaulting to this monorepo's own control-plane files —
+ * see the comment above `INVENTORY` for why the default exists and what it does not fix on its own.
+ *
+ * @param {{ inventoryPath?: string, groupVarsPath?: string }} [paths]
  */
-export function inventoryWorkerUrls() {
+export function inventoryWorkerUrls({ inventoryPath = INVENTORY, groupVarsPath = GROUP_VARS } = {}) {
   try {
-    const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
-    return workersFromInventory(readFileSync(INVENTORY, "utf8"), { port });
+    const port = portFromGroupVars(readFileSync(groupVarsPath, "utf8"));
+    return workersFromInventory(readFileSync(inventoryPath, "utf8"), { port });
   } catch {
     // No inventory, or one that does not parse, means "no bare-metal fleet declared here" — a local-VM-only
     // checkout is a supported setup. Rethrowing would make a hint fail the command it is only advising.
@@ -302,12 +320,15 @@ export function inventoryWorkerUrls() {
  *
  * Here rather than in each reporter, because that is the same pairing and a second copy would drift.
  *
+ * `inventoryPath`/`groupVarsPath` are INJECTED, same reason and same default as `inventoryWorkerUrls`.
+ *
+ * @param {{ inventoryPath?: string, groupVarsPath?: string }} [paths]
  * @returns {{name: string, url: string}[]} empty when no inventory is declared, like `inventoryWorkerUrls`
  */
-export function namedInventoryWorkers() {
+export function namedInventoryWorkers({ inventoryPath = INVENTORY, groupVarsPath = GROUP_VARS } = {}) {
   try {
-    const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
-    const inventory = readFileSync(INVENTORY, "utf8");
+    const port = portFromGroupVars(readFileSync(groupVarsPath, "utf8"));
+    const inventory = readFileSync(inventoryPath, "utf8");
     const names = workerNamesFromInventory(inventory, { port });
     return workersFromInventory(inventory, { port })
       .map((url) => ({ name: names[url] ?? url.replace(/^https?:\/\//, ""), url }));

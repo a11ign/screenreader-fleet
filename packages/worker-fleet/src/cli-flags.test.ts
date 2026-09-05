@@ -145,11 +145,11 @@ const GUARDED: Record<string, string> = {
     "takes no flags",
   "packages/lab/src/training/preflight-screenreader-dataset.mjs":
     "takes no flags",
-  "packages/worker-fleet/src/fleet-discover.mjs":
+  "packages/control/src/fleet-discover.mjs":
     "--enroll WRITES to inventory.yml; mistyped it scans and enrols nothing",
   "packages/worker-fleet/src/fleet-env.mjs":
     "its output is eval-ed by a shell, so a wrong shape is executed rather than read",
-  "packages/worker-fleet/src/fleet-wake.mjs":
+  "packages/control/src/fleet-wake.mjs":
     "takes no flags",
   "packages/worker-fleet/src/normalise-fleet.mjs":
     "takes no flags",
@@ -157,7 +157,7 @@ const GUARDED: Record<string, string> = {
     "its EXIT CODE is the contract — 0 clean, 1 failures, 2 no run, 3 wedged — so a caller reading it "
     + "has already committed to an output shape, and a mistyped `--json` gives it the other one",
   "packages/worker-fleet/src/doctor.mjs": JSON_REPORTER,
-  "packages/worker-fleet/src/fleet-status.mjs": JSON_REPORTER,
+  "packages/control/src/fleet-status.mjs": JSON_REPORTER,
   "packages/lab/src/training/capture-status.mjs": JSON_REPORTER,
   "packages/lab/scripts/lab-inventory.mjs": JSON_REPORTER,
 };
