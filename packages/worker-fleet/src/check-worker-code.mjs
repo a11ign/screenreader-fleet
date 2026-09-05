@@ -12,12 +12,10 @@
 // This asks each worker over HTTP, which is reachable exactly when the worker is usable and
 // involves no guest agent. Exit 0 when every worker matches, 1 otherwise.
 import { pathToFileURL } from "node:url";
-import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
-// By PATH, for the reason worker-code-check.mjs gives at length: the package index reaches guidepup,
-// which throws at import on any host without a screen reader.
-import { workerSourceDir } from "@a11y-witness/nvda-worker/code-version";
+// The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
+// `protocol-version.mjs` is dependency-free for exactly this: safe to import from a portable tree.
+import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda-worker/protocol-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
@@ -37,10 +35,6 @@ refuseUnknownFlags([], { entry: import.meta.url, command: "npm run worker:code" 
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.
 const CTL = fleetScriptPaths().workerCtl;
-// From the worker PACKAGE, not from the cwd. This was `resolve("src/capture/nvda")` and then
-// `resolve("packages/nvda-worker/src")` — a repo-layout guess that had to be edited every time the worker
-// moved, and that silently pointed at nothing whenever the cwd was not the repo root.
-const NVDA_DIR = workerSourceDir();
 // /health now reports installed runtime versions as well as the code hash. The first
 // request after a Windows boot may need PowerShell file-version discovery, so four seconds
 // was too tight and made a healthy worker look unreachable.
@@ -57,10 +51,9 @@ const HEALTH_TIMEOUT_MS = 15000;
  */
 function protocolBumpNote() {
   try {
-    const inTree = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      readFileSync(resolve(NVDA_DIR, "capture-core.mjs"), "utf8"))?.[1];
+    const inTree = String(PROTOCOL_IN_TREE);
     const committed = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/capture-core.mjs"], { encoding: "utf8" }))?.[1];
+      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"], { encoding: "utf8" }))?.[1];
     if (inTree && committed && inTree !== committed) {
       return `\nNOTE: your working tree has CAPTURE_PROTOCOL_VERSION = ${inTree} but HEAD has ${committed}.\n` +
         "That alone changes the local hash, so the guests may not be stale at all. Deploying it would\n" +
