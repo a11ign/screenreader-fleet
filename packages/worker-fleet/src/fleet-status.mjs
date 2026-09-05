@@ -241,7 +241,17 @@ export async function fleetStatus() {
     // `/health` carries no policy block. `null` would be a claim that it collected an empty policy.
     .map((p) => ({ worker: p.url, environment: p.health?.environment, policy: undefined }));
   const { consistent, mismatches } = fleetConsistency(guests);
-  return { rows, consistent, mismatches, reachable: guests.length, total: workers.length };
+  // WHICH CODE EACH BOX SERVES, COMPARED — the column has been printed since this file existed and
+  // nothing ever read it. A fleet part-way through a deploy shows two hashes, and that is the ONLY
+  // symptom it has: `consistent` above cannot see it, because `workerCode` is deliberately outside
+  // `fleet-consistency`'s MUST_MATCH (that answers "is this evidence still valid", a different question).
+  //
+  // Measured 2026-09-05: a deploy was killed mid-`Reboot`, leaving some boxes on the new code and one
+  // unreachable, and NOTHING said so. It surfaced when the next capture refused with `10 stale worker(s)`
+  // — the safety net working, one step too late. A split is a fact about the fleet and this is the
+  // command that describes the fleet.
+  const codes = [...new Set(rows.map((r) => r.code).filter(Boolean))];
+  return { rows, consistent, mismatches, codes, reachable: guests.length, total: workers.length };
 }
 
 async function main() {
@@ -265,6 +275,18 @@ async function main() {
       process.stdout.write(status.consistent
         ? "  fleet CONSISTENT — these workers are interchangeable for capture\n"
         : `  fleet INCONSISTENT — ${describeMismatches(status.mismatches).join("; ")}\n`);
+    }
+    // SPLIT CODE IS A SEPARATE VERDICT FROM INCONSISTENT, and collapsing them would be wrong in both
+    // directions. INCONSISTENT means the guests are not interchangeable for capture — a cache-key field
+    // differs. This means a DEPLOY did not finish, which is a fixable operational state rather than an
+    // evidence problem, and it has its own remedy.
+    if (status.codes.length > 1) {
+      const byCode = status.codes.map((c) =>
+        `${c.slice(0, 12)} on ${status.rows.filter((r) => r.code === c).length}`);
+      process.stdout.write(`  fleet SPLIT — ${status.codes.length} different code hashes: `
+        + `${byCode.join(", ")}.\n`
+        + "  A deploy did not finish. Nothing is broken and no evidence is invalid, but a capture will\n"
+        + "  REFUSE until it is fixed. Re-run `npm run fleet:deploy` — it is idempotent.\n");
     }
   }
   // Exit 1 when nothing answered. Every worker being down is a fault; ONE being down is not, because a
