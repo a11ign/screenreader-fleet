@@ -35,6 +35,12 @@ using.
 **Stopped worker VMs are the correct resting state.** `all stopped` is a READY state, not a fault — `a11y-doctor`
 says so explicitly, because "go and start a worker" is the wrong instinct and costs time.
 
+**The local UTM VM is not how this project's own corpus is captured.** It is the DEPRECATED default for a
+solo contributor with no bare-metal fleet, kept working precisely because it is still the right path for
+that case — this repo's own corpus is captured on ten bare-metal workers driven by
+`inventory.yml`, which `leaseWorker` checks first. If you are consuming this package standalone with your
+own Windows box, the VM lifecycle below still applies to you exactly as written.
+
 ## Capacity is measured, never assumed
 
 ```js
