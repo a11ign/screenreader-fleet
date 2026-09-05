@@ -57,6 +57,16 @@ import { request as httpsRequest } from "node:https";
  * page finishes in seconds. On REAL pages it silently dropped whatever used its budget, biasing the
  * real-page corpus toward small simple pages: precisely the axis that corpus exists to add.
  *
+ * 560,000 -> 620,000 on architecture-audit.md §14.5: `runCapture` (server.mjs) spends up to
+ * `DESKTOP_PREPARE_TIMEOUT_MS` (60 s) clearing the desktop BEFORE the hard-timeout-wrapped capture attempt
+ * even starts, sequentially rather than overlapping it -- so the true worst case a worker can legitimately
+ * take is 60 s + 520 s = 580 s, not 520 s alone. The old 560 s ceiling sat BELOW that, so a real page that
+ * used the full prepare budget and the full capture budget was killed by the CLIENT first and reported as
+ * a client failure for work the worker would have finished -- the exact shape this constant already exists
+ * to prevent, one rung further out. 620,000 keeps the same 40 s margin above the new true worst case that
+ * the original 560,000 kept above 520,000. `budget-ladder.test.ts` asserts the full sequence, not only the
+ * capture attempt inside it.
+ *
  * Deliberately NOT imported from `@a11y-witness/nvda-worker`: this package runs on macOS and Linux and must
  * not depend on a win32-only one. `budget-ladder.test.ts` enforces the relationship instead, over every
  * client it DISCOVERS rather than a list -- which is how the 300 s clients stayed invisible while a guard
@@ -65,7 +75,7 @@ import { request as httpsRequest } from "node:https";
  * `DATASET_CAPTURE_TIMEOUT_MS` still overrides it in the dataset runner, which is the only client that
  * wants a per-run ceiling.
  */
-export const CAPTURE_CLIENT_TIMEOUT_MS = 560_000;
+export const CAPTURE_CLIENT_TIMEOUT_MS = 620_000;
 
 /**
  * How long a capture's silent connection may idle before the OS proves it is still there.
