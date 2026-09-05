@@ -21,8 +21,12 @@ try {
 
 ## A lease, not a lifecycle you own
 
-`leaseWorker` starts what is missing and **puts it back as it found it**: a VM that was already running is left
-running, a stopped one is stopped again. A long run must not shut down something another run is using.
+`leaseWorker` decides what to capture against in priority order: an explicit worker you named, then
+`inventory.yml`'s bare-metal fleet if one is declared, then a local UTM VM, then the historical
+`http://localhost:8765` default. Only the VM case has a lifecycle to manage — a bare-metal box is
+always on — so `release()` is a no-op for every other source. It starts what is missing and **puts a
+VM back as it found it**: one that was already running is left running, a stopped one is stopped
+again. A long run must not shut down something another run is using.
 
 **Stopped worker VMs are the correct resting state.** `all stopped` is a READY state, not a fault — `a11y-doctor`
 says so explicitly, because "go and start a worker" is the wrong instinct and costs time.

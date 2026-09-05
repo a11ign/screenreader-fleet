@@ -19,6 +19,7 @@ import { promisify } from "node:util";
 import { networkInterfaces } from "node:os";
 import { availableHostMemoryMb, capacityReason, workersHostCanRun } from "./host-capacity.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
+import { inventoryWorkerUrls } from "./fleet-env.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -59,7 +60,7 @@ interface VmStatus {
 export interface WorkerLease {
   worker: string;
   /** How `worker` was chosen, so callers can tailor their own error messages. */
-  source: "explicit" | "local-vm" | "default";
+  source: "explicit" | "inventory.yml" | "local-vm" | "default";
   /**
    * The address the GUEST can use to reach THIS host, when capturing via a local VM.
    * Undefined otherwise. Needed because anything the host serves on `localhost` is
@@ -192,22 +193,54 @@ interface LeaseRequest {
  *
  *   1. A worker the caller named is used as-is. Naming one is a statement that you are
  *      managing it yourself, so the VM lifecycle is never touched.
- *   2. Otherwise, a registered local UTM VM is started on demand and released afterwards.
- *   3. Otherwise, the historical default, so a hand-run worker on this machine still works.
+ *   2. Otherwise, `inventory.yml`'s bare-metal fleet — always-on boxes, so there is no VM
+ *      lifecycle to run: the first declared worker is leased with a no-op release.
+ *   3. Otherwise, a registered local UTM VM is started on demand and released afterwards.
+ *   4. Otherwise, the historical default, so a hand-run worker on this machine still works.
  *
- * A11Y_LOCAL_VM=0 skips step 2 for anyone who wants the old behaviour back.
+ * FOUND 2026-09-06 (`docs/backlog.md` §8): this used to go straight from (1) to (3), never
+ * reading the inventory at all -- so a checkout WITH a bare-metal fleet declared and a UTM guest
+ * still registered (the ordinary state of a Mac that used to run the deprecated pool) leased the
+ * VM by default, exactly the wrong turn CLAUDE.md already records costing a capture-path change:
+ * "a deprecated path that is still the first one documented is not deprecated". `resolveWorkerPool`
+ * (`fleet-env.mjs`) already had the corrected order for the POOL case; this brings the single-worker
+ * case into line, and `worker-precedence.test.ts` is what is supposed to keep them there.
+ *
+ * Step 2 costs nothing and throws nothing for anyone without an `inventory.yml` -- a public
+ * consumer who installs this package -- because `inventoryWorkerUrls()` already treats an absent
+ * or unparsable file as "no fleet declared here" and returns `[]`. So the fall-through to (3) and
+ * (4) is byte-for-byte what it was before this change for that consumer; only a checkout that
+ * DECLARES a fleet sees new behaviour, and it sees the behaviour `doctor` and `worker:code`
+ * already assumed it had.
+ *
+ * A11Y_LOCAL_VM=0 skips step 3 for anyone who wants the pre-inventory local-VM behaviour back --
+ * unchanged in what it does, moved because inventory now sits ahead of it.
  *
  * Shared by every entry point that needs a worker, so the priority order cannot drift
  * between them.
+ *
+ * `deps` is the injection seam: real callers get the real inventory reader and the real (shells
+ * out to `utmctl`) VM lookup, and a test supplies fakes for both, so the precedence can be proven
+ * without a filesystem `inventory.yml` or a UTM install. Called as `deps.inventory?.() ?? inventoryWorkerUrls()`
+ * rather than resolved into a local first — deliberately, so `inventoryWorkerUrls(` and `findLocalVm(`
+ * both appear as real CALLS at the exact decision point, which is what lets `worker-precedence.test.ts`
+ * read this function's actual order rather than only the shape of its signature.
  */
-export async function leaseWorker({ worker, after }: LeaseRequest): Promise<WorkerLease> {
+export async function leaseWorker(
+  { worker, after }: LeaseRequest,
+  deps: { inventory?: () => string[]; findLocalVm?: () => Promise<VmStatus | null> } = {},
+): Promise<WorkerLease> {
   const release = async () => {};
   // Strip a trailing slash once, here, so no caller has to remember that `${worker}/capture`
   // would otherwise produce a double slash.
   if (worker) return { worker: worker.replace(/\/$/, ""), source: "explicit", release };
+
+  const fleet = deps.inventory ? deps.inventory() : inventoryWorkerUrls();
+  if (fleet.length) return { worker: fleet[0].replace(/\/$/, ""), source: "inventory.yml", release };
+
   if (process.env.A11Y_LOCAL_VM === "0") return { worker: DEFAULT_WORKER, source: "default", release };
 
-  const vm = await findLocalVm();
+  const vm = deps.findLocalVm ? await deps.findLocalVm() : await findLocalVm();
   if (!vm) return { worker: DEFAULT_WORKER, source: "default", release };
   return acquireLocalWorker(vm, after);
 }

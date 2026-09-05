@@ -80,7 +80,31 @@ function code(text: string): string[] {
 
 const firstLine = (lines: string[], pattern: RegExp) => lines.findIndex((l) => pattern.test(l));
 
-test("every module that reads BOTH sources asks the inventory FIRST", () => {
+/**
+ * Split a file into its top-level declarations, so an ordering check can be asked of ONE function
+ * rather than the whole file.
+ *
+ * FOUND 2026-09-06: `local-vm.ts` calls `findLocalVm(` for three unrelated reasons — the resolution
+ * decision in `leaseWorker`, a "is it busy" check in `releaseVm`, and a "did it come up" check in
+ * `acquireLocalWorker` — and its own `findLocalVm`/`leaseWorkerPool` DEFINITIONS live in the same file.
+ * A whole-file "first occurrence of the pattern" search finds whichever of those five is textually
+ * first, which has nothing to do with `leaseWorker`'s own precedence — so widening the LOCAL pattern to
+ * include `findLocalVm(` (below) without ALSO narrowing the search to one function would trade one
+ * blind spot (missing `leaseWorker` entirely) for a worse one (flagging it, or clearing it, for a
+ * reason unrelated to what it actually does).
+ *
+ * A new top-level function starts at column 0 — this repo's own style throughout `packages/` — so
+ * chunking on that line shape needs no brace-counting and cannot be confused by a brace inside a string
+ * or a regex literal, which a real parser would have to guard against and a chunker by line shape does
+ * not need to.
+ */
+function functionChunks(lines: string[]): { from: number; lines: string[] }[] {
+  const starts: number[] = [];
+  lines.forEach((l, i) => { if (/^(export\s+)?(async\s+)?function\s+\w+\s*\(/.test(l)) starts.push(i); });
+  return starts.map((from, i) => ({ from, lines: lines.slice(from, starts[i + 1] ?? lines.length) }));
+}
+
+test("every FUNCTION that reads BOTH sources asks the inventory FIRST", () => {
   // The property, not the mechanism. Three modules differ legitimately in LIFECYCLE — the corpus path
   // must build lease objects, `doctor` reports rather than dispatches — so requiring them all to call
   // `resolveWorkerPool` would be wrong. What must not differ is the ORDER, which is what drifted.
@@ -88,6 +112,13 @@ test("every module that reads BOTH sources asks the inventory FIRST", () => {
   // An earlier version of this test required delegation and flagged all three, including
   // `fleet-playbook.mjs`, which mentions `utmctl` only in a comment. Comments are blanked here for
   // exactly that reason: a test that reads source TEXT must at least read the code half of it.
+  //
+  // PER FUNCTION, not per file, since 2026-09-06 — see `functionChunks`. `leaseWorker` escaped this test
+  // entirely before then: it read only `findLocalVm(`, which the LOCAL pattern below did not even
+  // recognise, so the whole file was skipped as reading neither source. Widening the pattern without
+  // also narrowing the search to one function at a time would have made `local-vm.ts` a permanent false
+  // positive instead — `findLocalVm(` is defined in this file and called twice more for reasons that have
+  // nothing to do with resolution order.
   const offenders: string[] = [];
   for (const [path, text] of sources()) {
     if (path.endsWith("fleet-env.mjs") || path.endsWith("worker-precedence.test.ts")) continue;
@@ -96,14 +127,36 @@ test("every module that reads BOTH sources asks the inventory FIRST", () => {
     // `resolveWorkerPool` decides. Without this, `check-worker-code.mjs` is flagged for the line that
     // DEFINES `localPoolUrls` — a definition is not a precedence.
     if (lines.some((l) => /resolveWorkerPool\(/.test(l))) continue;
-    const local = firstLine(lines, /localPoolUrls\(|leaseWorkerPool\(/);
-    const inventory = firstLine(lines, /inventoryWorkerUrls\(|namedInventoryWorkers\(/);
-    if (local === -1 || inventory === -1) continue;
-    if (inventory > local) {
-      offenders.push(`${path}: local pool at line ${local + 1}, inventory at ${inventory + 1}`);
+    for (const chunk of functionChunks(lines)) {
+      const local = firstLine(chunk.lines, /localPoolUrls\(|leaseWorkerPool\(|findLocalVm\(/);
+      const inventory = firstLine(chunk.lines, /inventoryWorkerUrls\(|namedInventoryWorkers\(/);
+      if (local === -1 || inventory === -1) continue;
+      if (inventory > local) {
+        offenders.push(`${path}: local at line ${chunk.from + local + 1}, `
+          + `inventory at ${chunk.from + inventory + 1}`);
+      }
     }
   }
   assert.deepEqual(offenders, [], "the local UTM guests are DEPRECATED; inventory.yml is the fleet, and a "
-    + "module that prefers the pool describes a different fleet from `doctor` and `worker:code`:\n  "
+    + "function that prefers the pool describes a different fleet from `doctor` and `worker:code`:\n  "
     + offenders.join("\n  "));
+});
+
+test("functionChunks actually isolates leaseWorker, so the property above is not vacuous", () => {
+  // Proof this discovery examines the right span, not just that it happens to report zero offenders.
+  // `local-vm.ts` is exactly the file the OLD, whole-file version of this test was blind to, and
+  // `findLocalVm(` is called three times in it for three unrelated reasons — this pins that exactly ONE
+  // of those three lands inside `leaseWorker`'s own chunk, which is the span that actually matters.
+  const text = readFileSync(join(ROOT, "packages/worker-fleet/src/local-vm.ts"), "utf8");
+  const chunks = functionChunks(code(text));
+  const lease = chunks.find((c) => /^export async function leaseWorker\(/.test(c.lines[0]));
+  assert.ok(lease, "leaseWorker must be found as its own chunk");
+  const findLocalVmHits = (chunk: { lines: string[] }) => chunk.lines.filter((l) => /findLocalVm\(/.test(l)).length;
+  assert.equal(findLocalVmHits(lease!), 1, "leaseWorker's chunk must contain exactly its OWN call, "
+    + "neither releaseVm's busy-check nor acquireLocalWorker's readiness re-check");
+  assert.ok(lease!.lines.some((l) => /inventoryWorkerUrls\(/.test(l)), "and must contain its inventory call");
+  const total = chunks.reduce((n, c) => n + findLocalVmHits(c), 0);
+  assert.equal(total, 4, "the fixture's own premise: `findLocalVm(` appears four times in this file -- its "
+    + "own definition plus three real calls (leaseWorker, releaseVm, acquireLocalWorker) -- if this "
+    + "changes, re-check which chunk each occurrence landed in before trusting the count above");
 });
