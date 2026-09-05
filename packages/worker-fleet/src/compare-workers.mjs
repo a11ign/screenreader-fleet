@@ -27,7 +27,7 @@
 // "Not distinguishable" is a real answer, and it is the one that was missing.
 import { writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { refuseIfBusy } from "./measure-guard.mjs";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";
 import { sampleHost, diffHost } from "./host-metrics.mjs";
 import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.mjs";
@@ -45,7 +45,9 @@ refuseUnknownFlags(["--rounds=", "--runs="], { entry: import.meta.url, command: 
 // `requestJson`, not `fetch`: undici stops waiting for response HEADERS at 300 s whatever the
 // AbortSignal says, and the worker writes its status and body together at the END of a capture.
 // See worker-http.mjs -- this budget sits at or above that cap, so it never applied.
-const OUT = resolve(process.cwd(), "runs/worker-compare");
+// Resolved from THIS module, never the cwd -- same reason as `doctor.mjs`'s `DATASET`: this package
+// cannot import `@a11y-witness/lab`'s canonical `runs/` resolution without a dependency cycle.
+const OUT = resolve(fileURLToPath(new URL("../../../", import.meta.url)), "runs/worker-compare");
 const MS_PER_S = 1000;
 
 const args = process.argv.slice(2);
