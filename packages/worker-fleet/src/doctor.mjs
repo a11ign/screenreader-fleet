@@ -53,7 +53,11 @@ const CTL = fleetScriptPaths().workerCtl;
 // defect that made a fresh clone unable to run its own default judge (see packages/scorer/src/index.ts),
 // so nothing here may repeat it.
 const SCORER_MODEL_DIR = fileURLToPath(new URL("../../scorer/models/screenreader-scorer/", import.meta.url));
-const DATASET = resolve(process.cwd(), "runs/screenreader-dataset");
+// Same rule as SCORER_MODEL_DIR above: resolved from THIS module, never the cwd. `@a11y-witness/lab`
+// owns the canonical `runs/` resolution (`packages/lab/src/dataset-paths.mjs`), but `lab` depends on
+// `worker-fleet`, so this package cannot import it without a cycle — this is the same computation,
+// duplicated for that reason rather than left cwd-anchored.
+const DATASET = resolve(fileURLToPath(new URL("../../../", import.meta.url)), "runs/screenreader-dataset");
 const PROBE_TIMEOUT_MS = 8000;
 
 /** @type {any[]} */
