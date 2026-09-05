@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "@a11y-witness/evidence/source-text";
 import { unknownFlags, didYouMean, nameOf, refuseUnknownFlags } from "./cli-flags.mjs";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
@@ -192,19 +193,8 @@ const UNGUARDED = new Set<string>([
  */
 function isCommandLine(rel: string): boolean {
   if (!rel.endsWith(".mjs")) return false;
-  const source = withoutComments(readFileSync(join(REPO, rel), "utf8"));
+  const source = stripComments(readFileSync(join(REPO, rel), "utf8"));
   return source.includes("process.argv") && !source.includes("export function refuseUnknownFlags");
-}
-
-/**
- * Source with `//` and block comments removed.
- *
- * Deliberately crude — this is a classifier, not a parser, and a `//` inside a string literal costs at
- * worst one file's classification, which the EXEMPT list can then state with a reason. A real parser here
- * would be more machinery than the question deserves.
- */
-function withoutComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
 /** Every `.mjs` that reads argv — DISCOVERED, so a new one cannot arrive unnoticed. */
