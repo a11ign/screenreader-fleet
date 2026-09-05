@@ -34,6 +34,7 @@ import { pathToFileURL } from "node:url";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { warnUtmDeprecated } from "./utm-deprecated.mjs";
 
 /**
  * takes a VM name and a script POSITIONALLY, which this guard does not touch, plus `--timeout=`;
@@ -119,6 +120,7 @@ async function pull(uuid, guestPath) {
 }
 
 async function main() {
+  warnUtmDeprecated("node packages/worker-fleet/src/guest-run.mjs");
   const args = process.argv.slice(2);
   const [vmName, scriptFile] = args.filter((a) => !a.startsWith("--"));
   const timeoutS = Number(args.find((a) => a.startsWith("--timeout="))?.split("=")[1] ?? 600);

@@ -47,6 +47,12 @@
 # at-logon trigger restart the worker -- see docs/local-worker-vm.md.
 set -euo pipefail
 
+# architecture-audit.md §8: this manages a local UTM worker VM, which is deprecated -- "The UTM is
+# deprecated, that was a testing thing." (repository owner, 2026-09-05). Capture on the bare-metal fleet
+# instead: npm run fleet:status, npm run fleet:deploy. See CLAUDE.md's "Working on a Mac" section.
+echo "DEPRECATED: worker-ctl.sh manages a local UTM worker VM. UTM was a testing path and is not the fleet." >&2
+echo "Capture on the bare-metal fleet instead: npm run fleet:status, npm run fleet:deploy." >&2
+
 VM_NAME="${A11Y_VM_NAME:-a11y-worker}"
 PORT="${A11Y_PORT:-8765}"
 

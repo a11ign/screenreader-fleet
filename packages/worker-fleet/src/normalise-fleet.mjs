@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { warnUtmDeprecated } from "./utm-deprecated.mjs";
 
 /**
  * takes no flags: it brings every local guest to one baseline.
@@ -40,6 +41,7 @@ const UTMCTL = "/Applications/UTM.app/Contents/MacOS/utmctl";
 // stayed broken while `doctor` printed it as the FIX for a failed consistency check. The import check is
 // what catches that class, so it has to be safe to run.
 async function main() {
+  warnUtmDeprecated("npm run fleet:normalise");
   const { stdout } = await run(UTMCTL, ["list"]);
   const vms = stdout.split("\n").slice(1)
     .map((l) => l.trim().split(/\s+/))

@@ -12,6 +12,12 @@
 # the difference between a reproducible artifact and a folk recipe.
 set -euo pipefail
 
+# architecture-audit.md §8: builds a local UTM/QEMU worker VM, which is deprecated -- "The UTM is
+# deprecated, that was a testing thing." (repository owner, 2026-09-05). Capture on the bare-metal fleet
+# instead: npm run fleet:status, npm run fleet:deploy.
+echo "DEPRECATED: build-vm.sh builds a local UTM worker VM. UTM was a testing path and is not the fleet." >&2
+echo "Capture on the bare-metal fleet instead: npm run fleet:status, npm run fleet:deploy." >&2
+
 WIN_ISO="${1:-}"
 VM_DIR="${A11Y_VM_DIR:-$HOME/a11y-worker-vm}"
 DISK_GB="${A11Y_VM_DISK_GB:-64}"

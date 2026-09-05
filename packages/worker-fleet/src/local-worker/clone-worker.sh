@@ -17,6 +17,12 @@
 # write its cached copy back over the edit.
 set -euo pipefail
 
+# architecture-audit.md §8: clones a local UTM worker VM, which is deprecated -- "The UTM is deprecated,
+# that was a testing thing." (repository owner, 2026-09-05). Capture on the bare-metal fleet instead:
+# npm run fleet:status, npm run fleet:deploy.
+echo "DEPRECATED: clone-worker.sh clones a local UTM worker VM. UTM was a testing path and is not the fleet." >&2
+echo "Capture on the bare-metal fleet instead: npm run fleet:status, npm run fleet:deploy." >&2
+
 SOURCE_NAME="${A11Y_VM_NAME:-a11y-worker}"
 NEW_NAME="${1:-${SOURCE_NAME}-2}"
 DOCS="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents"

@@ -14,6 +14,12 @@
 # unless the bundle's OpenSSL.framework is on the framework path. Hence the shim below.
 set -euo pipefail
 
+# architecture-audit.md §8: builds an ISO for a local UTM worker VM, which is deprecated -- "The UTM is
+# deprecated, that was a testing thing." (repository owner, 2026-09-05). Bare-metal boxes install via
+# PXE/autounattend.xml instead — see packages/worker-fleet/src/provisioning/bare-metal/.
+echo "DEPRECATED: fetch-windows-iso.sh feeds a local UTM worker VM build. UTM was a testing path and is not the fleet." >&2
+echo "Capture on the bare-metal fleet instead: npm run fleet:status, npm run fleet:deploy." >&2
+
 OUT_DIR="${1:-$HOME/a11y-worker-vm/iso-build}"
 EDITION="${A11Y_WIN_EDITION:-professional}"
 LANG_CODE="${A11Y_WIN_LANG:-en-us}"

@@ -40,6 +40,7 @@ import { workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker/code-ver
 import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda-worker/protocol-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { warnUtmDeprecated } from "./utm-deprecated.mjs";
 
 /**
  * `--allow-protocol-change` is the flag that lets a CAPTURE_PROTOCOL_VERSION bump ship, invalidating
@@ -284,6 +285,7 @@ function guardProtocolChange() {
  * symmetry.
  */
 async function main() {
+  warnUtmDeprecated("npm run worker:deploy");
   guardProtocolChange();
 
   const files = hashedFiles();
