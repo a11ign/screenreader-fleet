@@ -38,6 +38,9 @@
   "dependencies": {
     "@a11y-witness/nvda-worker": "0.1.0"
   },
+  "devDependencies": {
+    "@a11y-witness/evidence": "0.1.0"
+  },
   "engines": {
     "node": ">=20"
   },
