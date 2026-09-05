@@ -29,6 +29,22 @@
     "./capture-client": {
       "types": "./dist/capture-client.d.mts",
       "default": "./dist/capture-client.mjs"
+    },
+    "./host-address": {
+      "types": "./dist/host-address.d.mts",
+      "default": "./dist/host-address.mjs"
+    },
+    "./fleet-env": {
+      "types": "./dist/fleet-env.d.mts",
+      "default": "./dist/fleet-env.mjs"
+    },
+    "./fleet-consistency": {
+      "types": "./dist/fleet-consistency.d.mts",
+      "default": "./dist/fleet-consistency.mjs"
+    },
+    "./worker-code-check": {
+      "types": "./dist/worker-code-check.d.mts",
+      "default": "./dist/worker-code-check.mjs"
     }
   },
   "bin": {
@@ -49,7 +65,9 @@
     "@a11y-witness/nvda-worker": "0.1.0"
   },
   "devDependencies": {
-    "@a11y-witness/evidence": "0.1.0"
+    "@a11y-witness/evidence": "0.1.0",
+    "yaml": "^2.9.0",
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=20"
