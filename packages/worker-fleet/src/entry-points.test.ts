@@ -40,7 +40,11 @@ function entryPoints(): string[] {
   const pkg = JSON.parse(readFileSync(`${REPO}package.json`, "utf8"));
   const found = new Set<string>();
   for (const command of Object.values(pkg.scripts as Record<string, string>)) {
-    for (const match of String(command).matchAll(/(?:^|\s)(packages\/[^\s]+\.(?:mjs|ts))/g)) {
+    // Top-level scripts/, not only packages/ — `scripts/isolation-gate.mjs` carried the WORST of the two
+    // wrong idioms this file's own second test polices (string concatenation) invisibly, because the
+    // pattern only ever matched packages/*.mjs|.ts. A repo-tooling entry point is exactly as exposed to
+    // "printed usage and exited before the first assertion" as a package one.
+    for (const match of String(command).matchAll(/(?:^|\s)((?:packages|scripts)\/[^\s]+\.(?:mjs|ts))/g)) {
       if (!match[1].endsWith(".test.ts")) found.add(match[1]);
     }
   }
