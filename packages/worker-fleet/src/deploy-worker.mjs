@@ -23,7 +23,7 @@
 // is no bespoke backup to go stale.
 import { pathToFileURL } from "node:url";
 import { execFile, execFileSync } from "node:child_process";
-import { createReadStream, readFileSync } from "node:fs";
+import { createReadStream } from "node:fs";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 // By SUBPATH, never the package ROOT: the index re-exports `capture-core.mjs`, which imports guidepup and
@@ -32,6 +32,11 @@ import { resolve } from "node:path";
 // `no-win32-imports.test.ts` found it.
 import { WORKER_FILES } from "@a11y-witness/nvda-worker/worker-files";
 import { workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker/code-version";
+// The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
+// `protocol-version.mjs` is dependency-free for exactly this: safe to import from a portable tree, unlike
+// the package ROOT or `capture-core.mjs` itself, which reach guidepup. The git-HEAD comparison below still
+// has to scrape TEXT, because `git show` returns a historical file's bytes, not something importable.
+import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda-worker/protocol-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
 
@@ -229,23 +234,23 @@ async function deployTo(vm, files, expected) {
  * deploy the bump, wipe the cache, and give no clue why the next run recaptured everything.
  */
 function guardProtocolChange() {
-  const inTree = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-    readFileSync(resolve(NVDA_DIR, "capture-core.mjs"), "utf8"))?.[1];
+  const inTree = String(PROTOCOL_IN_TREE);
   let committed;
   try {
     committed = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/capture-core.mjs"], { encoding: "utf8" }))?.[1];
+      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"], { encoding: "utf8" }))?.[1];
   } catch {
     // Two very different situations, and one of them is a guard that has quietly stopped guarding: there may
-    // be no git checkout at all, or the PATH may have moved (M5 relocated this file from `src/capture/nvda/`)
-    // so `git show` finds nothing. The second would silently disable the most expensive check in this script,
+    // be no git checkout at all, or the PATH may have moved (M5 relocated this file from `src/capture/nvda/`;
+    // it moved AGAIN out of `capture-core.mjs` into its own file on architecture-audit.md §5, item 3) so
+    // `git show` finds nothing. The second would silently disable the most expensive check in this script,
     // which is exactly the shape this repo keeps paying for, so it says so.
     try {
       execFileSync("git", ["rev-parse", "--verify", "HEAD"], { stdio: "ignore" });
       process.stdout.write(
         "  note: cannot compare CAPTURE_PROTOCOL_VERSION against HEAD — packages/nvda-worker/src/"
-        + "capture-core.mjs is not in HEAD.\n        Expected for a brand-new or just-moved file; if the path"
-        + " moved, fix it here or this guard is off.\n");
+        + "protocol-version.mjs is not in HEAD.\n        Expected for a brand-new or just-moved file; if the "
+        + "path moved, fix it here or this guard is off.\n");
     } catch { /* genuinely not a git checkout: nothing to compare, and nothing to warn about */ }
     return;
   }

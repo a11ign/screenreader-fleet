@@ -132,3 +132,46 @@ test("BOTH deploy paths are found, so neither can go unguarded unnoticed", () =>
   assert.ok(found.includes("packages/worker-fleet/src/deploy-worker.mjs"),
     `the UTM path must be discovered; found ${JSON.stringify(found)}`);
 });
+
+/**
+ * THE WORKING-TREE VALUE IS IMPORTED, NOT REGEX-SCRAPED — architecture-audit.md §5, item 3.
+ *
+ * `CAPTURE_PROTOCOL_VERSION` moved out of `capture-core.mjs` into its own dependency-free
+ * `protocol-version.mjs`, precisely so a WORKER-FLEET script (which already depends on
+ * `@a11y-witness/nvda-worker`) can import the number directly instead of parsing it out of a file it
+ * cannot safely import wholesale. A scraper whose regex or target path has quietly drifted reports the
+ * OLD number as though nothing changed — this has teeth now that the value has actually moved once
+ * (14 -> 15). The git-HEAD half of each guard still has to scrape TEXT (`git show` returns historical
+ * bytes, not a loadable module), so only the working-tree half is asserted here.
+ */
+test("deploy-worker and check-worker-code IMPORT the working-tree protocol version", () => {
+  const root = resolve(import.meta.dirname, "../../..");
+  for (const file of ["packages/worker-fleet/src/deploy-worker.mjs", "packages/worker-fleet/src/check-worker-code.mjs"]) {
+    const source = readFileSync(resolve(root, file), "utf8");
+    assert.match(source, /from\s+["']@a11y-witness\/nvda-worker\/protocol-version["']/,
+      `${file} must import CAPTURE_PROTOCOL_VERSION from the dependency-free protocol-version.mjs`);
+    assert.doesNotMatch(source, /readFileSync\([^)]*capture-core\.mjs/,
+      `${file} still reads capture-core.mjs's TEXT for the working-tree value -- the whole point of the `
+      + "move was to stop doing that");
+  }
+});
+
+/**
+ * THE HEAD-COMPARISON HALF NOW SCRAPES THE RIGHT FILE.
+ *
+ * Both guards ALSO compare against `git show HEAD:...` for a second reason (detecting an uncommitted
+ * bump) -- that half cannot become an import, but it must point at `protocol-version.mjs` now, or it
+ * would silently stop matching anything the moment this move landed as a real commit: the constant no
+ * longer exists in `capture-core.mjs`'s text at all.
+ */
+test("the git-HEAD comparison targets protocol-version.mjs, not the file the constant moved OUT of", () => {
+  const root = resolve(import.meta.dirname, "../../..");
+  for (const file of ["packages/worker-fleet/src/deploy-worker.mjs", "packages/worker-fleet/src/check-worker-code.mjs"]) {
+    const source = readFileSync(resolve(root, file), "utf8");
+    assert.match(source, /HEAD:packages\/nvda-worker\/src\/protocol-version\.mjs/,
+      `${file}'s HEAD comparison must target protocol-version.mjs -- capture-core.mjs no longer declares `
+      + "the constant, so scraping it there would silently stop matching");
+    assert.doesNotMatch(source, /HEAD:packages\/nvda-worker\/src\/capture-core\.mjs/,
+      `${file} still compares against capture-core.mjs at HEAD, which the constant no longer lives in`);
+  }
+});

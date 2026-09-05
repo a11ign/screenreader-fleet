@@ -21,6 +21,14 @@
     },
     "./cli-flags": {
       "default": "./dist/cli-flags.mjs"
+    },
+    "./transient-fault": {
+      "types": "./dist/transient-fault.d.mts",
+      "default": "./dist/transient-fault.mjs"
+    },
+    "./capture-client": {
+      "types": "./dist/capture-client.d.mts",
+      "default": "./dist/capture-client.mjs"
     }
   },
   "bin": {
