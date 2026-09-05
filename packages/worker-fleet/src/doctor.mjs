@@ -24,6 +24,7 @@ import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { requestJson } from "./worker-http.mjs";
 
 /**
  * a mistyped `--json` prints for a human where a script expected a machine-readable answer, and the
@@ -108,10 +109,18 @@ async function shell(/** @type {any} */ cmd, /** @type {any} */ args, timeout = 
   return stdout.trim();
 }
 
+// `requestJson`, not `fetch` -- audit §9's "the HTTP client" row: a second hand-rolled probe of the same
+// worker JSON API, with its own timeout mechanism, buys nothing and cost this project a silent-truncation
+// bug once already (worker-http.mjs's own header). `requestJson` also carries the failure's CODE
+// (`ECONNREFUSED`, `EHOSTUNREACH`) rather than fetch's undifferentiated `TypeError: fetch failed`.
 async function httpJson(/** @type {any} */ url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+  const response = await requestJson(url, { timeoutMs: PROBE_TIMEOUT_MS });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+  // `requestJson` returns `undefined` for unparseable JSON rather than throwing (its own docstring: a
+  // cache miss is a normal outcome for its usual callers) -- `fetch`'s `.json()` throws, and this function's
+  // callers rely on that to distinguish "answered with garbage" from "answered correctly". Restored here.
+  if (response.json === undefined) throw new Error(`invalid JSON from ${url}`);
+  return response.json;
 }
 
 // --- the checks -----------------------------------------------------------
