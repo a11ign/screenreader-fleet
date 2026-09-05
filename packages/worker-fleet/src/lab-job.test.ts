@@ -714,12 +714,45 @@ test("only a job that reports progress has a progress root, and it is declared",
   // Five do. They declare where, beside the command, the same shape as `params:`. The rest get no
   // progress block and say so — "this job does not report progress" and "here are some numbers" are
   // different answers and only one of them is true.
-  const withProgress = Object.entries(PLAY_VARS.lab_jobs)
-    .filter(([, entry]) => (entry as { progress?: string }).progress)
+  //
+  // DERIVED, NOT LISTED — and this test's own message used to claim a derivation it did not perform.
+  // It asserted a hardcoded five-name array while telling the reader it checked "the jobs whose script
+  // calls beginRun()". That is the shape this repo pays most for: a comment naming a rule above code
+  // that hardcodes an answer, so the list silently becomes the definition and drifts from the rule.
+  //
+  // The rule, stated so it can be checked: A JOB WRITES CAPTURE PROGRESS IFF IT DISPATCHES TO WORKERS.
+  // Both directions are causal rather than coincidental — a job that never touches a worker cannot
+  // produce capture progress, and a job that drives the fleet is capturing, which is what writes the
+  // file. `setenv: A11Y_WORKERS={{ lab_fleet_workers }}` is how the catalogue already says so, and
+  // `lab-job.mjs`'s `captureBearingJobs` already derives fleet-staleness checking from that same field.
+  // Two consumers of one declaration beats two lists that must be kept equal by hand.
+  //
+  // It caught a real gap the moment it was derived: `everything` and `retrain` are capture-bearing and
+  // declared no progress root, so `lab:status` answered "this job does not report progress" for the two
+  // longest-running jobs in the catalogue — the ones most likely to be asked about. See their entries in
+  // lab-job.yml for why declaring it required `training:status --since` first.
+  //
+  // Deliberately NARROWER than "any job that touches a worker": `evidence-check`, `stability` and
+  // `gate-stability` take ONE named worker rather than the fleet, and are diagnostics that persist
+  // nothing. They are excluded by the same field, for the same reason `worker-code-check.test.ts`
+  // excludes them — a diagnostic must never be the thing that takes the pool offline.
+  const jobs = Object.entries(PLAY_VARS.lab_jobs) as [string, {
+    progress?: string; setenv?: string[];
+  }][];
+  const withProgress = jobs.filter(([, e]) => e.progress).map(([name]) => name).sort();
+  const captureBearing = jobs
+    .filter(([, e]) => (e.setenv ?? []).some((v) => String(v).startsWith("A11Y_WORKERS=")))
     .map(([name]) => name).sort();
-  assert.deepEqual(withProgress,
-    ["capture", "capture-acceptance", "capture-acceptance-2", "capture-only", "capture-real-pages"],
-    "exactly the jobs whose script calls beginRun() may declare a progress root");
+  // A vacuity guard, because an empty set equals an empty set and would pass having checked nothing —
+  // a parser that stopped matching the catalogue is the failure this test could not otherwise see.
+  assert.ok(captureBearing.length >= 5,
+    `expected the catalogue to carry several capture-bearing jobs, found ${captureBearing.length} — the `
+    + "setenv parse has stopped matching lab-job.yml, so this test is checking nothing");
+  assert.deepEqual(withProgress, captureBearing,
+    "a job declares `progress:` IFF it dispatches to the fleet. A capture-bearing job missing a progress "
+    + "root makes lab:status say 'this job does not report progress' about a job that does; a progress "
+    + "root on a job that never captures makes it report a stranger's run, which is the fault two "
+    + "earlier fixes each half-closed.");
   // And every declared root must be a corpus directory, not a stray path.
   for (const name of withProgress) {
     const root = (PLAY_VARS.lab_jobs[name] as { progress?: string }).progress ?? "";
