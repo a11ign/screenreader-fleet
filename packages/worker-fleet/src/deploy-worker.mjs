@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // @ts-check
 // Deploy the worker's code to the guests, in one command, and prove it landed.
 //
@@ -23,7 +24,7 @@
 // is no bespoke backup to go stale.
 import { pathToFileURL } from "node:url";
 import { execFile, execFileSync } from "node:child_process";
-import { createReadStream } from "node:fs";
+import { createReadStream, realpathSync } from "node:fs";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 // By SUBPATH, never the package ROOT: the index re-exports `capture-core.mjs`, which imports guidepup and
@@ -317,4 +318,8 @@ async function main() {
   process.exit(failed.length ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
+// REALPATH'D: `import.meta.url` is resolved through symlinks by Node's ESM loader and `process.argv[1]`
+// is not, so a bin reached via its `.bin` symlink (which is how npm always installs one) mismatched here
+// and this guard silently read false — the tool loaded, did nothing, and exited 0. `/var` and `/tmp` are
+// themselves symlinks on macOS, so this fired every time. Same defect, same fix, as `cli.ts`'s `isProgram`.
+if (import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href) await main();

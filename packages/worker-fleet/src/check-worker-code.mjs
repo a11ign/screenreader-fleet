@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // @ts-check
 // Is every worker running the code in this checkout?
 //
@@ -11,6 +12,7 @@
 //
 // This asks each worker over HTTP, which is reachable exactly when the worker is usable and
 // involves no guest agent. Exit 0 when every worker matches, 1 otherwise.
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 // The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
@@ -161,4 +163,8 @@ async function main() {
   process.exit(staleUrls.length ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
+// REALPATH'D: `import.meta.url` is resolved through symlinks by Node's ESM loader and `process.argv[1]`
+// is not, so a bin reached via its `.bin` symlink (which is how npm always installs one) mismatched here
+// and this guard silently read false — the tool loaded, did nothing, and exited 0. `/var` and `/tmp` are
+// themselves symlinks on macOS, so this fired every time. Same defect, same fix, as `cli.ts`'s `isProgram`.
+if (import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href) await main();

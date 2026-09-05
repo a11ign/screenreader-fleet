@@ -20,8 +20,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { join, dirname, basename } from "node:path";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -67,8 +68,9 @@ test("every npm entry point refuses to run when imported", () => {
 
   assert.deepEqual(unguarded, [],
     "these run on import, so `node -e \"import(...)\"` cannot be used to check they still load. Wrap the "
-    + "executable part in a function and call it only under "
-    + "`if (import.meta.url === pathToFileURL(process.argv[1] ?? \"\").href)`.");
+    + "executable part in a function and call it only under `if (import.meta.url === "
+    + "pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : \"\").href)` — realpath'd if this "
+    + "is ever published as a bin, or npm's own .bin symlink silently skips it. See the symlink test below.");
 });
 
 test("the guard is the exact comparison, never a path suffix", () => {
@@ -93,4 +95,73 @@ test("the guard is the exact comparison, never a path suffix", () => {
       `${path} builds its guard by string concatenation, which does not percent-encode — a path with a `
       + "space makes it silently never run. Use pathToFileURL(process.argv[1] ?? \"\").href");
   }
+});
+
+/**
+ * Every `bin` a `package.json` declares, mapped to the SOURCE file it is built from — `dist/cli.js` is
+ * built from `src/cli.ts`, `dist/doctor.mjs` from `src/doctor.mjs`, and `nvda-worker`'s bin points at its
+ * source directly. Discovered rather than named, for the reason every discovery test in this file exists:
+ * a bin nobody remembered to list here is exactly the one that ships broken.
+ */
+/** `dist/cli.js` is built from `src/cli.ts` or `src/cli.mjs`; anything not under `dist/` is its own source. */
+function sourceFor(targetPath: string): string {
+  const dir = dirname(targetPath);
+  if (basename(dir) !== "dist") return targetPath;
+  const base = basename(targetPath);
+  const srcTs = join(dir, "..", "src", base.replace(/\.js$/, ".ts"));
+  const srcMjs = join(dir, "..", "src", base.replace(/\.js$/, ".mjs"));
+  if (existsSync(srcTs)) return srcTs;
+  if (existsSync(srcMjs)) return srcMjs;
+  return targetPath;
+}
+
+function declaredBinSources(): string[] {
+  const packagesDir = join(REPO, "packages");
+  const found = new Set<string>();
+  for (const pkgName of readdirSync(packagesDir)) {
+    const manifestPath = join(packagesDir, pkgName, "package.json");
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    for (const target of Object.values(manifest.bin ?? {}) as string[]) {
+      const source = sourceFor(join(packagesDir, pkgName, target));
+      found.add(source.replace(REPO, ""));
+    }
+  }
+  return [...found].sort();
+}
+
+test("every declared bin's entry-point guard survives being reached through a symlink", () => {
+  // architecture-audit.md §7.2: "the published dist/cli.js bin is executed by nothing". It should have
+  // been: `isProgram` compared `import.meta.url` (which Node's ESM loader resolves through symlinks)
+  // against a RAW `process.argv[1]`. npm always installs a `bin` entry as a symlink, and `npx` stages a
+  // package under `os.tmpdir()` first, which is `/var/folders/...` on macOS — itself a symlink to
+  // `/private/var/...`. So five of this repo's six real bins ran, matched nothing, skipped `main()`
+  // entirely, and exited 0 with no output — reproduced with a three-line script invoked through `/tmp/...`
+  // instead of its `/private/tmp/...` realpath, not by reasoning about it.
+  const sources = declaredBinSources();
+  assert.ok(sources.length >= 6, `only found ${sources.length} declared bin sources; the discovery is `
+    + "broken, not the codebase clean");
+
+  // `a11y-nvda-worker` is Windows-only by ADR 0001, and npm's Windows bin shim is a `.cmd`/`.ps1` wrapper
+  // that does not depend on a shebang or a symlink the way POSIX's does — so this exposure is real on
+  // every platform this repo actually ships the bin FOR except this one. It carries the identical pattern
+  // and should still be fixed, but `server.mjs` is a capture-path file held under this repo's own
+  // sequencing rule (anything touching server.mjs/capture-core.mjs/capture-probes.mjs/capture-setup.mjs/
+  // worker-files.mjs waits for the in-flight recapture) — tracked, not silently exempted.
+  const exempt = new Set(["packages/nvda-worker/src/server.mjs"]);
+  const jsSources = sources.filter((s) => !exempt.has(s) && /\.(mjs|ts)$/.test(s));
+
+  const vulnerable = jsSources.filter((path) => {
+    const src = readFileSync(`${REPO}${path}`, "utf8");
+    const executable = src.split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
+    // A guard is vulnerable if it compares against `process.argv[1]` without realpath'ing it first.
+    return /pathToFileURL\(\s*process\.argv\[1\]/.test(executable)
+      && !/realpathSync\(\s*process\.argv\[1\]/.test(executable);
+  });
+
+  assert.deepEqual(vulnerable, [],
+    "these bins compare import.meta.url against a non-realpath'd process.argv[1], so reaching them through "
+    + "the .bin symlink npm always creates (or npx's tmpdir staging) silently skips main() and exits 0: "
+    + "wrap the argv path in realpathSync() before pathToFileURL(), e.g. "
+    + "pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : \"\").href — " + vulnerable.join(", "));
 });

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // @ts-check
 // Can I run right now? One command, one answer.
 //
@@ -12,7 +13,7 @@
 // Exit codes: 0 ready, 1 something is broken (details in the report).
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
@@ -479,4 +480,8 @@ async function main() {
   process.exit(ready ? 0 : 1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
+// REALPATH'D: `import.meta.url` is resolved through symlinks by Node's ESM loader and `process.argv[1]`
+// is not, so a bin reached via its `.bin` symlink (which is how npm always installs one) mismatched here
+// and this guard silently read false — the tool loaded, did nothing, and exited 0. `/var` and `/tmp` are
+// themselves symlinks on macOS, so this fired every time. Same defect, same fix, as `cli.ts`'s `isProgram`.
+if (import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href) await main();

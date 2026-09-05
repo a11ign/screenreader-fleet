@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // @ts-check
 // Why is one worker slower than another? Run the same page on each and diff every phase.
 //
@@ -24,7 +25,7 @@
 //
 // It also refuses to declare a difference the samples do not support -- see `./worker-stats.mjs`.
 // "Not distinguishable" is a real answer, and it is the one that was missing.
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { refuseIfBusy } from "./measure-guard.mjs";
 import { pathToFileURL } from "node:url";
 import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";
@@ -329,4 +330,8 @@ function reportFoundations(/** @type {any} */ { hostBefore }) {
   return { foundations, hostAfter };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
+// REALPATH'D: `import.meta.url` is resolved through symlinks by Node's ESM loader and `process.argv[1]`
+// is not, so a bin reached via its `.bin` symlink (which is how npm always installs one) mismatched here
+// and this guard silently read false — the tool loaded, did nothing, and exited 0. `/var` and `/tmp` are
+// themselves symlinks on macOS, so this fired every time. Same defect, same fix, as `cli.ts`'s `isProgram`.
+if (import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href) await main();
