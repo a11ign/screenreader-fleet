@@ -128,7 +128,7 @@ export const KEEPALIVE_DELAY_MS = 15_000;
  */
 export function assertWorkerUrl(value, { source = "--worker" } = {}) {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${source} is required and was empty. Give a worker address, e.g. ${source}=http://REDACTED-INTERNAL-ADDRESS:8765`);
+    throw new Error(`${source} is required and was empty. Give a worker address, e.g. ${source}=http://192.0.2.10:8765`);
   }
   const raw = value.trim().replace(/\/$/, "");
   let target;
@@ -141,7 +141,7 @@ export function assertWorkerUrl(value, { source = "--worker" } = {}) {
     // unreachable, which is this repo's own most-repeated defect, so the message that belongs to that case
     // is folded in here where it can actually be read.
     throw new Error(
-      `${source}=${raw} is not a URL. Expected something like http://REDACTED-INTERNAL-ADDRESS:8765\n`
+      `${source}=${raw} is not a URL. Expected something like http://192.0.2.10:8765\n`
       + "If the host is missing, that is what a shell variable expanding to nothing looks like: a bash "
       + "array does not survive `nohup bash -c`, and zsh does not word-split a scalar. Both produce "
       + "exactly this.", { cause });
@@ -208,8 +208,8 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
     // carriers set a 5-30 minute NAT connection timeout" -- and that passage is about MOBILE CARRIERS AND
     // THE PUBLIC INTERNET.
     //
-    // THIS IS A LAN. The control plane is REDACTED-INTERNAL-ADDRESS/24 and every worker is 192.168.1.x/24; the route to
-    // them is `link#14`, direct on the link layer with no gateway hop. NAT happens at REDACTED-INTERNAL-ADDRESS on the
+    // THIS IS A LAN. The control plane and every worker sit on the same /24; the route between them is
+    // `link#14`, direct on the link layer with no gateway hop. NAT happens at the router on the
     // way OUT. There is no translation table between these hosts, so there is nothing here that a NAT
     // timeout could expire. The theory was inapplicable from the first line, and the mismatch went
     // unnoticed because the quotation fitted the SYMPTOM.

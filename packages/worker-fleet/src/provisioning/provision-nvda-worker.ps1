@@ -499,7 +499,7 @@ Step 7a 'Never sleep, and keep the NIC awake'
 
 # A worker that sleeps is a worker that has vanished, and this is BARE-METAL ONLY: VMs do not
 # sleep, so the whole fleet ran for months without needing it. On the first physical box it
-# presented as `EHOSTUNREACH REDACTED-INTERNAL-ADDRESS:8765` for every request in an evidence-check run --
+# presented as `EHOSTUNREACH <worker>:8765` for every request in an evidence-check run --
 # 48 instant failures -- and then answered a curl 30 seconds later. Intermittent unreachability
 # reads as a flaky network or a wedged worker; it was Windows power management doing its job.
 #

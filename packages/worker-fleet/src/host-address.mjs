@@ -15,8 +15,8 @@
  *     new URL(worker).hostname.replace(/\.\d+$/, ".1")
  *
  * That is right for UTM, where the Mac really is the `.1` gateway of the shared network, and wrong
- * for every other network. Measured: against a bare-metal worker at REDACTED-INTERNAL-ADDRESS it produced
- * `http://REDACTED-INTERNAL-ADDRESS:5050` — the ROUTER — so `evidence:check` refused to run because the pages
+ * for every other network. Measured: against a bare-metal worker on the fleet's own LAN it produced
+ * the ROUTER's address instead — so `evidence:check` refused to run because the pages
  * were not being served. On a fleet of bare-metal boxes it fails every time.
  *
  * The failure mode is why this matters more than tidiness. `guestReachableUrl`'s own note records

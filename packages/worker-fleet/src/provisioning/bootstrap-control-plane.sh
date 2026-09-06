@@ -29,7 +29,7 @@
 #
 #   A11Y_REPO_URL     default the public GitHub repo
 #   A11Y_REPO_PATH    default ~/a11y-witness
-#   A11Y_WORKERS      comma-separated worker URLs, e.g. http://REDACTED-INTERNAL-ADDRESS:8765
+#   A11Y_WORKERS      comma-separated worker URLs, e.g. http://192.0.2.10:8765
 #   A11Y_CORPUS_URL   optional tar.gz of runs/ to seed the baseline corpus (69 MB at time of writing)
 set -euo pipefail
 
@@ -317,7 +317,7 @@ step 6 'Workers'
 if [ -z "${A11Y_WORKERS:-}" ]; then
   warn 'A11Y_WORKERS is not set. Without it the orchestrator looks for LOCAL VMs, which do not'
   warn 'exist here — that path is macOS/UTM only. Set it to your bare-metal workers:'
-  warn '  export A11Y_WORKERS=http://REDACTED-INTERNAL-ADDRESS:8765'
+  warn '  export A11Y_WORKERS=http://192.0.2.10:8765'
 else
   # Reachability is checked, not assumed: this whole exercise began with an orchestrator that
   # could not reach its workers and reported it as something else entirely.
