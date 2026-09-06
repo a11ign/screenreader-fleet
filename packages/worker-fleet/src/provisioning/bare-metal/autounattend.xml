@@ -356,6 +356,13 @@
         </SynchronousCommand>
         <!-- Fetch the payload over HTTP rather than looking for it on the install media.
              ==================== SET THE ADDRESS BELOW BEFORE USE ====================
+             `$h` below is 203.0.113.10 -- an RFC 5737 DOCUMENTATION address, not this fleet's real
+             control-plane host (#86: a real address sat here in tracked source; RFC 5737 is reserved so
+             it can never resolve to anything, the same replacement #83 used elsewhere in this repo).
+             It WILL fail to fetch, on purpose: a box that silently boots against a stale or wrong host
+             is a worse failure than one that visibly hangs retrying an address that cannot answer.
+             Replace it with your control plane's real address before generating install media.
+
              iVentoy injects files to X:, which is the WinPE RAM disk and is GONE by the time this runs,
              so scanning drive letters (which the UTM path does, from a support ISO that stays attached)
              finds nothing here. Fetching also means one small file to serve rather than a repacked ISO,
@@ -366,7 +373,7 @@
         <SynchronousCommand wcm:action="add">
           <Order>3</Order>
           <Description>Fetch the bootstrap payload from the control plane</Description>
-          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$h='http://REDACTED-INTERNAL-ADDRESS:8099'; $d='C:\a11y'; New-Item -ItemType Directory -Force $d | Out-Null; foreach($f in 'first-boot.cmd','bootstrap-windows-worker.ps1','operator-key.pub'){ for($i=0;$i -lt 60;$i++){ try{ Invoke-WebRequest -UseBasicParsing -Uri ($h+'/'+$f) -OutFile ($d+'\'+$f); break }catch{ Start-Sleep -Seconds 5 } } }"</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$h='http://203.0.113.10:8099'; $d='C:\a11y'; New-Item -ItemType Directory -Force $d | Out-Null; foreach($f in 'first-boot.cmd','bootstrap-windows-worker.ps1','operator-key.pub'){ for($i=0;$i -lt 60;$i++){ try{ Invoke-WebRequest -UseBasicParsing -Uri ($h+'/'+$f) -OutFile ($d+'\'+$f); break }catch{ Start-Sleep -Seconds 5 } } }"</CommandLine>
         </SynchronousCommand>
         <!-- Then hand off. first-boot.cmd waits for DHCP, stages the operator key, and runs the bootstrap
              elevated via a RunLevel Highest scheduled task, because a UAC prompt here would render on the secure
