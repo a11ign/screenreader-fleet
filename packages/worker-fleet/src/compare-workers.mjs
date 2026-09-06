@@ -50,6 +50,21 @@ refuseUnknownFlags(["--rounds=", "--runs="], { entry: import.meta.url, command: 
 const OUT = resolve(fileURLToPath(new URL("../../../", import.meta.url)), "runs/worker-compare");
 const MS_PER_S = 1000;
 
+/**
+ * `dataset-paths.mjs`'s `refuseIfRunsReadonly`, duplicated rather than imported -- same reason `OUT`
+ * above resolves from this module's own location instead of importing `runsRoot()`: this package cannot
+ * import `@a11y-witness/lab` without a dependency cycle (see `dataset-paths.test.ts`'s own EXEMPT entry
+ * for this file). `A11Y_RUNS_READONLY=1 npm run worker:compare ...` must refuse and name `OUT` exactly
+ * like every other runs/ writer, so a peer asking "is this safe to run" gets one answer regardless of
+ * which package the script happens to live in.
+ */
+function refuseIfRunsReadonly() {
+  if (process.env.A11Y_RUNS_READONLY !== "1") return;
+  console.error("REFUSING to write runs/worker-compare/compare.json — A11Y_RUNS_READONLY=1 is set.");
+  console.error("  Unset A11Y_RUNS_READONLY to run this for real.");
+  process.exit(3);
+}
+
 const args = process.argv.slice(2);
 const runs = Number(args.find((a) => a.startsWith("--rounds="))?.slice("--rounds=".length)
   ?? args.find((a) => a.startsWith("--runs="))?.slice("--runs=".length) ?? 6);
@@ -139,6 +154,7 @@ async function main() {
     process.stderr.write("usage: npm run worker:compare -- <page-url> <worker> <worker> [--rounds=6]\n");
     process.exit(2);
   }
+  refuseIfRunsReadonly();
 
   // REFUSE A BUSY BOX BEFORE MEASURING IT. This whole tool exists to answer "which worker is the
   // problem", and four separate measurement errors came from sampling a box that was doing something
