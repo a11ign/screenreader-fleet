@@ -70,8 +70,12 @@ async function capture(/** @type {any} */ worker) {
 
 async function diagnostics(/** @type {any} */ worker) {
   try {
-    const response = await fetch(`${worker.replace(/\/$/, "")}/diagnostics`, { signal: AbortSignal.timeout(180_000) });
-    return response.ok ? await response.json() : null;
+    // `requestJson`, not `fetch`: the same worker JSON client every other probe in this file uses (see
+    // `capture`, above), rather than a second hand-rolled timeout mechanism for this one endpoint.
+    const response = await requestJson(`${worker.replace(/\/$/, "")}/diagnostics`, { timeoutMs: 180_000 });
+    // `?? null`: `response.json` is `undefined` on unparseable JSON (requestJson's own contract) rather
+    // than a throw, so this still folds into the same "an older worker has no /diagnostics" outcome.
+    return response.ok ? response.json ?? null : null;
   } catch {
     return null; // an older worker has no /diagnostics; the phase comparison still works
   }
@@ -114,8 +118,9 @@ function sweepDetail(/** @type {any} */ entries) {
 
 async function vitals(/** @type {any} */ worker) {
   try {
-    const response = await fetch(`${worker.replace(/\/$/, "")}/health`, { signal: AbortSignal.timeout(20_000) });
-    return response.ok ? (await response.json()).vitals ?? null : null;
+    // `requestJson`, not `fetch`: see `diagnostics`, above.
+    const response = await requestJson(`${worker.replace(/\/$/, "")}/health`, { timeoutMs: 20_000 });
+    return response.ok ? response.json?.vitals ?? null : null;
   } catch {
     return null;
   }

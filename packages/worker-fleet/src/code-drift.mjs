@@ -12,13 +12,23 @@
  * `control-has-no-dependencies.test.ts` walks every import reachable from there and refuses exactly this
  * shape. So the two constraints — no TS5055 here, no `node_modules` there — cannot both be satisfied by one
  * import line in one file, and this file exists to be the copy neither constraint touches: every function
- * below takes `expected` as a plain string, computed by whichever caller can safely reach a hasher, and
- * imports nothing but `node:child_process` and `node:child_process`'s `fetch` (a global, not an import).
+ * below takes `expected` as a plain string, computed by whichever caller can safely reach a hasher.
+ *
+ * It imports `node:child_process` and, for `readWorkerCode`, this package's own `./worker-http.mjs` —
+ * relative, and itself importing nothing but `node:http`/`node:https`, so it resolves without
+ * `node_modules` exactly like this file already does. Verified against
+ * `control-has-no-dependencies.test.ts` before relying on it, since "should resolve" and "does resolve" are
+ * different claims and this file's whole reason for existing is being the copy the second one has to hold
+ * for. `fetch` (a global, needing no import) is what it replaced, kept out for the reason
+ * `worker-http.mjs`'s own header gives: undici silently caps the wait for response headers at ~300 s
+ * regardless of an `AbortSignal`, which this file's own question — does the fleet run this checkout — must
+ * never answer wrongly because of a truncated response.
  *
  * `lab-job.mjs` is that second caller — it needs this BEFORE dispatching to the lab at all, from
  * `packages/control`, which cannot import `worker-code-check.mjs` directly for the reason above.
  */
 import { execFileSync } from "node:child_process";
+import { requestJson } from "./worker-http.mjs";
 
 /** How long a worker gets to answer `/health`. Matches `check-worker-code.mjs`: a cold Windows box needs it. */
 const HEALTH_TIMEOUT_MS = 15_000;
@@ -169,12 +179,20 @@ export function describeCodeDrift(drift, { when = "before the run", bareMetalUrl
 /** @param {string} url */
 export async function readWorkerCode(url) {
   try {
-    const response = await fetch(`${String(url).replace(/\/$/, "")}/health`, {
-      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
-    });
+    // `requestJson`, not `fetch` -- see worker-http.mjs's own header: undici silently caps the wait for
+    // response headers at ~300 s regardless of an AbortSignal, and this file exists to answer a question
+    // (does the fleet run this checkout) that a truncated response must never answer wrongly. `requestJson`
+    // imports only `node:http`/`node:https`, so pulling it in here does not add anything `packages/control`
+    // could not already resolve from a raw checkout -- verified against
+    // `control-has-no-dependencies.test.ts` rather than assumed, since this file's whole reason for existing
+    // is being the copy that constraint reaches.
+    const response = await requestJson(`${String(url).replace(/\/$/, "")}/health`, { timeoutMs: HEALTH_TIMEOUT_MS });
+    // `undefined` on unparseable JSON (requestJson's contract) is folded into the same "did not answer"
+    // path as a network failure below, via the throw -- matching fetch's `.json()`, which threw here too.
+    if (response.json === undefined) throw new Error(`invalid JSON from ${url}`);
     // "absent" rather than null: a worker that answers without a code field predates `/health.code`,
     // which is a stale deploy and must not be filed under "did not answer".
-    return (await response.json()).code ?? "absent";
+    return response.json.code ?? "absent";
   } catch {
     return null;
   }

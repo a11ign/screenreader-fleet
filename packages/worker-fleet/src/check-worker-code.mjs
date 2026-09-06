@@ -25,6 +25,7 @@ import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fle
 import { expectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
 import { errorText } from "@a11y-witness/nvda-worker/error-text";
+import { requestJson } from "./worker-http.mjs";
 
 /**
  * takes NO flags — it asks every worker what code it is running and compares. Any flag passed to it
@@ -111,10 +112,14 @@ function localPoolUrls() {
 
 /** @param {string} url */
 async function versionOf(url) {
-  const response = await fetch(`${url.replace(/\/$/, "")}/health`, {
-    signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
-  });
-  return (await response.json()).code ?? "absent";
+  // `requestJson`, not `fetch`: gains a real error CODE (`ECONNREFUSED`, `EHOSTUNREACH`) for the per-worker
+  // `errorText(e)` line below, in place of fetch's undifferentiated `TypeError: fetch failed`.
+  const response = await requestJson(`${url.replace(/\/$/, "")}/health`, { timeoutMs: HEALTH_TIMEOUT_MS });
+  // `requestJson` returns `undefined` for unparseable JSON rather than throwing (its own docstring: a cache
+  // miss is a normal outcome for its usual callers) -- `fetch`'s `.json()` threw, and the caller here relies
+  // on that to report "unreachable" for a worker that answered garbage. Restored explicitly.
+  if (response.json === undefined) throw new Error(`invalid JSON from ${url}`);
+  return response.json.code ?? "absent";
 }
 
 /**

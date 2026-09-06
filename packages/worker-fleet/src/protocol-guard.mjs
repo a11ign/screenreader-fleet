@@ -20,6 +20,7 @@
  * the verification over HTTP — which is this repo's rule after a hash-check that returned EMPTY whenever
  * the channel it used was broken, and read as a flaky tool rather than a failed deploy.
  */
+import { requestJson } from "./worker-http.mjs";
 
 /** How long a worker gets to answer `/health` before it counts as unreachable. */
 const HEALTH_TIMEOUT_MS = 5_000;
@@ -78,12 +79,16 @@ export function protocolVerdict({ local, served, allowed, source }) {
 export async function servedProtocols(urls) {
   return Promise.all(urls.map(async (url) => {
     try {
-      const response = await fetch(`${url.replace(/\/$/, "")}/health`,
-        { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
-      const health = await response.json();
+      // `requestJson`, not `fetch` -- the same worker JSON API this repo's own audit found duplicated with
+      // its own timeout mechanism at several other call sites (worker-http.mjs's own header), and this one
+      // is on the deploy-guard path: a swallowed truncation here would misreport a fleet mid-protocol-bump
+      // as unreachable rather than as differing, silently weakening the one check standing between a
+      // deploy and an unannounced cache wipe.
+      const response = await requestJson(`${url.replace(/\/$/, "")}/health`, { timeoutMs: HEALTH_TIMEOUT_MS });
       // `?? null` and never `?? 0`: a worker predating the field has no opinion, and reading absence as a
-      // number is the defect this project pays for most often.
-      return { worker: url, protocol: health?.environment?.captureProtocol ?? null };
+      // number is the defect this project pays for most often. `response.json` is `undefined` rather than
+      // a throw on unparseable JSON (requestJson's own contract), which `?.` already treats as "no opinion".
+      return { worker: url, protocol: response.json?.environment?.captureProtocol ?? null };
     } catch {
       // Deliberately not rethrown: unreachable is a VERDICT here, handled by `protocolVerdict`, not an
       // error. Swallowing it would be wrong only if nothing downstream distinguished it, and something does.
