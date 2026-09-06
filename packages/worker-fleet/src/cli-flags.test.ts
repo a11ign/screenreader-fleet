@@ -38,6 +38,8 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "packages/lab/scripts/check-preregistered-verdict.mjs":
+    "takes NO flags -- it reads docs/board/reported.json and nothing else -- so it calls refuseUnknownFlags([]) with an EMPTY list. That is the case worth guarding rather than skipping: a command with no flags is exactly where a mistyped one would otherwise be discarded in silence and the default reported as success.",
   "packages/lab/scripts/collect-promotion.mjs":
     "it OVERWRITES the shipped model weights, so an unrecognised flag running the default is not a "
     + "wasted run but a promotion installed when somebody asked for --dry-run. It takes exactly one "
