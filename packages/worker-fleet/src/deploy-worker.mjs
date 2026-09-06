@@ -24,6 +24,7 @@
 // is no bespoke backup to go stale.
 import { pathToFileURL } from "node:url";
 import { execFile, execFileSync } from "node:child_process";
+import { sandboxGitEnv } from "./git-safe-env.mjs";
 import { createReadStream, realpathSync } from "node:fs";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
@@ -250,7 +251,8 @@ function guardProtocolChange() {
   let committed;
   try {
     committed = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"], { encoding: "utf8" }))?.[1];
+      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"],
+        { encoding: "utf8", env: sandboxGitEnv() }))?.[1];
   } catch {
     // Two very different situations, and one of them is a guard that has quietly stopped guarding: there may
     // be no git checkout at all, or the PATH may have moved (M5 relocated this file from `src/capture/nvda/`;
@@ -258,7 +260,7 @@ function guardProtocolChange() {
     // `git show` finds nothing. The second would silently disable the most expensive check in this script,
     // which is exactly the shape this repo keeps paying for, so it says so.
     try {
-      execFileSync("git", ["rev-parse", "--verify", "HEAD"], { stdio: "ignore" });
+      execFileSync("git", ["rev-parse", "--verify", "HEAD"], { stdio: "ignore", env: sandboxGitEnv() });
       process.stdout.write(
         "  note: cannot compare CAPTURE_PROTOCOL_VERSION against HEAD — packages/nvda-worker/src/"
         + "protocol-version.mjs is not in HEAD.\n        Expected for a brand-new or just-moved file; if the "

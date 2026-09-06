@@ -15,6 +15,7 @@
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
+import { sandboxGitEnv } from "./git-safe-env.mjs";
 // The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
 // `protocol-version.mjs` is dependency-free for exactly this: safe to import from a portable tree.
 import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda-worker/protocol-version";
@@ -56,7 +57,8 @@ function protocolBumpNote() {
   try {
     const inTree = String(PROTOCOL_IN_TREE);
     const committed = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"], { encoding: "utf8" }))?.[1];
+      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"],
+        { encoding: "utf8", env: sandboxGitEnv() }))?.[1];
     if (inTree && committed && inTree !== committed) {
       return `\nNOTE: your working tree has CAPTURE_PROTOCOL_VERSION = ${inTree} but HEAD has ${committed}.\n` +
         "That alone changes the local hash, so the guests may not be stale at all. Deploying it would\n" +

@@ -28,6 +28,7 @@
  * `packages/control`, which cannot import `worker-code-check.mjs` directly for the reason above.
  */
 import { execFileSync } from "node:child_process";
+import { sandboxGitEnv } from "./git-safe-env.mjs";
 import { requestJson } from "./worker-http.mjs";
 
 /** How long a worker gets to answer `/health`. Matches `check-worker-code.mjs`: a cold Windows box needs it. */
@@ -207,7 +208,7 @@ export async function readWorkerCode(url) {
 export function workerSourceDirty() {
   try {
     return execFileSync("git", ["status", "--porcelain", "--", "packages/nvda-worker/src"],
-      { encoding: "utf8" }).trim().split("\n").filter(Boolean).join("; ");
+      { encoding: "utf8", env: sandboxGitEnv() }).trim().split("\n").filter(Boolean).join("; ");
   } catch {
     return "";
   }
