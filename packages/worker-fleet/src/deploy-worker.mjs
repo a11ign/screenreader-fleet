@@ -39,7 +39,7 @@ import { workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker/code-ver
 // has to scrape TEXT, because `git show` returns a historical file's bytes, not something importable.
 import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda-worker/protocol-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
-import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
 import { warnUtmDeprecated } from "./utm-deprecated.mjs";
 
 /**
@@ -70,7 +70,7 @@ const LIFECYCLE_TIMEOUT_MS = 420_000;
 const POOL_TIMEOUT_MS = 240_000;
 const HEALTH_TIMEOUT_MS = 20_000;
 
-const only = process.argv.find((a) => a.startsWith("--vm="))?.slice("--vm=".length);
+const only = flagValue(process.argv, "vm");
 
 /**
  * The files that make up the worker's code version.

@@ -55,6 +55,30 @@ export function nameOf(argument) {
 }
 
 /**
+ * `--name=value`'s value, or `undefined` if `--name=` was never passed. audit §9's "argv parsing" row:
+ * VALIDATION is owned here (`refuseUnknownFlags`), but 15+ files each hand-rolled this exact three-line
+ * idiom for EXTRACTION, and one of them had already drifted from the rest.
+ *
+ * MEASURED before writing this, across all fifteen, against five vectors (a normal value, a missing flag,
+ * an empty value, a repeated flag, and a value containing its own `=`): fourteen agreed on all five —
+ * `argv.find((a) => a.startsWith("--name=")).slice("--name=".length)`, verbatim or with `name` templated
+ * in. `fleet-discover.mjs`'s `arg()` used `.split("=")[1]` instead, which is identical on four vectors and
+ * silently WRONG on the fifth: `--url=http://host?a=b` came back as `"http://host?a"`, truncated at the
+ * value's own `=`. Dormant today — that helper is only ever asked for `--cidr=` and `--port=`, neither of
+ * which can contain one — but a live discrepancy the day it is asked for a URL or a `key=value` pair.
+ *
+ * Kept as `.slice`, matching the fourteen rather than the one, and `fleet-discover.mjs` converted to it.
+ *
+ * @param {readonly string[]} argv @param {string} name
+ * @returns {string | undefined}
+ */
+export function flagValue(argv, name) {
+  const prefix = `--${name}=`;
+  const hit = argv.find((a) => a.startsWith(prefix));
+  return hit === undefined ? undefined : hit.slice(prefix.length);
+}
+
+/**
  * Which of `argv` are flags this command does not know. PURE, so it is testable without a process.
  *
  * A bare `--` is npm's separator and never a flag. Anything not starting with `-` is positional — a URL,
