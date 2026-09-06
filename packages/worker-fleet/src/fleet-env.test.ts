@@ -58,10 +58,15 @@ test("the port comes from the group vars, not from a second copy in here", () =>
   assert.equal(portFromGroupVars("nothing here\n"), DEFAULT_WORKER_PORT);
 });
 
-test("the REAL inventory in this repo parses, and agrees with the real group vars", () => {
-  // The fixtures above prove the reader's rules; this proves the shipped files obey them. A reader that
-  // only ever runs against its own fixtures is a reader that has never met the file it exists to read.
-  const inventory = readFileSync(fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url)), "utf8");
+// Reads inventory.example.yml, deliberately -- the REAL inventory.yml is gitignored (real addresses,
+// restored from the secrets store at bring-up) and does not exist in CI or a fresh clone.
+// inventory-example-parity.test.ts is what proves the example stays equivalent to the real file for this
+// purpose; do not re-point this at inventory.yml, or it will pass locally and fail everywhere else.
+test("the EXAMPLE inventory parses, and agrees with the real group vars", () => {
+  // The fixtures above prove the reader's rules; this proves a real, committed file obeys them. A reader
+  // that only ever runs against its own fixtures is a reader that has never met a file shaped like the one
+  // it exists to read.
+  const inventory = readFileSync(fileURLToPath(new URL("../../control/ansible/inventory.example.yml", import.meta.url)), "utf8");
   const groupVars = readFileSync(
     fileURLToPath(new URL("../../control/ansible/group_vars/a11y_workers.yml", import.meta.url)), "utf8");
 
@@ -254,7 +259,14 @@ test("THE INVENTORY IS A FLEET DOCTOR CAN SEE, and it is named", () => {
   // Named, not numbered: `fleet-status.mjs` records what an address-only report cost — ".224 is
   // a11y-worker-FIVE, so `fleet:sleep --limit=a11y-worker-4` put a healthy machine to sleep and left the
   // drifted one serving".
-  const workers = namedInventoryWorkers();
+  //
+  // inventory.example.yml, not the real inventory.yml -- the real one is gitignored (real addresses,
+  // restored from the secrets store at bring-up) and this checkout would otherwise need it just to run
+  // `npm test`. `inventory-example-parity.test.ts` is what keeps the example's shape (and therefore this
+  // test's premise) honest.
+  const workers = namedInventoryWorkers({
+    inventoryPath: fileURLToPath(new URL("../../control/ansible/inventory.example.yml", import.meta.url)),
+  });
   assert.ok(workers.length > 0, "this checkout declares a bare-metal fleet; the reader must find it");
   for (const { name, url } of workers) {
     assert.match(url, /^https?:\/\/[^/]+:\d+$/, "every entry is a usable worker address");
