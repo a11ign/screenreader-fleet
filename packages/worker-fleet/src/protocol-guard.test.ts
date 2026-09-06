@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 import { protocolVerdict } from "./protocol-guard.mjs";
+import { sandboxGitEnv } from "./git-safe-env.mjs";
 
 const fleet = (...protocols: (number | null)[]) =>
   protocols.map((protocol, i) => ({ worker: `w${i + 1}`, protocol }));
@@ -96,7 +97,7 @@ test("a string protocol from an older worker compares equal to the number", () =
 function deployClients(): { file: string; guarded: boolean }[] {
   const root = resolve(import.meta.dirname, "../../..");
   const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-  return execFileSync("git", ["ls-files", "packages"], { cwd: root, encoding: "utf8" })
+  return execFileSync("git", ["ls-files", "packages"], { cwd: root, env: sandboxGitEnv(), encoding: "utf8" })
     .split("\n")
     .filter((f) => /\.(ts|mjs)$/.test(f) && !f.includes(".test.") && !f.includes("/dist/"))
     .map((file) => ({ file, source: strip(readFileSync(resolve(root, file), "utf8")) }))

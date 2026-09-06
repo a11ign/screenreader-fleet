@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { sandboxGitEnv } from "./git-safe-env.mjs";
 
 /** The lab's scripts directory, resolved the same way `read` resolves the playbooks. */
 const LAB_SCRIPTS = fileURLToPath(new URL("../../lab/scripts/", import.meta.url));
@@ -928,7 +929,7 @@ test("every `job=<name>` a message tells an operator to run is a job the catalog
   // one layer out.
   const grep = spawnSync("git", ["grep", "-hoE", "job=[a-z0-9-]+", "--",
     ":!packages/control/ansible/lab-job.yml", ":!*.test.ts", ":!*.test.mjs"],
-    { cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8" });
+    { cwd: fileURLToPath(new URL("../../../", import.meta.url)), env: sandboxGitEnv(), encoding: "utf8" });
   assert.equal(grep.status, 0, `git grep found no job= references at all, which cannot be right: `
     + `${grep.stderr}`);
   const referenced = [...new Set(grep.stdout.split("\n").filter(Boolean).map((m) => m.slice("job=".length)))];
