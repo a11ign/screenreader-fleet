@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
 /** The lab's scripts directory, resolved the same way `read` resolves the playbooks. */
 const LAB_SCRIPTS = fileURLToPath(new URL("../../lab/scripts/", import.meta.url));
@@ -846,4 +847,35 @@ test("a filter that can return nothing is defaulted BEFORE it is indexed", () =>
       `this indexes a filter that can return nothing without defaulting FIRST, so a non-match throws `
       + `while rendering the message: ${flat.slice(0, 120)}`);
   }
+});
+
+test("every `job=<name>` a message tells an operator to run is a job the catalogue has", () => {
+  // A JOB NAME WRITTEN IN TWO PLACES, with nothing comparing them -- this repo's most expensive recurring
+  // shape, here in its cheapest form. Guards, audits and reports across the tree end by naming the command
+  // that fixes what they found (`npm run lab:job -- -e job=export`), and `lab-status.yml` already refuses a
+  // name the catalogue does not have. So a stale reference does not fail here: it fails at 2 a.m. on the
+  // lab, as a refusal to a command a tool just told somebody to type.
+  //
+  // Found 2026-09-06 from the other direction: `export`'s manifest-drift guard named a raw
+  // `node packages/lab/src/training/generate-screenreader-dataset.mjs`, which is not dispatchable at all,
+  // and the only way to refresh a manifest was to pay for a `--no-cache` capture. `generate` is a job now,
+  // and this test is what keeps its name and the catalogue's from drifting apart.
+  //
+  // DISCOVERED, never listed: a hand-written list of the files that mention a job name is the same defect
+  // one layer out.
+  const grep = spawnSync("git", ["grep", "-hoE", "job=[a-z0-9-]+", "--",
+    ":!packages/control/ansible/lab-job.yml", ":!*.test.ts", ":!*.test.mjs"],
+    { cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8" });
+  assert.equal(grep.status, 0, `git grep found no job= references at all, which cannot be right: `
+    + `${grep.stderr}`);
+  const referenced = [...new Set(grep.stdout.split("\n").filter(Boolean).map((m) => m.slice("job=".length)))];
+  // Vacuity guard: this test passes trivially if the search matched nothing, which is how a check comes to
+  // vouch for a tree it never read.
+  assert.ok(referenced.length >= 5,
+    `expected several job references across the tree, found ${referenced.length} -- the search is broken, `
+    + "not the tree");
+  const unknown = referenced.filter((name) => !(name in PLAY_VARS.lab_jobs));
+  assert.deepEqual(unknown, [],
+    `these job names are named to an operator somewhere in the tree and are NOT in lab-job.yml, so the `
+    + `command they are told to run would be refused: ${unknown.join(", ")}`);
 });
