@@ -564,8 +564,26 @@ test("every Jinja expression in run-job.yml can actually be TEMPLATED", () => {
  * So the interface is DATA where an operator reads it, and this file derives the same answer from each
  * job's raw argv and refuses any disagreement — over all 36 jobs, not a hand-picked few.
  */
-const RAW_LAB_JOB = parseYaml(read("lab-job.yml")) as Array<{ vars: PlayVars }>;
-const PLAY_VARS = RAW_LAB_JOB[0].vars;
+const RAW_LAB_JOB = parseYaml(read("lab-job.yml")) as Array<{ name?: string; vars?: PlayVars }>;
+
+/**
+ * THE PLAY THAT CARRIES THE CATALOGUE, FOUND BY WHAT IT HOLDS RATHER THAN BY POSITION.
+ *
+ * This read `RAW_LAB_JOB[0].vars`, which was true while the file had one play and broke the moment a
+ * second was added in FRONT of it — the zero-host inventory guard, which must run first precisely so it
+ * can speak when the main play would be skipped. The failure was
+ * `Cannot read properties of undefined (reading 'lab_param_aliases')`, which names neither the file nor
+ * the cause.
+ *
+ * "The catalogue is the first play" was a convention nobody wrote down, and this repo's own rule about
+ * `not-working.md`'s four same-numbered sections applies: a POSITION is a convention, a NAME is a fact.
+ */
+const CATALOGUE_PLAY = RAW_LAB_JOB.find((play) => play.vars?.lab_jobs);
+if (!CATALOGUE_PLAY?.vars) {
+  throw new Error("no play in lab-job.yml declares `lab_jobs` — the catalogue moved, or a play was "
+    + `renamed. Plays present: ${RAW_LAB_JOB.map((p) => p.name ?? "(unnamed)").join(", ")}`);
+}
+const PLAY_VARS = CATALOGUE_PLAY.vars;
 
 type JobEntry = { argv?: unknown[] | string; setenv?: string[]; timeout?: number;
                   params?: Record<string, "required" | "optional"> };
