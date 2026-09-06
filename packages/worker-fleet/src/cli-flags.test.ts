@@ -133,6 +133,10 @@ const GUARDED: Record<string, string> = {
     "--verify-only is the difference between checking a backup and WRITING one",
   "packages/lab/scripts/corpus-snapshot.mjs":
     "a mistyped --out= writes the snapshot where you will not look for it",
+  "packages/lab/scripts/corpus-release.mjs":
+    "a typo'd --dryrun UPLOADS the corpus while the operator believes they are rehearsing — the flag is "
+    + "the whole difference between describing an upload and performing one, and an ignored flag runs "
+    + "the default",
   "packages/lab/scripts/emit-grants-map.mjs":
     "takes no flags",
   "packages/lab/scripts/explain-scorer.mjs":
