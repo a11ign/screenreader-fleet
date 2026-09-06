@@ -55,14 +55,14 @@ Nothing can automate this: the box is off and has no OS to ask.
 ### 2. On the control plane, serve the payload
 
 ```bash
-./serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub        # port 8099
+./serve-bootstrap.sh ~/.ssh/<fleet key filename>.pub        # port 8099
 ```
 
 It refuses a private key, and it is not a service — Ctrl-C when the box is up.
 
 ### 3. In iVentoy
 
-The PXE server is **Proxmox CT 110 `iventoy-pxe`, `REDACTED-INTERNAL-ADDRESS`**, web UI on `:26000`.
+The PXE server is **Proxmox CT 110 `iventoy-pxe`** (address in `inventory.yml`), web UI on `:26000`.
 
 Point the Windows 11 x64 ISO's **Auto Install Script** at this directory's `autounattend.xml`, and set a
 non-zero boot timeout so the install starts without a keypress.
@@ -75,7 +75,7 @@ Ask iVentoy, do not probe the port:
 
 ```bash
 curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{"method":"query_status"}' http://REDACTED-INTERNAL-ADDRESS:26000/iventoy/json     # {"status": "running"}
+  -d '{"method":"query_status"}' http://<the pxe host>:26000/iventoy/json     # {"status": "running"}
 ```
 
 **TFTP is UDP.** A TCP connect to port 69 fails whether the service is up or down, so it cannot
@@ -87,7 +87,7 @@ is better, because it asks the service rather than the socket.
 The same endpoint drives the rest: `start_server`, `stop_server`, `sys_ip_list`, `get_img_tree`,
 `img_add_auto_script`, `img_set_auto_id`, `img_set_auto_timeout`.
 
-**Check the address in `autounattend.xml`.** It has `http://REDACTED-INTERNAL-ADDRESS:8099` baked in, and that must be
+**Check the address in `autounattend.xml`.** It has `http://<fleet-control host>:8099` baked in, and that must be
 the machine running `serve-bootstrap.sh`.
 
 That address is the **fleet-control container**, not the iVentoy host, and the reason is that
@@ -173,7 +173,7 @@ fleet was built**, and each fix came from a real install that failed:
 
 | | |
 |---|---|
-| `279e161` 15 Aug | aims the payload fetch at fleet-control (`REDACTED-INTERNAL-ADDRESS:8099`) rather than the PXE host |
+| `279e161` 15 Aug | aims the payload fetch at fleet-control (`<fleet-control host>:8099`) rather than the PXE host |
 | `5d4b877` 15 Aug | the install asked for a locale the media does not carry |
 | `4fff4c6` 23 Aug | the product key stopped matching the edition once `install.wim` was split |
 
