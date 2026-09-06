@@ -21,7 +21,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "@a11y-witness/evidence/source-text";
-import { unknownFlags, didYouMean, nameOf, refuseUnknownFlags } from "./cli-flags.mjs";
+import { unknownFlags, didYouMean, nameOf, refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -320,6 +320,21 @@ test("a SINGLE-DASH flag is refused, because an ansible-shaped argument silently
   // the one an operator is most likely to reach for by analogy — and it was the one shape not checked.
   assert.deepEqual(unknownFlags(["-e", "job=train"], ["--ref="]), ["-e"]);
   assert.deepEqual(unknownFlags(["-l", "a11y-worker-3"], ["--limit="]), ["-l"]);
+});
+
+test("flagValue: the five vectors measured across all fifteen pre-existing hand-rolled copies", () => {
+  // audit §9 "argv parsing". These five are what distinguished the fourteen-file majority from the one
+  // outlier (`fleet-discover.mjs`'s `.split("=")[1]`) before this function existed.
+  assert.equal(flagValue(["--url=http://host"], "url"), "http://host", "a normal value");
+  assert.equal(flagValue([], "url"), undefined, "a missing flag is undefined, not an empty string");
+  assert.equal(flagValue(["--url="], "url"), "", "an explicitly empty value is '', not undefined");
+  assert.equal(flagValue(["--url=first", "--url=second"], "url"), "first", "first occurrence wins");
+  assert.equal(flagValue(["--url=http://host?a=b"], "url"), "http://host?a=b",
+    "a value containing its own '=' is preserved whole -- this is the vector fleet-discover.mjs's "
+    + "`.split(\"=\")[1]` got wrong, truncating to 'http://host?a'");
+  assert.equal(flagValue(["--worker", "http://x"], "worker"), undefined,
+    "the space-separated form is not supported by any of the fifteen originals, and this must not "
+    + "silently start accepting it -- that would be a parsing behaviour change, not a deduplication");
 });
 
 test("positionals are still not this guard's business", () => {
