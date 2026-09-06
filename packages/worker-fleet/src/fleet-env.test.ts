@@ -12,11 +12,11 @@ import {
 test("hosts become worker URLs on the declared port", () => {
   const workers = workersFromInventory([
     "all:", "  children:", "    a11y_workers:", "      hosts:",
-    "        a11y-worker-1:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "        a11y-worker-1:", "          ansible_host: 203.0.113.83",
     "        a11y-worker-2:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
   ].join("\n"), { port: 8765 });
 
-  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765", "http://REDACTED-INTERNAL-ADDRESS:8765"]);
+  assert.deepEqual(workers, ["http://203.0.113.83:8765", "http://REDACTED-INTERNAL-ADDRESS:8765"]);
 });
 
 test("a commented-out machine is not in the fleet", () => {
@@ -24,18 +24,18 @@ test("a commented-out machine is not in the fleet", () => {
   // regex was hungry.
   const workers = workersFromInventory([
     "all:", "  children:", "    a11y_workers:", "      hosts:",
-    "        a11y-worker-1:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "        a11y-worker-1:", "          ansible_host: 203.0.113.83",
     "        # a11y-worker-2:", "        #   ansible_host: REDACTED-INTERNAL-ADDRESS",
   ].join("\n"));
 
-  assert.deepEqual(workers, [`http://REDACTED-INTERNAL-ADDRESS:${DEFAULT_WORKER_PORT}`]);
+  assert.deepEqual(workers, [`http://203.0.113.83:${DEFAULT_WORKER_PORT}`]);
 });
 
 test("a host entry this reader does not understand is an ERROR, not a silent omission", () => {
   // The whole point. Losing a machine here means it is provisioned, updated, and never dispatched to —
   // and nothing reports a worker it does not know exists.
   assert.throws(
-    () => workersFromInventory("          ansible_host: [REDACTED-INTERNAL-ADDRESS, REDACTED-INTERNAL-ADDRESS]"),
+    () => workersFromInventory("          ansible_host: [203.0.113.83, REDACTED-INTERNAL-ADDRESS]"),
     /looks like a host entry but does not parse/);
 });
 
@@ -49,8 +49,8 @@ test("an inventory with no hosts is refused rather than returning an empty fleet
 test("quoted addresses are accepted, because YAML allows them", () => {
   assert.deepEqual(workersFromInventory([
     "all:", "  children:", "    a11y_workers:", "      hosts:",
-    "        a11y-worker-1:", '          ansible_host: "REDACTED-INTERNAL-ADDRESS"',
-  ].join("\n"), { port: 1 }), ["http://REDACTED-INTERNAL-ADDRESS:1"]);
+    "        a11y-worker-1:", '          ansible_host: "203.0.113.83"',
+  ].join("\n"), { port: 1 }), ["http://203.0.113.83:1"]);
 });
 
 test("the port comes from the group vars, not from a second copy in here", () => {
@@ -125,8 +125,8 @@ test("nothing set is an empty list, not null — 'no worker named' is a normal s
 });
 
 test("the name is the host, for a readable per-worker report", () => {
-  withEnv({ A11Y_WORKERS: "http://REDACTED-INTERNAL-ADDRESS:8765", A11Y_WORKER: undefined }, () => {
-    assert.equal(configuredWorkers()[0].name, "REDACTED-INTERNAL-ADDRESS:8765");
+  withEnv({ A11Y_WORKERS: "http://203.0.113.83:8765", A11Y_WORKER: undefined }, () => {
+    assert.equal(configuredWorkers()[0].name, "203.0.113.83:8765");
   });
 });
 
@@ -141,12 +141,12 @@ test("a host in another group is NOT a capture worker", () => {
   // of truth for what exists) without becoming things a run dispatches to.
   const workers = workersFromInventory([
     "all:", "  children:", "    a11y_workers:", "      hosts:",
-    "        a11y-worker-2:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "        a11y-worker-2:", "          ansible_host: 203.0.113.107",
     "    a11y_lab:", "      hosts:",
-    "        a11y-lab:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "        a11y-lab:", "          ansible_host: 203.0.113.79",
   ].join("\n"), { port: 8765 });
 
-  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+  assert.deepEqual(workers, ["http://203.0.113.107:8765"]);
 });
 
 test("group order does not matter — a non-worker group FIRST must not leak", () => {
@@ -154,19 +154,19 @@ test("group order does not matter — a non-worker group FIRST must not leak", (
   // worker group comes first is one that breaks silently on somebody else's tidy-up.
   const workers = workersFromInventory([
     "all:", "  children:", "    a11y_lab:", "      hosts:",
-    "        a11y-lab:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "        a11y-lab:", "          ansible_host: 203.0.113.79",
     "    a11y_workers:", "      hosts:",
-    "        a11y-worker-2:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "        a11y-worker-2:", "          ansible_host: 203.0.113.107",
   ].join("\n"), { port: 8765 });
 
-  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+  assert.deepEqual(workers, ["http://203.0.113.107:8765"]);
 });
 
 test("a host in no group at all is an ERROR, not a guess", () => {
   // Including it recreates the phantom worker; dropping it silently shortens the fleet. Both are
   // invisible, so neither is a safe default.
   assert.throws(
-    () => workersFromInventory("        a11y-worker-1:\n          ansible_host: REDACTED-INTERNAL-ADDRESS"),
+    () => workersFromInventory("        a11y-worker-1:\n          ansible_host: 203.0.113.83"),
     /declares a host outside any group/);
 });
 
@@ -176,10 +176,10 @@ test("host vars other than the address do not disturb the group", () => {
   const workers = workersFromInventory([
     "all:", "  children:", "    a11y_workers:", "      hosts:",
     "        a11y-worker-2:", '          mac: "e8:6a:64:e2:3c:8d"',
-    "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "          ansible_host: 203.0.113.107",
   ].join("\n"), { port: 8765 });
 
-  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+  assert.deepEqual(workers, ["http://203.0.113.107:8765"]);
 });
 
 test("indentation width is not assumed", () => {
@@ -187,16 +187,16 @@ test("indentation width is not assumed", () => {
   // report a short fleet, which is the failure mode this module is built to refuse.
   const workers = workersFromInventory([
     "all:", "    children:", "        a11y_workers:", "            hosts:",
-    "                a11y-worker-2:", "                    ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "                a11y-worker-2:", "                    ansible_host: 203.0.113.107",
   ].join("\n"), { port: 8765 });
 
-  assert.deepEqual(workers, ["http://REDACTED-INTERNAL-ADDRESS:8765"]);
+  assert.deepEqual(workers, ["http://203.0.113.107:8765"]);
 });
 
 test("asking for a group that has no hosts is refused, naming the group", () => {
   assert.throws(() => workersFromInventory([
     "all:", "  children:", "    a11y_workers:", "      hosts:",
-    "        a11y-worker-2:", "          ansible_host: REDACTED-INTERNAL-ADDRESS",
+    "        a11y-worker-2:", "          ansible_host: 203.0.113.107",
   ].join("\n"), { group: "a11y_lab" }), /no hosts found under a11y_lab\.hosts/);
 });
 

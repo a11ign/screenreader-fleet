@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 
 import { remedyLines } from "./worker-code-check.mjs";
 
-const BARE_METAL = ["http://REDACTED-INTERNAL-ADDRESS:8765", "http://REDACTED-INTERNAL-ADDRESS:8765"];
+const BARE_METAL = ["http://203.0.113.107:8765", "http://203.0.113.59:8765"];
 const LOCAL_VM = "http://REDACTED-INTERNAL-ADDRESS:8765";
 
 const joined = (stale: string[], fleet = BARE_METAL) => remedyLines(stale, fleet).join("\n");
