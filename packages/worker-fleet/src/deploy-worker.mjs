@@ -41,6 +41,7 @@ import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
 import { warnUtmDeprecated } from "./utm-deprecated.mjs";
+import { requestJson } from "./worker-http.mjs";
 
 /**
  * `--allow-protocol-change` is the flag that lets a CAPTURE_PROTOCOL_VERSION bump ship, invalidating
@@ -129,9 +130,18 @@ function push(uuid, file) {
 
 /** @param {string} ip @param {number} port */
 async function healthCode(ip, port) {
-  const response = await fetch(`http://${ip}:${port}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+  // `requestJson`, not `fetch` -- audit §9's "the HTTP client" row: a second hand-rolled probe of the
+  // same worker JSON API, with its own timeout mechanism, buys nothing and carries `fetch`'s
+  // undifferentiated `TypeError: fetch failed` in place of a real error CODE (`ECONNREFUSED`,
+  // `EHOSTUNREACH`) -- the exact distinction `isTransient` and this repo's own diagnostics rely on
+  // elsewhere. This site was found by a tree-wide sweep, not the original audit's four named ones.
+  const response = await requestJson(`http://${ip}:${port}/health`, { timeoutMs: HEALTH_TIMEOUT_MS });
   if (!response.ok) throw new Error(`HTTP ${response.status} from /health`);
-  return (await response.json()).code;
+  // `requestJson` returns `undefined` for unparseable JSON rather than throwing (its own docstring: a
+  // cache miss is a normal outcome for its usual callers) -- `fetch`'s `.json()` threw, and
+  // `healthCodeWhenAwake`'s retry loop relies on that to keep polling on garbage the same as on silence.
+  if (response.json === undefined) throw new Error(`invalid JSON from http://${ip}:${port}/health`);
+  return response.json.code;
 }
 
 /** How long a rebooted guest gets to start answering before a deploy calls the verification failed. */
