@@ -53,6 +53,10 @@ const GUARDED: Record<string, string> = {
     + "pages from the one asked for, then report PASS. This gate exists to prove the tool gives the same "
     + "answer twice; a pass over pages nobody requested is that claim made about the wrong subject, which "
     + "is the exact defect it was written to catch",
+  "packages/lab/scripts/fleet-hours.mjs":
+    "--dir picks a corpus other than runs/, and a mistyped one would silently report the DEFAULT "
+    + "corpus's hours under the name of the run you asked about — a cost figure attributed to the "
+    + "wrong run, which is the defect this whole tool was written around",
   "packages/lab/scripts/emit-unclosable-vetoes.mjs":
     "it takes NO flags, and an ignored one would emit the wrong set silently — a veto report that "
     + "forgave the wrong pairs reads as a shorter work list rather than as an error",
