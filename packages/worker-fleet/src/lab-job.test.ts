@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 /** The lab's scripts directory, resolved the same way `read` resolves the playbooks. */
@@ -703,6 +703,69 @@ test("a job that answers in exit codes says what they mean", () => {
   for (const code of Object.keys(meanings)) {
     assert.match(code, /^[1-9][0-9]*$/, `exitMeanings key '${code}' is not a non-zero exit code`);
   }
+});
+
+/**
+ * `evidence-check` is not the only job that answers in exit codes -- it is the only one that SAYS what
+ * they mean. `rules-gate`, `rules-real-pages`, `rules-real-pages-update`, `stability`, `gate-stability`
+ * and `gate-probe-order` all genuinely dispatch a script that imports `gateVerdict`/`fleetVerdict` from
+ * `packages/lab/src/gates/verdict.mjs` and therefore answers in the identical 0 PASS / 1 FAIL /
+ * 2 INCONCLUSIVE contract -- and until this test, none of them declared it, so an operator reading
+ * `lab:status` on any of the five had to already know the contract rather than be told it.
+ *
+ * DERIVED, not hand-listed -- the same remedy `exit-code-contract.test.ts`'s own `adoptingScripts()`
+ * chose over a second hand-written list, for the identical reason: a sixth adopter must fail this test by
+ * appearing undeclared, not slip past a list nobody remembered to extend. The regex is deliberately the
+ * SAME one `exit-code-contract.test.ts` uses -- copied, not imported, so the two tests independently
+ * agreeing is a fact about the source, not an accident of one importing the other's opinion.
+ */
+const PACKAGE_SCRIPTS = JSON.parse(readFileSync(
+  fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8")).scripts as Record<string, string>;
+const DERIVED_VERDICT = /\b(gateVerdict|fleetVerdict)\(/;
+
+/**
+ * The `.mjs`/`.ts` file a job's argv ultimately runs, resolving ONE level of `npm run <name>` indirection
+ * through `package.json` -- every gateVerdict/fleetVerdict adopter found in this catalogue is either a
+ * direct interpreter invocation or exactly one `npm run` hop away, verified by reading each job by hand
+ * before writing this resolver rather than trusting it to be general.
+ */
+function resolvedScriptFile(argv: unknown): string | undefined {
+  const tokens = Array.isArray(argv) ? argv.map(String) : typeof argv === "string" ? argv.split(/\s+/) : [];
+  const direct = tokens.find((t) => t.endsWith(".mjs") || t.endsWith(".ts"));
+  if (direct) return direct;
+  const runIndex = tokens.indexOf("run");
+  if (!tokens[0]?.includes("npm") || runIndex < 0) return undefined;
+  const scriptName = tokens[runIndex + 1] === "--silent" ? tokens[runIndex + 2] : tokens[runIndex + 1];
+  const command = PACKAGE_SCRIPTS[scriptName ?? ""];
+  return command ? resolvedScriptFile(command.split(/\s+/)) : undefined;
+}
+
+function jobAdoptsVerdict(scriptFile: string | undefined): boolean {
+  if (!scriptFile) return false;
+  const path = fileURLToPath(new URL(`../../../${scriptFile}`, import.meta.url));
+  return existsSync(path) && DERIVED_VERDICT.test(readFileSync(path, "utf8"));
+}
+
+test("every job whose resolved script adopts gateVerdict/fleetVerdict declares exitMeanings", () => {
+  const jobs = PLAY_VARS.lab_jobs as Record<string, { argv?: unknown; exitMeanings?: Record<string, string> }>;
+  const names = Object.keys(jobs);
+  assert.ok(names.length > 20, "vacuity guard: the job catalogue must not read as near-empty");
+
+  const adopters = names.filter((name) => jobAdoptsVerdict(resolvedScriptFile(jobs[name].argv)));
+  // Vacuity guard for the DISCOVERY itself, not just the catalogue -- a broken resolver that finds nothing
+  // would otherwise pass this test having examined no adopters at all. Six are confirmed by hand: rules-gate,
+  // rules-real-pages, rules-real-pages-update, stability, gate-stability, gate-probe-order.
+  assert.ok(adopters.length >= 6,
+    `found only ${adopters.length} gateVerdict/fleetVerdict-adopting job(s) (${adopters.join(", ")}) -- `
+    + "either most were removed from the catalogue, or resolvedScriptFile()'s resolution broke; six are "
+    + "confirmed by direct reading, so six is the floor to investigate before relaxing this number");
+
+  const undeclared = adopters.filter((name) =>
+    !jobs[name].exitMeanings?.["1"] || !jobs[name].exitMeanings?.["2"]);
+  assert.deepEqual(undeclared, [],
+    "these jobs dispatch a script that answers in the shared gateVerdict/fleetVerdict 0/1/2 contract and "
+    + "do not declare what 1 and 2 mean here -- see rules-gate's entry in lab-job.yml for the shape to "
+    + `copy:\n${undeclared.map((n) => `  ${n}`).join("\n")}`);
 });
 
 test("only a job that reports progress has a progress root, and it is declared", () => {
