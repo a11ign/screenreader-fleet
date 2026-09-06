@@ -28,13 +28,17 @@ const HEALTH_TIMEOUT_MS = 5_000;
  * Decide whether a deploy may proceed.
  *
  * @param {{ local: number|string|null, served: {worker: string, protocol: number|string|null}[],
- *           allowed: boolean }} input
+ *           allowed: boolean, source?: string }} input
  * @returns {{ refuse: boolean, message: string }}
  */
-export function protocolVerdict({ local, served, allowed }) {
+export function protocolVerdict({ local, served, allowed, source }) {
   if (local === null || local === undefined) {
-    return { refuse: true, message: "cannot read CAPTURE_PROTOCOL_VERSION from capture-core.mjs, so this "
-      + "deploy cannot say whether it would invalidate the corpus. That is a broken guard, not a clean one." };
+    // NAMES THE FILE IT WAS GIVEN, never a hardcoded one. This message said "from capture-core.mjs" while
+    // the caller had long since been pointed elsewhere, so the one sentence a broken guard prints sent the
+    // reader to a file that was not the problem.
+    return { refuse: true, message: `cannot read CAPTURE_PROTOCOL_VERSION from ${source ?? "the worker "
+      + "source"}, so this deploy cannot say whether it would invalidate the corpus. That is a broken `
+      + "guard, not a clean one." };
   }
   const reachable = served.filter((s) => s.protocol !== null && s.protocol !== undefined);
   // EXAMINED NOTHING IS NOT AGREEMENT. If no worker answered, the guard has no opinion — and a guard with
