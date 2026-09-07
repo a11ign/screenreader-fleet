@@ -329,6 +329,11 @@ const GUARDED: Record<string, string> = {
     + "(refuses without one) rather than silently rewriting the wrong tree, but `--clone-into` and "
     + "`--replacements` deciding the WRONG path or pattern set silently is exactly the failure this tool "
     + "exists to make impossible for a history rewrite, #310",
+  "scripts/prune-stale-workspace-scope.mjs":
+    "takes NO flags -- it removes a stale `node_modules/@*` workspace scope on every `npm install` (#376) "
+    + "-- so it calls refuseUnknownFlags([]) with an EMPTY list, the same case as "
+    + "check-preregistered-verdict.mjs. It runs from `prepare`, on every plain install, so a discarded "
+    + "flag here would silently change what gets removed on a machine nobody is watching.",
 };
 
 
