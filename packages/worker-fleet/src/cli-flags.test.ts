@@ -329,6 +329,13 @@ const GUARDED: Record<string, string> = {
     + "(refuses without one) rather than silently rewriting the wrong tree, but `--clone-into` and "
     + "`--replacements` deciding the WRONG path or pattern set silently is exactly the failure this tool "
     + "exists to make impossible for a history rewrite, #310",
+  "scripts/assert-glob-not-empty.mjs":
+    "`--min` decides the floor a test glob must clear (#355); a discarded typo would silently check "
+    + "against the default of 1 instead of the real floor, passing a glob that lost most of its files. "
+    + "`--run` and `--test-concurrency` decide whether this command executes `tsx --test` on the globs it "
+    + "just checked, or only checks them -- a discarded `--run` would make a caller believe the real "
+    + "suite ran when only the vacuity check did, which is silence exactly where this tool exists to "
+    + "refuse it.",
 };
 
 
