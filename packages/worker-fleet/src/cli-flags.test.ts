@@ -284,6 +284,11 @@ const GUARDED: Record<string, string> = {
   "packages/control/src/fleet-status.mjs": JSON_REPORTER,
   "packages/lab/src/training/capture-status.mjs": JSON_REPORTER,
   "packages/lab/scripts/lab-inventory.mjs": JSON_REPORTER,
+  "scripts/owned-path-signoff.mjs":
+    "it decides whether a change to a CORPUS-INVALIDATING path may merge (#356). `--diff` and `--body` "
+    + "are the two things it compares; a discarded one leaves it comparing an empty set and "
+    + "reporting SATISFIED -- a check passing having examined nothing, on the paths where a mistake "
+    + "costs a corpus rather than a revert",
   "scripts/pr-hold.mjs":
     "it WRITES a `session:` label that decides whether `merge-guard` refuses a PR (#266). `--session` "
     + "says who is taking the hold and `--steal` displaces whoever has it, so a discarded flag either "
