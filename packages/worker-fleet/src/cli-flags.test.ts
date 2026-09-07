@@ -100,6 +100,11 @@ const GUARDED: Record<string, string> = {
     "takes no flags; the `--build` in the file is passed to tsc. Guarded rather than exempted because "
     + "a build that silently ignores an argument is how a stale `dist` gets shipped, which this repo "
     + "has paid for twice",
+  "scripts/acceptance-commands.mjs":
+    "takes no flags at all -- it reads the PR body from PR_BODY (an env var, never argv, because a PR "
+    + "body is adversarial input) and runs the author's own stated Acceptance: commands, which is the "
+    + "one thing standing between a row's claim and its evidence. A discarded flag here would be the "
+    + "identical shape this whole job exists to end, one layer up.",
   "scripts/changed-packages.mjs":
     "takes no flags; `--name-only` goes onward to git. Its output selects which CI jobs run, so a "
     + "discarded argument narrows a test run silently",
