@@ -13,10 +13,11 @@
 // Exit codes: 0 ready, 1 something is broken (details in the report).
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
+import { createRequire } from "node:module";
 // The canonical scrubber for this package -- `scripts/git-env.mjs` re-exports the same function for the
 // repo-root scripts. One helper, two entry points, so a git spawn cannot inherit GIT_DIR by either door.
 import { sandboxGitEnv } from "./git-safe-env.mjs";
@@ -67,16 +68,20 @@ const PROBE_TIMEOUT_MS = 8000;
 
 /** @type {any[]} */
 /** @type {{ name: string, ok: boolean, detail: string, fix: string|null }[]} */
-/** @type {{name: string, ok: boolean, detail: string, fix: string|null, advisory?: boolean}[]} */
+/** @type {{name: string, id: string, ok: boolean, detail: string, fix: string|null, advisory?: boolean}[]} */
 const checks = [];
 /**
  * One check's verdict, and its FIX. Every parameter is typed here rather than inferred, because `fix`
  * defaulting to `null` infers as exactly `null` -- so the argument that matters most, the sentence
  * telling a reader what to do about a failed check, was the one the compiler refused.
  *
+ * `id` is always `name` -- #256 is the first check queried individually by `--json`
+ * (`.checks[] | select(.id=="dist-freshness")`), and every check already has a unique `name`, so a
+ * separate parameter here would be a second spelling of the same fact rather than a new one.
+ *
  * @param {string} name @param {boolean} ok @param {string} detail @param {string|null} [fix]
  */
-const add = (name, ok, detail, fix = null) => checks.push({ name, ok, detail, fix });
+const add = (name, ok, detail, fix = null) => checks.push({ name, id: name, ok, detail, fix });
 
 /**
  * A finding that is REAL and does not stop a run — reported every time, never blocking.
@@ -89,7 +94,8 @@ const add = (name, ok, detail, fix = null) => checks.push({ name, ok, detail, fi
  * Distinct from `ok: true` for the opposite reason: silence is how ADR 0012 went years describing a system
  * that did not exist. It is stated on every run and excluded from the verdict.
  */
-const advise = (/** @type {string} */ name, /** @type {string} */ detail, /** @type {string|null} */ fix = null) => checks.push({ name, ok: true, advisory: true, detail, fix });
+const advise = (/** @type {string} */ name, /** @type {string} */ detail, /** @type {string|null} */ fix = null) =>
+  checks.push({ name, id: name, ok: true, advisory: true, detail, fix });
 
 function commandError(/** @type {any} */ error) {
   const observed = [error?.stderr, error?.stdout, /** @type {any} */ (error)?.message]
@@ -213,6 +219,149 @@ function checkControlPlaneIsolation() {
     "docs/control-plane-plan.md L3 — drive the control plane rather than holding its keys");
 }
 
+/**
+ * Pure: does `resolvedRealPath` (already realpath'd) live under `thisCheckoutRoot` (also realpath'd)?
+ * Both must be realpath'd BEFORE calling this, never inside it -- comparing a symlinked path against a
+ * realpath'd root would report every worktree as foreign to itself, since a worktree's own files are
+ * reached through no symlink while its `node_modules` is one.
+ *
+ * @param {string} resolvedRealPath
+ * @param {string} thisCheckoutRootReal
+ * @returns {boolean}
+ */
+export function resolvesToThisCheckout(resolvedRealPath, thisCheckoutRootReal) {
+  return resolvedRealPath === thisCheckoutRootReal
+    || resolvedRealPath.startsWith(thisCheckoutRootReal.endsWith("/") ? thisCheckoutRootReal : `${thisCheckoutRootReal}/`);
+}
+
+/**
+ * Pure: which checkout root does a resolved `packages/<name>/dist/...` path belong to? Everything before
+ * the first `/packages/` -- this repo's own, fixed layout, not a guess. `null` when the path does not look
+ * like it, which a caller must treat as "could not tell", never as "this checkout".
+ *
+ * @param {string} resolvedRealPath
+ * @returns {string | null}
+ */
+export function checkoutRootFor(resolvedRealPath) {
+  const idx = resolvedRealPath.indexOf("/packages/");
+  return idx === -1 ? null : resolvedRealPath.slice(0, idx);
+}
+
+/**
+ * Pure-ish (I/O injectable): the newest mtime, in ms, among every FILE recursively under `dir`. `null` when
+ * `dir` does not exist or is empty -- distinct from `0`, which would read as "the oldest possible file" and
+ * make every real file look newer by comparison.
+ *
+ * @param {string} dir
+ * @param {{ readdir?: typeof readdirSync, stat?: typeof statSync }} [deps]
+ * @returns {number | null}
+ */
+export function newestMtimeMs(dir, { readdir = readdirSync, stat = statSync } = {}) {
+  /** @type {string[]} */
+  let relativePaths;
+  try {
+    relativePaths = /** @type {string[]} */ (readdir(dir, { recursive: true }));
+  } catch {
+    return null;
+  }
+  let newest = -Infinity;
+  for (const rel of relativePaths) {
+    let info;
+    try {
+      info = stat(join(dir, rel));
+    } catch {
+      continue; // a race between listing and stat-ing (removed, or a broken symlink) -- skip, don't guess
+    }
+    if (info.isFile() && info.mtimeMs > newest) newest = info.mtimeMs;
+  }
+  return newest === -Infinity ? null : newest;
+}
+
+/**
+ * Pure: is the source genuinely newer than the dist it was compiled to? `null`, not `false`, when either
+ * side could not be read -- "stale" and "could not tell" need opposite responses (build vs. investigate),
+ * and collapsing them would report a filesystem error as a clean build.
+ *
+ * @param {number | null} srcNewestMs
+ * @param {number | null} distNewestMs
+ * @returns {boolean | null}
+ */
+export function distIsStale(srcNewestMs, distNewestMs) {
+  if (srcNewestMs == null || distNewestMs == null) return null;
+  return srcNewestMs > distNewestMs;
+}
+
+/**
+ * ", N commit(s) behind origin/main" or "" -- best-effort, and silently empty on any failure (not a git
+ * checkout at all, no `origin/main`, `otherRoot` unknown). This is a NOTE on an already-advisory finding,
+ * not itself a fact `doctor` promises; the resolution mismatch is reported either way.
+ *
+ * @param {string | null} otherRoot
+ * @returns {string}
+ */
+function behindOriginMainNote(otherRoot) {
+  if (!otherRoot) return "";
+  try {
+    const behindBy = execFileSync("git", ["rev-list", "--count", "HEAD..origin/main"],
+      { cwd: otherRoot, encoding: "utf8", env: sandboxGitEnv() }).trim();
+    return behindBy === "0" ? "" : `, ${behindBy} commit(s) behind origin/main`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * WHOSE dist a cross-package import actually resolves to, and is IT stale (#256) -- both computed from
+ * the exact SPECIFIER a real import site in this repo uses, never the bare package name. CLAUDE.md's own
+ * recorded lesson: "resolving @a11y-witness/judge does not prove @a11y-witness/judge/rules came from your
+ * tree" -- a package can export subpaths from elsewhere, so resolving the root proves nothing about a
+ * subpath. `@a11y-witness/judge/rules` is a real specifier this repo imports
+ * (`packages/lab/scripts/score-rules.ts` and others), not a synthetic probe.
+ *
+ * ADVISORY, never a hard failure -- same reasoning as `isolation` above: a worktree resolving to the
+ * primary's dist can still run every command correctly today, and a doctor that refused READY over an
+ * environmental fact would be ignored, which is how a guard gets switched off. It is reported every run
+ * so a stale answer is a known condition, not a silent one.
+ */
+function checkCrossPackageDist() {
+  const specifier = "@a11y-witness/judge/rules";
+  const thisCheckoutRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+  /** @type {string} */
+  let resolvedRealPath;
+  try {
+    resolvedRealPath = realpathSync(createRequire(import.meta.url).resolve(specifier));
+  } catch (error) {
+    return advise("dist-resolution", `could not resolve ${specifier} to check whose dist it comes from -- `
+      + `${/** @type {Error} */ (error).message}`, "npm run build");
+  }
+
+  if (resolvesToThisCheckout(resolvedRealPath, realpathSync(thisCheckoutRoot))) {
+    add("dist-resolution", true, `${specifier} resolves to this checkout's own dist`);
+  } else {
+    const behindNote = behindOriginMainNote(checkoutRootFor(resolvedRealPath));
+    advise("dist-resolution", `${specifier} resolves to ${resolvedRealPath} (NOT this checkout${behindNote})`,
+      "npm run primary:update && npm run build   # if that is the primary checkout");
+  }
+
+  // THE HALF A RESOLUTION CHECK ALONE MISSES: resolving to your OWN tree is no protection if your own
+  // dist is stale -- so this checks freshness of whichever checkout the specifier ACTUALLY resolved to,
+  // not always this one.
+  const distRoot = checkoutRootFor(resolvedRealPath) ?? thisCheckoutRoot;
+  const distDir = resolve(distRoot, "packages/judge/dist");
+  const srcDir = resolve(distRoot, "packages/judge/src");
+  const distNewest = newestMtimeMs(distDir);
+  const srcNewest = newestMtimeMs(srcDir);
+  const stale = distIsStale(srcNewest, distNewest);
+  if (stale === null) {
+    return advise("dist-freshness", `could not compare packages/judge/src and dist under ${distRoot} -- `
+      + "one or both are unreadable", "npm run build");
+  }
+  if (!stale) {
+    return add("dist-freshness", true, `packages/judge/dist under ${distRoot} is newer than its own source`);
+  }
+  advise("dist-freshness", `packages/judge/dist under ${distRoot} is OLDER than its own source -- a build `
+    + "compiled before the source it now reflects", "npm run build   # in that checkout");
+}
 
 // The DEFAULT here was "codex", and every part of that was wrong. `judge.ts` has no codex case at all —
 // it offers local, anthropic and openai — so with JUDGE_BACKEND unset (the normal case) this told the
@@ -529,6 +678,7 @@ function nextCommand() {
 async function main() {
   checkPrimaryCheckoutMark();
   checkControlPlaneIsolation();
+  checkCrossPackageDist();
   await checkJudge();
   await checkWorker();
   await checkDatasetPages();
