@@ -28,13 +28,13 @@
 # no macOS-only command at all.
 #
 #   A11Y_REPO_URL     default the public GitHub repo
-#   A11Y_REPO_PATH    default ~/a11y-witness
+#   A11Y_REPO_PATH    default ~/a11ign
 #   A11Y_WORKERS      comma-separated worker URLs, e.g. http://192.0.2.10:8765
 #   A11Y_CORPUS_URL   optional tar.gz of runs/ to seed the baseline corpus (69 MB at time of writing)
 set -euo pipefail
 
-REPO_URL="${A11Y_REPO_URL:-https://github.com/DanBeckDev/a11y-witness.git}"
-REPO_PATH="${A11Y_REPO_PATH:-$HOME/a11y-witness}"
+REPO_URL="${A11Y_REPO_URL:-https://github.com/a11ign/a11ign.git}"
+REPO_PATH="${A11Y_REPO_PATH:-$HOME/a11ign}"
 
 # WHICH HALF OF THE CONTROL PLANE IS THIS?  (A11Y_ROLE=control|lab, default both)
 #
@@ -202,12 +202,12 @@ fi
 # Generated rather than copied, so this box is self-contained. The PUBLIC half is printed, because it
 # has to reach the workers -- serve-bootstrap.sh hands it to a PXE install, and ssh-key.yml installs it
 # on a box that is already up.
-FLEET_KEY="$HOME/.ssh/a11y-witness_ed25519"
+FLEET_KEY="$HOME/.ssh/a11ign_ed25519"
 if [ -f "$FLEET_KEY" ]; then
   ok "fleet key present ($(ssh-keygen -lf "$FLEET_KEY.pub" 2>/dev/null | awk '{print $2}'))"
 else
   mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-  ssh-keygen -t ed25519 -N '' -C 'a11y-witness-capture-worker' -f "$FLEET_KEY" >/dev/null
+  ssh-keygen -t ed25519 -N '' -C 'a11ign-capture-worker' -f "$FLEET_KEY" >/dev/null
   ok "fleet key generated at $FLEET_KEY"
 fi
 echo
@@ -354,7 +354,7 @@ cat <<EOF
     eval "\$(npm run --silent fleet:env)"   # A11Y_WORKERS, derived from that inventory
 
   Build one:
-    packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub
+    packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11ign_ed25519.pub
 
   Manage them (from packages/control/ansible):
     ansible-playbook provision-role.yml -l <host> --check --diff

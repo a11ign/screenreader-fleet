@@ -1,5 +1,5 @@
 /**
- * `@a11y-witness/worker-fleet` IS PUBLISHED. `@a11y-witness/control` NEVER IS.
+ * `@a11ign/worker-fleet` IS PUBLISHED. `@a11ign/control` NEVER IS.
  *
  * `control-has-no-dependencies.test.ts` walks the import graph OUT of `control` and refuses a package-name
  * specifier, because that direction — `control -> worker-fleet` by relative path — is the sanctioned one

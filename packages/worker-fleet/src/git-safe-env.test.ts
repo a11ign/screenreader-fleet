@@ -1,7 +1,7 @@
 /**
  * `git-safe-env.mjs` is a DELIBERATE duplicate of the repo-root `scripts/git-env.mjs`, forced by a
  * publish boundary this package's own header explains: `check-worker-code.mjs`/`deploy-worker.mjs` ship
- * as `bin` entries, so nothing they import can reach outside `@a11y-witness/worker-fleet`.
+ * as `bin` entries, so nothing they import can reach outside `@a11ign/worker-fleet`.
  *
  * This is CLAUDE.md's remedy #3 ("pin them equal with a test") applied to the one case remedy #1
  * ("delete a copy") cannot reach: the two files cross a package-publishing boundary neither side can

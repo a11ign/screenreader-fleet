@@ -9,9 +9,9 @@ test("the schedule command is a single string, with the script path quoted", () 
   // parentheses, & or quotes gets split across them and cmd receives fragments. A reg query written
   // that way reported "key not found" for a key that existed, and nearly turned a real configuration
   // drift into a dismissed false alarm.
-  const cmd = scheduleCommand({ scriptPath: "C:\\Users\\witness\\a11y-witness\\trim.cmd" });
+  const cmd = scheduleCommand({ scriptPath: "C:\\Users\\witness\\a11ign\\trim.cmd" });
   assert.equal(typeof cmd, "string");
-  assert.match(cmd, /\/tr "C:\\Users\\witness\\a11y-witness\\trim\.cmd"/, "path must be quoted — it has spaces");
+  assert.match(cmd, /\/tr "C:\\Users\\witness\\a11ign\\trim\.cmd"/, "path must be quoted — it has spaces");
   assert.match(cmd, /\/ru SYSTEM \/rl HIGHEST/, "elevation is the whole point");
   assert.match(cmd, /schtasks \/run/, "registering without running does nothing");
 });

@@ -32,13 +32,13 @@ import { resolve } from "node:path";
 // throws `No available supported screen readers` at import on any host without one. This file only
 // runs on a Mac, where VoiceOver makes that throw invisible — which is exactly why it went unnoticed.
 // `no-win32-imports.test.ts` found it.
-import { WORKER_FILES } from "@a11y-witness/nvda-worker/worker-files";
-import { workerSourceDir, codeVersion } from "@a11y-witness/nvda-worker/code-version";
+import { WORKER_FILES } from "@a11ign/nvda-worker/worker-files";
+import { workerSourceDir, codeVersion } from "@a11ign/nvda-worker/code-version";
 // The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
 // `protocol-version.mjs` is dependency-free for exactly this: safe to import from a portable tree, unlike
 // the package ROOT or `capture-core.mjs` itself, which reach guidepup. The git-HEAD comparison below still
 // has to scrape TEXT, because `git show` returns a historical file's bytes, not something importable.
-import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda-worker/protocol-version";
+import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11ign/nvda-worker/protocol-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
 import { warnUtmDeprecated } from "./utm-deprecated.mjs";
@@ -62,7 +62,7 @@ const NVDA_DIR = workerSourceDir();
 // where the scheduled task points, so renaming it means re-provisioning every guest — and M5 moving the host
 // directory to `packages/nvda-worker/src` changed nothing here. All the worker needs is that its files land in
 // one directory together.
-const GUEST_DIR = "C:\\Users\\witness\\a11y-witness\\src\\capture\\nvda";
+const GUEST_DIR = "C:\\Users\\witness\\a11ign\\src\\capture\\nvda";
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.
 const CTL = fleetScriptPaths().workerCtl;

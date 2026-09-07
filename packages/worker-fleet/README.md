@@ -1,15 +1,15 @@
-# `@a11y-witness/worker-fleet`
+# `@a11ign/worker-fleet`
 
 Host-side lifecycle, health and capacity for a fleet of Windows NVDA capture workers. Runs on the machine that
 *drives* the workers — no NVDA, no guidepup, no Windows.
 
 ```bash
-npm install @a11y-witness/worker-fleet
-npx a11y-doctor          # can I run right now? every check names its own fix
+npm install @a11ign/worker-fleet
+npx a11ign-doctor          # can I run right now? every check names its own fix
 ```
 
 ```js
-import { leaseWorker } from "@a11y-witness/worker-fleet";
+import { leaseWorker } from "@a11ign/worker-fleet";
 
 const lease = await leaseWorker({ after: "stop" });
 try {
@@ -32,7 +32,7 @@ source. It starts what is missing and **puts a VM back as it found it**: one tha
 left running, a stopped one is stopped again. A long run must not shut down something another run is
 using.
 
-**Stopped worker VMs are the correct resting state.** `all stopped` is a READY state, not a fault — `a11y-doctor`
+**Stopped worker VMs are the correct resting state.** `all stopped` is a READY state, not a fault — `a11ign-doctor`
 says so explicitly, because "go and start a worker" is the wrong instinct and costs time.
 
 **The local UTM VM is not how this project's own corpus is captured.** It is the DEPRECATED default for a
@@ -44,7 +44,7 @@ own Windows box, the VM lifecycle below still applies to you exactly as written.
 ## Capacity is measured, never assumed
 
 ```js
-import { availableHostMemoryMb, workersHostCanRun } from "@a11y-witness/worker-fleet/capacity";
+import { availableHostMemoryMb, workersHostCanRun } from "@a11ign/worker-fleet/capacity";
 ```
 
 A worker VM costs the host **~8 GB**, not the 4 GB it is configured with — QEMU's overhead on top of guest RAM
@@ -65,7 +65,7 @@ Two rules follow, both learned the hard way:
 ## Health: watch `recoveries`, not failures
 
 ```js
-import { assessWorker } from "@a11y-witness/worker-fleet/health";
+import { assessWorker } from "@a11ign/worker-fleet/health";
 ```
 
 The worst worker fault this fleet has had produced **zero failures**. One guest's NVDA went mute on 4 of 4
@@ -79,7 +79,7 @@ appears to work.
 ## The provisioning scripts ship with the package
 
 ```js
-import { fleetScriptPaths } from "@a11y-witness/worker-fleet";
+import { fleetScriptPaths } from "@a11ign/worker-fleet";
 fleetScriptPaths().workerCtl;   // absolute path to worker-ctl.sh
 ```
 

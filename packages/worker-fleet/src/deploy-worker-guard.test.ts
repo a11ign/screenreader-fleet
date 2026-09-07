@@ -2,9 +2,9 @@
  * `deploy-worker.mjs`'s entry-point guard, proven through a REAL symlinked argv — WITHOUT running the
  * binary itself.
  *
- * Every other bin fixed alongside this one (`a11y-doctor`, `a11y-worker-code`, `a11y-worker-compare`) was
+ * Every other bin fixed alongside this one (`a11ign-doctor`, `a11ign-worker-code`, `a11ign-worker-compare`) was
  * proven by packing the real tarball, installing it into a throwaway consumer directory, and invoking the
- * installed `.bin` symlink directly — the same thing `npx` does. `a11y-worker-deploy` was deliberately
+ * installed `.bin` symlink directly — the same thing `npx` does. `a11ign-worker-deploy` was deliberately
  * NOT run that way: its `main()` reaches for fleet and SSH state even under `--help`, and doing that from
  * a test would be the exact resource-touching action this repo's own agent conventions ban. "Fixed and
  * not executed is correct, but it must not become 'not verified'" — so this proves the MECHANISM the fix

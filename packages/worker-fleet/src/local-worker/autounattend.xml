@@ -144,8 +144,8 @@
 
       <UserData>
         <AcceptEula>true</AcceptEula>
-        <FullName>a11y-witness</FullName>
-        <Organization>a11y-witness</Organization>
+        <FullName>a11ign</FullName>
+        <Organization>a11ign</Organization>
         <!-- Generic Windows 11 Pro KMS client key: selects the edition during an
              unattended install. It does NOT activate, which is what we want  -  an
              unactivated Windows is fully functional for capture, and leaving it

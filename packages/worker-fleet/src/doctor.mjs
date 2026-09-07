@@ -59,7 +59,7 @@ const CTL = fleetScriptPaths().workerCtl;
 // defect that made a fresh clone unable to run its own default judge (see packages/scorer/src/index.ts),
 // so nothing here may repeat it.
 const SCORER_MODEL_DIR = fileURLToPath(new URL("../../scorer/models/screenreader-scorer/", import.meta.url));
-// Same rule as SCORER_MODEL_DIR above: resolved from THIS module, never the cwd. `@a11y-witness/lab`
+// Same rule as SCORER_MODEL_DIR above: resolved from THIS module, never the cwd. `@a11ign/lab`
 // owns the canonical `runs/` resolution (`packages/lab/src/dataset-paths.mjs`), but `lab` depends on
 // `worker-fleet`, so this package cannot import it without a cycle — this is the same computation,
 // duplicated for that reason rather than left cwd-anchored.
@@ -202,7 +202,7 @@ function checkControlPlaneIsolation() {
   // `~` is a SHELL expansion, not a filesystem one: `existsSync("~/.ssh/...")` is always false, which
   // would make this guard report every machine as compliant. The silent-pass failure mode, in the guard
   // written because a document silently passed.
-  const raw = process.env.A11Y_SSH_KEY || "~/.ssh/a11y-witness_ed25519";
+  const raw = process.env.A11Y_SSH_KEY || "~/.ssh/a11ign_ed25519";
   const keyPath = raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
   const hasFleetKey = existsSync(keyPath);
   const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
@@ -311,9 +311,9 @@ function behindOriginMainNote(otherRoot) {
 /**
  * WHOSE dist a cross-package import actually resolves to, and is IT stale (#256) -- both computed from
  * the exact SPECIFIER a real import site in this repo uses, never the bare package name. CLAUDE.md's own
- * recorded lesson: "resolving @a11y-witness/judge does not prove @a11y-witness/judge/rules came from your
+ * recorded lesson: "resolving @a11ign/judge does not prove @a11ign/judge/rules came from your
  * tree" -- a package can export subpaths from elsewhere, so resolving the root proves nothing about a
- * subpath. `@a11y-witness/judge/rules` is a real specifier this repo imports
+ * subpath. `@a11ign/judge/rules` is a real specifier this repo imports
  * (`packages/lab/scripts/score-rules.ts` and others), not a synthetic probe.
  *
  * ADVISORY, never a hard failure -- same reasoning as `isolation` above: a worktree resolving to the
@@ -322,7 +322,7 @@ function behindOriginMainNote(otherRoot) {
  * so a stale answer is a known condition, not a silent one.
  */
 function checkCrossPackageDist() {
-  const specifier = "@a11y-witness/judge/rules";
+  const specifier = "@a11ign/judge/rules";
   const thisCheckoutRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
   /** @type {string} */
   let resolvedRealPath;

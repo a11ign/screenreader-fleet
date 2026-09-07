@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { stripComments } from "@a11y-witness/evidence/source-text";
+import { stripComments } from "@a11ign/evidence/source-text";
 import { unknownFlags, didYouMean, nameOf, refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
@@ -315,9 +315,9 @@ const UNGUARDED: Record<string, string> = {
   //
   // `check-schema-migration.mjs` is COPIED INTO A THROWAWAY DIRECTORY AND RUN THERE by
   // `migration-gate-refuses.test.ts`, which is how that gate is proved end to end rather than by reading
-  // its source. A copied script has no `node_modules`, so importing `@a11y-witness/worker-fleet/cli-flags`
+  // its source. A copied script has no `node_modules`, so importing `@a11ign/worker-fleet/cli-flags`
   // makes it die on startup: measured, `ERR_MODULE_NOT_FOUND: Cannot find package
-  // '@a11y-witness/worker-fleet'`, three tests red. Guarding it would trade a real proof that the
+  // '@a11ign/worker-fleet'`, three tests red. Guarding it would trade a real proof that the
   // migration gate refuses for a guard against a mistyped flag, which is the worse bargain.
   //
   // The alternative — a second copy of `refuseUnknownFlags` with no workspace import — is the

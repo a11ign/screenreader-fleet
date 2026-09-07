@@ -27,7 +27,7 @@ rem --- Windows trim -----------------------------------------------------------
 rem Needs elevation, which the worker does not have: it retries at every boot, detects it is
 rem unelevated, and records needsElevation. This is where it actually runs.
 >> %OUT% echo [windows trim]
-"C:\Program Files\nodejs\node.exe" src\capture\nvda\windows-trim.mjs C:\Users\witness\a11y-witness\.windows-trimmed >> %OUT% 2>&1
+"C:\Program Files\nodejs\node.exe" src\capture\nvda\windows-trim.mjs C:\Users\witness\a11ign\.windows-trimmed >> %OUT% 2>&1
 
 rem --- verify -------------------------------------------------------------------
 >> %OUT% echo [services]

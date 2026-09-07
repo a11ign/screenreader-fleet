@@ -46,14 +46,14 @@ refuseUnknownFlags(["--rounds=", "--runs="], { entry: import.meta.url, command: 
 // AbortSignal says, and the worker writes its status and body together at the END of a capture.
 // See worker-http.mjs -- this budget sits at or above that cap, so it never applied.
 // Resolved from THIS module, never the cwd -- same reason as `doctor.mjs`'s `DATASET`: this package
-// cannot import `@a11y-witness/lab`'s canonical `runs/` resolution without a dependency cycle.
+// cannot import `@a11ign/lab`'s canonical `runs/` resolution without a dependency cycle.
 const OUT = resolve(fileURLToPath(new URL("../../../", import.meta.url)), "runs/worker-compare");
 const MS_PER_S = 1000;
 
 /**
  * `dataset-paths.mjs`'s `refuseIfRunsReadonly`, duplicated rather than imported -- same reason `OUT`
  * above resolves from this module's own location instead of importing `runsRoot()`: this package cannot
- * import `@a11y-witness/lab` without a dependency cycle (see `dataset-paths.test.ts`'s own EXEMPT entry
+ * import `@a11ign/lab` without a dependency cycle (see `dataset-paths.test.ts`'s own EXEMPT entry
  * for this file). `A11Y_RUNS_READONLY=1 npm run worker:compare ...` must refuse and name `OUT` exactly
  * like every other runs/ writer, so a peer asking "is this safe to run" gets one answer regardless of
  * which package the script happens to live in.
