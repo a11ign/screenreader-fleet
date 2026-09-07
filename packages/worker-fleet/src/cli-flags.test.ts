@@ -334,6 +334,13 @@ const GUARDED: Record<string, string> = {
     + "-- so it calls refuseUnknownFlags([]) with an EMPTY list, the same case as "
     + "check-preregistered-verdict.mjs. It runs from `prepare`, on every plain install, so a discarded "
     + "flag here would silently change what gets removed on a machine nobody is watching.",
+  "scripts/assert-glob-not-empty.mjs":
+    "`--min` decides the floor a test glob must clear (#355); a discarded typo would silently check "
+    + "against the default of 1 instead of the real floor, passing a glob that lost most of its files. "
+    + "`--run` and `--test-concurrency` decide whether this command executes `tsx --test` on the globs it "
+    + "just checked, or only checks them -- a discarded `--run` would make a caller believe the real "
+    + "suite ran when only the vacuity check did, which is silence exactly where this tool exists to "
+    + "refuse it.",
 };
 
 
