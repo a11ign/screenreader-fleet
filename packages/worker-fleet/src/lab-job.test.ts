@@ -661,7 +661,10 @@ test("the sibling playbooks re-read the job table, and find it where it looks", 
   // `lab:status`, `lab:log` and `lab:stop` refuse a job name they do not have by reading the catalogue
   // from the file that DEFINES it, indexed as `[0].vars.lab_jobs`. If that path ever returns nothing they
   // would refuse every job, so this pins the shape they depend on.
-  assert.ok(PLAY_VARS.lab_jobs, "lab_jobs must stay in the FIRST play's `vars:` — the lookup indexes [0]");
+  // NAMED, never positional. This message used to read "must stay in the FIRST play's `vars:` — the lookup
+  // indexes [0]", which described the defect as though it were the contract: an added play then moved the
+  // catalogue and five readers broke together. `PLAY_VARS` finds it by the attribute instead.
+  assert.ok(PLAY_VARS.lab_jobs, "lab_jobs must stay in the play that declares it, found by name not position");
   assert.ok(Object.keys(PLAY_VARS.lab_jobs).length > 20, "the job table must not read as near-empty");
   for (const [name, entry] of Object.entries(PLAY_VARS.lab_jobs)) {
     // A list OR the expression that builds one: `evidence-check` composes its argv from the fleet.
@@ -684,8 +687,22 @@ test("asking about a job that does not exist is refused, not answered", () => {
       + `never existed`);
     // Read from the file that DEFINES the catalogue, never copied. A second list of job names is how one
     // comes to name a job that no longer exists — the duplication defect these playbooks exist to avoid.
-    assert.match(source, /lookup\('file', playbook_dir ~ '\/lab-job\.yml'\)[^\n]*lab_jobs/,
-      `${playbook} must read the catalogue from lab-job.yml rather than carrying its own copy`);
+    //
+    // THIS USED TO PIN THE LOOKUP EXPRESSION ITSELF, `(... | from_yaml)[0].vars.lab_jobs`, and pinning it
+    // pinned the BUG. That spelling indexes the plays by POSITION, so adding the zero-host inventory
+    // refusal at the top of each file broke all five copies of it at once — `lab:log`, `lab:status` and
+    // `lab:stop` every one refusing with a Jinja attribute error, which reads as a corrupted catalogue
+    // rather than as a moved play. A test asserting the exact text of a fragile expression makes it
+    // harder to fix than to leave.
+    //
+    // So this now pins the PROPERTY the test was always about — one catalogue, loaded from the file that
+    // defines it — and lets the mechanism be replaced. `lab-catalogue-is-found-by-name.test.ts` owns the
+    // complementary half: that nothing goes back to reading it by position, and that no second spelling
+    // of the lookup appears.
+    assert.match(source, /vars_files:\s*\n\s*-\s*vars\/lab-catalogue\.yml/,
+      `${playbook} must load the shared catalogue lookup rather than spelling its own`);
+    assert.match(source, /job in lab_catalogue/,
+      `${playbook} must check the job name against that catalogue`);
   }
 });
 

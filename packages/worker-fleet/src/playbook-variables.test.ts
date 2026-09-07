@@ -98,13 +98,43 @@ const GLOBAL = new Set<string>([
       .map(([, key]) => key)),
 ]);
 
+/**
+ * The keys a play's `vars_files:` brings in, read from the files it actually names.
+ *
+ * A PLAYBOOK CAN LOAD ITS VARS FROM A FILE, and this test could not see that. `ansible/vars/` was outside
+ * both the playbook list and the `group_vars` scan, so `vars_files: [vars/lab-catalogue.yml]` provided
+ * `lab_catalogue` to Ansible and provided nothing to this check — which then reported four orphans in four
+ * playbooks that were entirely correct.
+ *
+ * Read per PLAY rather than folded into `GLOBAL`, deliberately. A vars file loaded by one playbook says
+ * nothing about another, and this test's whole value is that it fails when a variable is read where it was
+ * never set. Adding these globally would have fixed the false alarm by weakening the guard everywhere —
+ * the shape CLAUDE.md names as making the gate quiet rather than making it right.
+ */
+function varsFileKeys(doc: unknown): string[] {
+  const plays = Array.isArray(doc) ? doc : [doc];
+  const keys: string[] = [];
+  for (const play of plays) {
+    const files = (play as { vars_files?: unknown })?.vars_files;
+    if (!Array.isArray(files)) continue;
+    for (const file of files) {
+      // Relative to the playbook directory, which is how Ansible resolves them. A path that does not
+      // resolve is left to Ansible to complain about at run time; silently skipping it here would let a
+      // typo look like a provided variable.
+      const text = readFileSync(join(ANSIBLE, String(file)), "utf8");
+      keys.push(...[...text.matchAll(/^\s*((?:lab|job)_[a-z0-9_]+):/gm)].map(([, key]) => key));
+    }
+  }
+  return keys;
+}
+
 test("every lab_*/job_* a playbook reads is set somewhere", () => {
   let scanned = 0;
   const orphans: string[] = [];
   for (const name of playbooks) {
     const text = readFileSync(join(ANSIBLE, name), "utf8");
     const doc = parseYaml(text);
-    const known = new Set([...provided(doc), ...GLOBAL]);
+    const known = new Set([...provided(doc), ...varsFileKeys(doc), ...GLOBAL]);
     const reads = referenced(text, doc);
     scanned += reads.size;
     for (const ref of reads) if (!known.has(ref)) orphans.push(`${name}: ${ref}`);
