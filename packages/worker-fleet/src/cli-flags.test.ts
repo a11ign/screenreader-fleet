@@ -225,6 +225,9 @@ const GUARDED: Record<string, string> = {
     "takes its sites POSITIONALLY; the flags in the file are passed onward",
   "packages/lab/scripts/corpus-backup.mjs":
     "--verify-only is the difference between checking a backup and WRITING one",
+  // Its ONLY flag, and the one that decides whether it destroys anything. A mistyped `--aply` must be
+  // refused rather than silently running the reporting default and reading as "nothing to prune".
+  "packages/lab/scripts/corpus-prune-orphans.mjs": "--apply",
   "packages/lab/scripts/corpus-snapshot.mjs":
     "a mistyped --out= writes the snapshot where you will not look for it",
   "packages/lab/scripts/corpus-release.mjs":
@@ -262,6 +265,14 @@ const GUARDED: Record<string, string> = {
   "packages/control/src/fleet-status.mjs": JSON_REPORTER,
   "packages/lab/src/training/capture-status.mjs": JSON_REPORTER,
   "packages/lab/scripts/lab-inventory.mjs": JSON_REPORTER,
+  "scripts/pr-hold.mjs":
+    "it WRITES a `session:` label that decides whether `merge-guard` refuses a PR (#266). `--session` "
+    + "says who is taking the hold and `--steal` displaces whoever has it, so a discarded flag either "
+    + "takes a hold in nobody's name or fails to displace the person it just announced displacing",
+  "scripts/stash-whose.mjs":
+    "it reports who holds each stash in a pile SHARED between every worktree (#290). It takes no "
+    + "flags, and a discarded argument would answer about a different question than the one asked -- "
+    + "on the command a worker consults before deciding whether a stash is safe to pop",
   // Landed on `main` while this branch was open — the third such batch, which is itself the argument for
   // #205: a census pinned to a hand-written number is stale the moment anyone else merges a CLI.
   "scripts/changeset-precise.mjs":
