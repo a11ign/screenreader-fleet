@@ -288,6 +288,17 @@ const GUARDED: Record<string, string> = {
   "scripts/workflow-run-liveness.mjs":
     "`--sha` falls back to $GITHUB_SHA, so a mistyped flag silently answers about a DIFFERENT commit — "
     + "and the question it answers is whether that commit was tested before it reached main",
+  "scripts/history-secret-scan.mjs":
+    "`--all` is required and not optional -- a mistyped or dropped flag would run neither branch, since "
+    + "the script REFUSES rather than defaulting when it is absent, precisely because scanning only the "
+    + "current branch would silently miss the branches with more instances of the defect than main has "
+    + "(measured: 72 vs 48, #310). `--repo` decides WHICH repository is scanned; a discarded one falls "
+    + "back to this checkout, reporting on the wrong tree entirely for a rehearsal clone.",
+  "scripts/history-purge-rehearsal.mjs":
+    "`--source` names the real repository to mirror-clone from; a discarded flag would fail closed "
+    + "(refuses without one) rather than silently rewriting the wrong tree, but `--clone-into` and "
+    + "`--replacements` deciding the WRONG path or pattern set silently is exactly the failure this tool "
+    + "exists to make impossible for a history rewrite, #310",
 };
 
 
