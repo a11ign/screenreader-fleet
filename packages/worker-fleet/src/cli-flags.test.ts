@@ -252,6 +252,18 @@ const GUARDED: Record<string, string> = {
   "packages/control/src/fleet-status.mjs": JSON_REPORTER,
   "packages/lab/src/training/capture-status.mjs": JSON_REPORTER,
   "packages/lab/scripts/lab-inventory.mjs": JSON_REPORTER,
+  // Landed on `main` while this branch was open, and all three arrived ALREADY GUARDED — which is the
+  // census working in the direction it was built for: the failing assertion is what told this branch they
+  // existed at all, and the source it then had to read said the guard was already there.
+  "scripts/mark-primary-checkout.mjs":
+    "`--set` and `--unset` are OPPOSITE ACTS on a repo-local git config, and it writes when it sees one — "
+    + "a mistyped `--unser` that ran the default would leave the operator believing a checkout was marked",
+  "scripts/row-reachability.mjs":
+    "`--row=<n>` decides WHICH row is examined; ignoring a mistyped one falls back to the number it finds "
+    + "positionally, so the answer would describe a different row than the one asked about",
+  "scripts/workflow-run-liveness.mjs":
+    "`--sha` falls back to $GITHUB_SHA, so a mistyped flag silently answers about a DIFFERENT commit — "
+    + "and the question it answers is whether that commit was tested before it reached main",
 };
 
 
