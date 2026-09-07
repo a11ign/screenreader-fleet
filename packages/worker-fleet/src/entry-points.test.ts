@@ -20,7 +20,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname, basename } from "node:path";
 
@@ -36,43 +36,91 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
  * before its first assertion, which is exactly why that file had no tests. A discovery test still only
  * discovers what its pattern admits.
  */
-function entryPoints(): string[] {
-  const pkg = JSON.parse(readFileSync(`${REPO}package.json`, "utf8"));
-  const found = new Set<string>();
-  for (const command of Object.values(pkg.scripts as Record<string, string>)) {
-    // Top-level scripts/, not only packages/ — `scripts/isolation-gate.mjs` carried the WORST of the two
-    // wrong idioms this file's own second test polices (string concatenation) invisibly, because the
-    // pattern only ever matched packages/*.mjs|.ts. A repo-tooling entry point is exactly as exposed to
-    // "printed usage and exited before the first assertion" as a package one.
-    for (const match of String(command).matchAll(/(?:^|\s)((?:packages|scripts)\/[^\s]+\.(?:mjs|ts))/g)) {
-      if (!match[1].endsWith(".test.ts")) found.add(match[1]);
-    }
+/**
+ * EVERY WAY A SCRIPT IN THIS REPO COMES TO BE EXECUTED — enumerated, not appended to (#202).
+ *
+ * This discovery has been widened three times in one night, each time by adding the invocation source
+ * that had just bitten: `package.json` only, then `scripts/` paths inside it (#174), then
+ * `.github/workflows` and `action.yml` (#185). Each fix was correct and none asked the general question,
+ * so the fourth source bit anyway — **two files carrying the banned entry guard merged AFTER #185 landed,
+ * invoked by git hooks**, which nothing here read.
+ *
+ * So the table below is the deliverable rather than the widening. A source this cannot read is DECLARED,
+ * not omitted: "nothing needs this" and "nobody looked" must stay different states.
+ *
+ * | source | read here | why |
+ * |---|---|---|
+ * | `package.json` scripts | YES | the original population |
+ * | `.github/workflows/*.yml`, `action.yml` | YES | #185; a runner's checkout path is not one we choose |
+ * | `scripts/git-hooks/*` | YES, #202 | the source that bit twice after #185 |
+ * | `packages/control/ansible/*.yml` | NO — examined and rejected, same reason as `.cmd` |
+ * | `*.cmd` / `*.ps1` (Windows scheduled tasks) | NO — examined and rejected, see below |
+ * | one script spawning another | NO — `spawned-paths.test.ts` owns that question, deliberately |
+ * | a human typing `node scripts/x.mjs` | NO, and unknowable — the entry guard is what makes that safe |
+ *
+ * `*.cmd`/`*.ps1` AND THE ANSIBLE PLAYBOOKS WERE BOTH TRIED AND BACKED OUT, which is why it is listed as NOT covered rather than left
+ * off. Reading those files finds `packages/worker-fleet/src/cli-flags.mjs`, `code-version.mjs`,
+ * `dataset-paths.mjs`, `fleet-consistency.mjs`, `axe.ts`, `fetch-encoder.mjs` and `git-sandbox.ts` —
+ * every one a LIBRARY MODULE named in a deployed-file manifest or a dependency list, not something
+ * anyone executes. Being listed is not being invoked, and a discovery that cannot tell the
+ * difference reports eight false entry points and gets loosened until it reports none. If a Windows
+ * scheduled task ever invokes a `.mjs` directly, this is the source to add and the manifest problem is
+ * what to solve first.
+ *
+ * A BARE BASENAME COUNTS, and that is not tidiness. `pre-commit` builds its path at runtime:
+ * `guard_script="$(cd "$(dirname "$0")/.." && pwd)/piped-exit-status-guard.mjs"` — the repo-relative
+ * path never appears, so a path-regex reads that hook and still misses the file it runs. Basenames are
+ * resolved against the directories this repo actually keeps scripts in.
+ */
+/** Each hook, with shell comments stripped. */
+function hookTexts(): string[] {
+  const dir = `${REPO}scripts/git-hooks`;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    // No hooks directory in this checkout is not a fault here; anything else that cannot be listed is.
+    return [];
   }
-  // AND EVERY WORKFLOW, because an entry point CI runs directly was invisible here.
-  //
-  // Discovery read `package.json` alone, so a script invoked by a GitHub workflow and by nothing else was
-  // never checked. Widening it on 2026-09-07 found THREE unguarded entry points that had never been seen:
-  // `scripts/ci-changed.mjs` (the concatenated form this file's second test forbids),
-  // `packages/lab/src/harnesses/assert-action-report.mjs` (the path-suffix form, the first test's
-  // subject), and `packages/cli/src/action/run.ts`, which had no guard at all -- 95 lines of top-level
-  // code ending in `process.exit`, in a PUBLISHED package.
-  //
-  // This is the same widening the comment above records for `scripts/` versus `packages/`, one source
-  // further out, and it is the third instance in this one file of a guard reaching some of the paths that
-  // need it. `#164` found the identical population boundary in the guarded-CLI census the same night, in a
-  // different guard -- which makes it a class rather than an oversight.
-  //
-  // It matters MORE in a workflow than in an npm script. The concatenated form silently never fires on a
-  // path containing a space, and the RUNNER's checkout path is not something anybody here chooses -- so
-  // the failure arrives as a job exiting 0 having done nothing, indistinguishable from a clean run.
-  for (const file of workflowFiles()) {
-    for (const match of file.matchAll(/(?:^|\s)((?:packages|scripts)\/[^\s]+\.(?:mjs|ts))/g)) {
-      // A WORKFLOW MENTIONS GLOBS AS WELL AS PATHS. `scripts/*.mjs` in a lint or paths-filter line reads
-      // exactly like an entry point to a regex, and the first version of this crashed ENOENT on it.
-      // Requiring the file to exist is the honest filter: a glob is not an entry point, and a path that
-      // has been deleted is `referenced-scripts.test.ts`'s question rather than this one's.
-      if (match[1].endsWith(".test.ts") || match[1].includes("*")) continue;
-      if (existsSync(`${REPO}${match[1]}`)) found.add(match[1]);
+  return names.flatMap((name) => {
+    const path = `${dir}/${name}`;
+    if (!statSync(path).isFile()) return [];
+    // COMMENTS STRIPPED FIRST. A hook is heavily commented and its prose NAMES paths it does not run --
+    // `git-sandbox.ts`, `cli-flags.mjs` and `axe.ts` are all mentioned in explanations here and are
+    // libraries, not entry points. Every other discovery guard in this repo strips comments before
+    // matching for the same reason: a file that only MENTIONS a script has not invoked it.
+    return [readFileSync(path, "utf8").split("\n").filter((line) => !/^\s*#/.test(line)).join("\n")];
+  });
+}
+
+function invocationTexts(): { kind: "path" | "hook", text: string }[] {
+  return [
+    { kind: "path" as const, text: readFileSync(`${REPO}package.json`, "utf8") },
+    ...workflowFiles().map((text) => ({ kind: "path" as const, text })),
+    ...hookTexts().map((text) => ({ kind: "hook" as const, text })),
+  ];
+}
+
+function entryPoints(): string[] {
+  const found = new Set<string>();
+  const keep = (path: string) => {
+    // A GLOB IS NOT AN ENTRY POINT. `scripts/*.mjs` in a paths-filter reads exactly like an invocation,
+    // and the first version of the workflow widening crashed ENOENT on one. Requiring the file to exist
+    // is the honest filter; a path that has been DELETED is `referenced-scripts.test.ts`'s question.
+    if (path.endsWith(".test.ts") || path.includes("*")) return;
+    if (existsSync(`${REPO}${path}`)) found.add(path);
+  };
+  for (const { kind, text } of invocationTexts()) {
+    for (const match of text.matchAll(/(?:^|\s)((?:packages|scripts)\/[^\s]+\.(?:mjs|ts))/g)) {
+      keep(match[1]);
+    }
+    // THE RUNTIME-CONSTRUCTED CASE, AND ONLY IN A HOOK. A hook is shell: a `.mjs` basename there is
+    // something it runs. In source or a playbook the same token is far more often an IMPORT -- applied
+    // everywhere it matched `cli-flags.mjs`, `code-version.mjs` and `dataset-paths.mjs`, none of them an
+    // entry point, which is a discovery that finds too much and gets loosened until it finds nothing.
+    if (kind !== "hook") continue;
+    for (const match of text.matchAll(/(?:^|[\s"'`(/$])([a-z][a-z0-9-]*\.mjs)\b/g)) {
+      keep(`scripts/${match[1]}`);
     }
   }
   return [...found].sort();
@@ -148,27 +196,33 @@ test("every npm entry point refuses to run when imported", () => {
 });
 
 test("the guard is the exact comparison, never a path suffix", () => {
-  // `process.argv[1]?.endsWith("guest-run.mjs")` worked but matched on a SUFFIX, so any entry point whose
-  // path happened to end that way would have run the wrong file's main. One idiom means one thing to get
-  // right, and `pathToFileURL` is the one that cannot be fooled by a name.
+  // COLLECTED, NOT ASSERTED IN THE LOOP. This used to `assert.ok` per file, so it stopped at the FIRST
+  // offender and named one -- and when #202 widened the discovery to git hooks it found TWO, reporting
+  // `board-only-check.mjs` while `piped-exit-status-guard.mjs` sat equally broken and unmentioned. A
+  // guard that names one of two makes the second look like a regression the next time somebody runs it.
+  const suffixForm: string[] = [];
+  const concatenated: string[] = [];
   for (const path of entryPoints()) {
     const src = readFileSync(`${REPO}${path}`, "utf8");
     const executable = src.split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
-    assert.ok(!/process\.argv\[1\]\?\.endsWith\(/.test(executable),
-      `${path} guards on a path suffix; use import.meta.url === pathToFileURL(process.argv[1] ?? "").href`);
+
+    // `process.argv[1]?.endsWith("guest-run.mjs")` worked but matched on a SUFFIX, so any entry point
+    // whose path happened to end that way would have run the wrong file's main.
+    if (/process\.argv\[1\]\?\.endsWith\(/.test(executable)) suffixForm.push(path);
 
     // The second wrong idiom, and it silently DISABLES the entry point rather than mis-firing it.
-    // `import.meta.url === \`file://${process.argv[1]}\`` builds a URL by concatenation, so it does not
-    // percent-encode: check this repo out under a path containing a SPACE and the comparison is false, the
-    // guard never fires, and the script exits 0 having done nothing. Measured, not reasoned — a probe in a
-    // directory named "dir with space" reported `template form matches: false` while pathToFileURL matched.
-    // Seven entry points carried it, including fleet-status, check-worker-code, deploy-worker and
-    // fleet-wake: the whole fleet toolchain would have gone quiet for anyone with a space in their path,
-    // reporting success for work never done.
-    assert.ok(!/import\.meta\.url === `file:\/\//.test(executable),
-      `${path} builds its guard by string concatenation, which does not percent-encode — a path with a `
-      + "space makes it silently never run. Use pathToFileURL(process.argv[1] ?? \"\").href");
+    // Building the URL by concatenation does not percent-encode, so a checkout under a path containing a
+    // SPACE makes the comparison false, the guard never fires, and the script exits 0 having done
+    // nothing. Measured in a directory named "dir with space": the template form matched false while
+    // `pathToFileURL` matched. Seven entry points carried it once, including the whole fleet toolchain.
+    if (/import\.meta\.url === `file:\/\//.test(executable)) concatenated.push(path);
   }
+
+  assert.deepEqual(suffixForm, [],
+    'these guard on a path suffix; use import.meta.url === pathToFileURL(process.argv[1] ?? "").href');
+  assert.deepEqual(concatenated, [],
+    "these build the guard by string concatenation, which does not percent-encode -- a path with a space "
+    + 'makes it silently never run. Use pathToFileURL(process.argv[1] ?? "").href');
 });
 
 /**
