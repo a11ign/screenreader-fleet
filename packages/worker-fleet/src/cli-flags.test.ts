@@ -17,9 +17,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { stripComments } from "@a11y-witness/evidence/source-text";
 import { unknownFlags, didYouMean, nameOf, refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
 
@@ -356,4 +358,57 @@ test("positionals are still not this guard's business", () => {
   assert.deepEqual(unknownFlags(["/pages/index.html"], ["--ref="]), []);
   assert.deepEqual(unknownFlags(["--"], ["--ref="]), []);          // npm's separator
   assert.deepEqual(unknownFlags(["-5"], ["--ref="]), []);          // a negative number is not a flag
+});
+
+test("the guard fires through a SYMLINK, because npm's own .bin entries are symlinks", () => {
+  // #237. The entry guards at every call site realpath `argv[1]`; `refuseUnknownFlags`'s OWN comparison
+  // did not. So through a symlink the outer condition was TRUE and this one FALSE: `main()` ran and the
+  // flag guard returned early having inspected nothing.
+  //
+  // Measured on `board-schedule-liveness.mjs`, same file, same flag, before and after:
+  //
+  //   before:  via symlink exit 0, "--bogusflag" IGNORED   |  direct exit 2, refused
+  //   after:   via symlink exit 2, refused                 |  direct exit 2, refused
+  //
+  // Through the symlink the mistyped flag ran the default and reported success — which is the sentence
+  // the refusal itself prints as the reason it exists. A remedy whose TRIGGER is narrower than the thing
+  // it guards, the `refreshBrowseBuffer` shape.
+  //
+  // It matters beyond a hand-made link: **npm creates `.bin` entries as symlinks**, so any CLI this repo
+  // ever exposes as a `bin` is invoked through one.
+  //
+  // Driven end to end through a REAL child process rather than by calling the function, because the whole
+  // defect lives in `process.argv[1]` versus `import.meta.url` — a unit call cannot express it, which is
+  // exactly why the census (which asserts a file CONTAINS `refuseUnknownFlags(`) could not see it either.
+  const dir = mkdtempSync(join(tmpdir(), "a11y-flagguard-"));
+  try {
+    const real = join(dir, "real-command.mjs");
+    writeFileSync(real, [
+      `import { realpathSync } from "node:fs";`,
+      `import { pathToFileURL } from "node:url";`,
+      `import { refuseUnknownFlags } from ${JSON.stringify(pathToFileURL(join(REPO, "packages/worker-fleet/src/cli-flags.mjs")).href)};`,
+      `if (import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href) {`,
+      `  refuseUnknownFlags(["--known"], { entry: import.meta.url, command: "real-command" });`,
+      `  console.log("RAN");`,
+      `}`,
+    ].join("\n"));
+    const link = join(dir, "via-symlink.mjs");
+    symlinkSync(real, link);
+
+    const direct = spawnSync(process.execPath, [real, "--bogus"], { encoding: "utf8" });
+    assert.equal(direct.status, 2, "invoked directly, an unknown flag must be refused");
+
+    const viaLink = spawnSync(process.execPath, [link, "--bogus"], { encoding: "utf8" });
+    assert.equal(viaLink.status, 2,
+      "through a symlink the guard must still fire; exit 0 here means the flag was IGNORED and the "
+      + `command reported success. stdout: ${viaLink.stdout} stderr: ${viaLink.stderr}`);
+    assert.match(viaLink.stderr, /unknown flag --bogus/);
+
+    // AND THE NORMAL PATH IS UNTOUCHED: a known flag through the symlink still runs.
+    const ok = spawnSync(process.execPath, [link, "--known"], { encoding: "utf8" });
+    assert.equal(ok.status, 0, `a known flag must still run through the symlink: ${ok.stderr}`);
+    assert.match(ok.stdout, /RAN/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

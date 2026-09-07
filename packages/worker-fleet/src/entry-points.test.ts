@@ -21,6 +21,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { sandboxGitEnv } from "../../../scripts/git-env.mjs";
 import { fileURLToPath } from "node:url";
 import { join, dirname, basename } from "node:path";
 
@@ -195,34 +197,70 @@ test("every npm entry point refuses to run when imported", () => {
     + "is ever published as a bin, or npm's own .bin symlink silently skips it. See the symlink test below.");
 });
 
-test("the guard is the exact comparison, never a path suffix", () => {
-  // COLLECTED, NOT ASSERTED IN THE LOOP. This used to `assert.ok` per file, so it stopped at the FIRST
-  // offender and named one -- and when #202 widened the discovery to git hooks it found TWO, reporting
-  // `board-only-check.mjs` while `piped-exit-status-guard.mjs` sat equally broken and unmentioned. A
-  // guard that names one of two makes the second look like a regression the next time somebody runs it.
-  const suffixForm: string[] = [];
-  const concatenated: string[] = [];
-  for (const path of entryPoints()) {
-    const src = readFileSync(`${REPO}${path}`, "utf8");
-    const executable = src.split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
+/**
+ * EVERY FILE THAT DECLARES ITSELF AN ENTRY POINT — asked of the FILE, never of the invocation sources.
+ *
+ * The form question and the "does this file need a guard" question are different, and this one has been
+ * riding on the other's answer for no reason. `entryPoints()` enumerates how a script comes to be
+ * executed, and that enumeration was widened FOUR TIMES in one night — `package.json`, then `scripts/`
+ * paths (#174), then workflows (#185), then git hooks (#202) — each time by adding the source that had
+ * just bitten. The fifth instance bit anyway: `reconstitution-blank.mjs`… `reconstitution-drill.mjs` is
+ * invoked by **none** of those (`package.json` 0, workflows 0, hooks 0). It is run by a human, because
+ * `docs/roles/migrate.md` tells them to.
+ *
+ * **A doc telling a person to run something cannot be enumerated.** So the enumeration is inherently
+ * incomplete, and the form check does not need it: **a file that is an entry point says so, in the guard
+ * itself.** Measured on `main` at 20a85a3a — 93 files contain `import.meta.url ===`, exactly one used
+ * the banned form, and all five of the night's instances declared a guard whose FORM was wrong.
+ *
+ * WHAT THIS DOES NOT CATCH, and the split is worthless if this is not said: a file with a top-level
+ * executable body and NO guard at all declares nothing, so it is invisible here. `packages/cli/src/action/
+ * run.ts` was exactly that. **That** question still needs the enumeration above, and that enumeration is
+ * still incomplete — which is now visible rather than hidden behind a form check that appeared to cover
+ * it.
+ */
+/** Every tracked source, excluding built output and tests — the population the FILE question needs. */
+function trackedSources(): string[] {
+  return execFileSync("git", ["ls-files"], { cwd: REPO, encoding: "utf8", env: sandboxGitEnv() })
+    .split("\n")
+    .filter((f) => /\.(mjs|ts)$/.test(f) && !f.includes("/dist/") && !f.endsWith(".test.ts"));
+}
 
-    // `process.argv[1]?.endsWith("guest-run.mjs")` worked but matched on a SUFFIX, so any entry point
-    // whose path happened to end that way would have run the wrong file's main.
-    if (/process\.argv\[1\]\?\.endsWith\(/.test(executable)) suffixForm.push(path);
+/**
+ * A file's source with `//` comments removed — because a MENTION is not a USE, and this repo has paid for
+ * that three times in one night. `install-git-hooks.mjs`'s own header QUOTES the banned form to explain
+ * why it does not use it; scanning unstripped reports it as an offender.
+ */
+function executableSource(path: string): string {
+  return readFileSync(`${REPO}${path}`, "utf8").split("\n")
+    .filter((line) => !line.trimStart().startsWith("//")).join("\n");
+}
 
-    // The second wrong idiom, and it silently DISABLES the entry point rather than mis-firing it.
-    // Building the URL by concatenation does not percent-encode, so a checkout under a path containing a
-    // SPACE makes the comparison false, the guard never fires, and the script exits 0 having done
-    // nothing. Measured in a directory named "dir with space": the template form matched false while
-    // `pathToFileURL` matched. Seven entry points carried it once, including the whole fleet toolchain.
-    if (/import\.meta\.url === `file:\/\//.test(executable)) concatenated.push(path);
-  }
+function declaresAnEntryGuard(): string[] {
+  return trackedSources().filter((path) => executableSource(path).includes("import.meta.url ==="));
+}
 
+test("every declared entry guard uses the exact comparison — no sources consulted", () => {
+  const declared = declaresAnEntryGuard();
+
+  // A floor, not a pin: there were 93 when this was written, and it is the FORM population rather than
+  // the discovery's 84. Fewer means the scan has stopped matching real files, which is the only way this
+  // test can go quietly green while the codebase is wrong.
+  assert.ok(declared.length >= 85,
+    `only ${declared.length} files declare an entry guard; the scan is broken, not the codebase clean`);
+
+  const suffixForm = declared.filter((p) => /process\.argv\[1\]\?\.endsWith\(/.test(executableSource(p)));
+  const concatenated = declared.filter((p) => /import\.meta\.url === `file:\/\//.test(executableSource(p)));
+
+  // COLLECTED, NOT ASSERTED IN A LOOP: an assertion inside the walk stops at the first offender, and the
+  // second then looks like a regression the next time somebody runs it.
   assert.deepEqual(suffixForm, [],
     'these guard on a path suffix; use import.meta.url === pathToFileURL(process.argv[1] ?? "").href');
   assert.deepEqual(concatenated, [],
     "these build the guard by string concatenation, which does not percent-encode -- a path with a space "
-    + 'makes it silently never run. Use pathToFileURL(process.argv[1] ?? "").href');
+    + "makes it silently never run, so the script exits 0 having done nothing. Measured in a directory "
+    + 'named "dir with space": the template form matched false while pathToFileURL matched. Use '
+    + 'pathToFileURL(process.argv[1] ?? "").href');
 });
 
 /**
