@@ -202,7 +202,10 @@ test("a job's environment additions come from the CATALOGUE, never from an extra
   for (const [, value] of LAB_JOB.matchAll(/setenv:\s*\[([^\]]*)\]/g)) {
     // Both permitted names are facts BUILT from the inventory and then asserted against a strict address
     // pattern before use. Anything else -- notably a bare `-e` variable -- must fail here.
-    const ASSERTED_FACTS = new Set(["lab_fleet_workers", "lab_named_worker", "lab_selected_workers"]);
+    const ASSERTED_FACTS = new Set(["lab_fleet_workers", "lab_named_worker", "lab_selected_workers",
+      // Asserted by "A capture root must be a name, so a path cannot be expressed" -- it reaches a child
+      // as an environment variable, so a path must be inexpressible rather than rejected downstream.
+      "lab_capture_root"]);
     for (const [, expression] of value.matchAll(/\{\{\s*([a-z_]+)[^}]*\}\}/g)) {
       assert.ok(ASSERTED_FACTS.has(expression),
         `setenv may only interpolate asserted facts; found ${expression}`);
