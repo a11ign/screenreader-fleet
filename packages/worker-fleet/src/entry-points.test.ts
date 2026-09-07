@@ -110,6 +110,16 @@ function entryPoints(): string[] {
     // and the first version of the workflow widening crashed ENOENT on one. Requiring the file to exist
     // is the honest filter; a path that has been DELETED is `referenced-scripts.test.ts`'s question.
     if (path.endsWith(".test.ts") || path.includes("*")) return;
+    // NOT BUILD OUTPUT, AND NOT A DECLARATION FILE. A workflow names paths for many reasons besides
+    // running them -- #168's diagnostic step names `packages/evidence/dist/wcag.d.ts` in an `ls` and a
+    // `head`, purely to inspect what the build produced. `.d.ts` ends in `.ts` and the file exists, so
+    // both filters above passed it and this test demanded an entry guard on a TypeScript declaration.
+    //
+    // Found by that step failing this very test: the workflow widening meeting a path it was never about.
+    // An entry point is a SOURCE file something EXECUTES; `dist/` is what the compiler wrote. Narrowing
+    // the population to the question rather than weakening the guard -- every executable entry point here
+    // is a source file, and the npm-script half of the discovery names sources too.
+    if (path.endsWith(".d.ts") || path.includes("/dist/")) return;
     if (existsSync(`${REPO}${path}`)) found.add(path);
   };
   for (const { kind, text } of invocationTexts()) {
@@ -308,7 +318,7 @@ test("every declared bin's entry-point guard survives being reached through a sy
   assert.ok(sources.length >= 6, `only found ${sources.length} declared bin sources; the discovery is `
     + "broken, not the codebase clean");
 
-  // `a11y-nvda-worker` is Windows-only by ADR 0001, and npm's Windows bin shim is a `.cmd`/`.ps1` wrapper
+  // `a11ign-nvda-worker` is Windows-only by ADR 0001, and npm's Windows bin shim is a `.cmd`/`.ps1` wrapper
   // that does not depend on a shebang or a symlink the way POSIX's does — so this exposure is real on
   // every platform this repo actually ships the bin FOR except this one. It carries the identical pattern
   // and should still be fixed, but `server.mjs` is a capture-path file held under this repo's own

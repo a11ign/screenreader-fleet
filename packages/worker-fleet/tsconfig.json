@@ -6,5 +6,12 @@
   // makes `dist/local-vm.js`'s `./host-capacity.mjs` import resolve. `allowJs` without `checkJs` transpiles
   // them without type-checking.
   "include": ["src/**/*.ts", "src/**/*.mjs"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts"],
+  // doctor.mjs (#256) resolves `@a11ign/judge/rules` at runtime to check whose dist a cross-package
+  // import comes from -- a real dependency now, not a synthetic probe. `tsc --build` follows `references`
+  // to decide build ORDER, so without this a first `npm install` can compile worker-fleet before judge
+  // exists to resolve against, the same race `lab`'s own reference to `evidence`/`scorer` documents.
+  "references": [
+    { "path": "../judge" }
+  ]
 }

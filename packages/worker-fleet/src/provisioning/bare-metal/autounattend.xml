@@ -207,8 +207,8 @@
 
       <UserData>
         <AcceptEula>true</AcceptEula>
-        <FullName>a11y-witness</FullName>
-        <Organization>a11y-witness</Organization>
+        <FullName>a11ign</FullName>
+        <Organization>a11ign</Organization>
         <!-- NO product key, deliberately, and the element is present-but-empty rather than absent.
              `/IMAGE/NAME` above already selects the edition, which is the only job a key was doing
              here: we do not want activation, and an unactivated Windows is fully functional for

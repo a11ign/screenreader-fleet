@@ -4,7 +4,7 @@
  * ## The fault, measured 2026-08-25
  *
  * `@guidepup/guidepup`'s index CONSTRUCTS a `ScreenReader` at module scope, and its constructor throws
- * `No available supported screen readers` on a host with none. `@a11y-witness/nvda-worker`'s package index
+ * `No available supported screen readers` on a host with none. `@a11ign/nvda-worker`'s package index
  * re-exports `capture-core.mjs`, which imports guidepup. So importing the worker package BY NAME — even for
  * a pure 16-line hasher that has its own dependency-free module — puts that throw on the import path.
  *
@@ -30,7 +30,7 @@
  * ## The knowledge already existed
  *
  * `worker-http.mjs` states the rule verbatim: *"Deliberately NOT imported from
- * `@a11y-witness/nvda-worker`: this package runs on macOS and Linux and must not depend on a win32-only
+ * `@a11ign/nvda-worker`: this package runs on macOS and Linux and must not depend on a win32-only
  * one."* And `deploy.yml` reaches the same conclusion for a different reason. It was written down twice, in
  * prose, and a new file in the same package broke it within the hour — which is the argument for a test
  * rather than a third comment.
@@ -47,7 +47,7 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const POISON = "@guidepup/guidepup";
 
 /** Importing this by NAME reaches POISON, because the package index re-exports `capture-core.mjs`. */
-const WORKER_PACKAGE = "@a11y-witness/nvda-worker";
+const WORKER_PACKAGE = "@a11ign/nvda-worker";
 const WORKER_INDEX = "packages/nvda-worker/src/index.mjs";
 
 /**
@@ -213,7 +213,7 @@ test("a dynamic import is not flagged, because it is the remedy", () => {
   // anywhere and only pays for guidepup where it is called. If this test ever fails, the import scanner
   // has started matching dynamic imports and would forbid the fix along with the bug.
   const fixtures = "packages/lab/src/harnesses/capture-fixtures.mjs";
-  assert.match(readFileSync(join(REPO, fixtures), "utf8"), /await import\("@a11y-witness\/nvda-worker"\)/);
+  assert.match(readFileSync(join(REPO, fixtures), "utf8"), /await import\("@a11ign\/nvda-worker"\)/);
   assert.equal(pathToDriver(fixtures), null,
     `${fixtures} reaches the driver statically; only its dynamic import should exist`);
 });

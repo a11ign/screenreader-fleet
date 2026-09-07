@@ -398,7 +398,7 @@ test("a setenv value reaches systemd without a backreference", () => {
 });
 
 test("a job that pulled rebuilds, or a gate scores compiled code that is not the code", () => {
-  // `@a11y-witness/judge/rules` resolves to `dist/rules.js`, so `rules:gate` runs COMPILED output while a
+  // `@a11ign/judge/rules` resolves to `dist/rules.js`, so `rules:gate` runs COMPILED output while a
   // pull only updates source. Measured 2026-08-22: a newly added 2.4.2 rule fired when imported from source
   // and the gate reported `0/1 MISSING EVIDENCE`, because the lab's dist contained zero occurrences of it.
   //
@@ -819,6 +819,25 @@ test("every job whose resolved script adopts gateVerdict/fleetVerdict declares e
     "these jobs dispatch a script that answers in the shared gateVerdict/fleetVerdict 0/1/2 contract and "
     + "do not declare what 1 and 2 mean here -- see rules-gate's entry in lab-job.yml for the shape to "
     + `copy:\n${undeclared.map((n) => `  ${n}`).join("\n")}`);
+});
+
+test("rules-real-pages's exit-1 meaning does not claim an assertion the gate did not make -- #364", () => {
+  // Exit 1 fires on ANY new finding against the conformant baseline, asserted or referred -- the same
+  // gateVerdict contract every job above shares. `check-real-page-findings.ts` prints its own
+  // `OF THOSE N: ... ASSERTED, ... REFERRED` line and, on a referral-only run, says outright
+  // "NOTHING WAS ASSERTED. ... this is referral noise ... and not a publish blocker." A hand-written "1"
+  // meaning that names only the worse of the two possibilities contradicts that line on the exact runs
+  // where it matters most -- measured 2026-09-07, same run, same exit code, opposite verdicts.
+  for (const name of ["rules-real-pages", "rules-real-pages-update"]) {
+    const meaning = (PLAY_VARS.lab_jobs[name] as { exitMeanings?: Record<string, string> })
+      .exitMeanings?.["1"] ?? "";
+    assert.ok(meaning.length > 0, `${name} must still declare a non-empty exit-1 meaning`);
+    assert.doesNotMatch(meaning, /asserted wrongly/i,
+      `${name}'s exit-1 meaning must not claim an assertion happened -- most new findings are referrals`);
+    assert.doesNotMatch(meaning, /genuine false positive/i,
+      `${name}'s exit-1 meaning must not claim a genuine false positive -- that is only true when the `
+      + "gate's own ASSERTED/REFERRED line says ASSERTED");
+  }
 });
 
 test("only a job that reports progress has a progress root, and it is declared", () => {

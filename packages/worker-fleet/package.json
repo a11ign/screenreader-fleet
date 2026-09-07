@@ -1,5 +1,5 @@
 {
-  "name": "@a11y-witness/worker-fleet",
+  "name": "@a11ign/worker-fleet",
   "version": "0.1.0",
   "description": "Host-side lifecycle, health and capacity for a fleet of Windows NVDA capture workers: lease one, judge whether it is degrading, and know how many the host can afford.",
   "license": "AGPL-3.0-or-later",
@@ -48,11 +48,11 @@
     }
   },
   "bin": {
-    "a11y-doctor": "./dist/doctor.mjs",
-    "a11y-worker-code": "./dist/check-worker-code.mjs",
-    "a11y-worker-compare": "./dist/compare-workers.mjs",
-    "a11y-worker-ctl": "./src/local-worker/worker-ctl.sh",
-    "a11y-worker-deploy": "./dist/deploy-worker.mjs"
+    "a11ign-doctor": "./dist/doctor.mjs",
+    "a11ign-worker-code": "./dist/check-worker-code.mjs",
+    "a11ign-worker-compare": "./dist/compare-workers.mjs",
+    "a11ign-worker-ctl": "./src/local-worker/worker-ctl.sh",
+    "a11ign-worker-deploy": "./dist/deploy-worker.mjs"
   },
   "files": [
     "dist",
@@ -62,10 +62,11 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@a11y-witness/nvda-worker": "0.1.0"
+    "@a11ign/judge": "0.1.0",
+    "@a11ign/nvda-worker": "0.1.0"
   },
   "devDependencies": {
-    "@a11y-witness/evidence": "0.1.0",
+    "@a11ign/evidence": "0.1.0",
     "yaml": "^2.9.0",
     "typescript": "^6.0.3"
   },
@@ -81,9 +82,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DanBeckDev/a11y-witness.git",
+    "url": "git+https://github.com/a11ign/a11ign.git",
     "directory": "packages/worker-fleet"
   },
+  "homepage": "https://a11ign.com",
   "keywords": [
     "accessibility",
     "a11y",
