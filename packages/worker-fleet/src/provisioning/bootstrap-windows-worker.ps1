@@ -3,7 +3,7 @@
 # Run this ONCE, in the VM, in an elevated PowerShell, right after Windows setup:
 #
 #   Set-ExecutionPolicy -Scope Process Bypass -Force
-#   irm https://raw.githubusercontent.com/DanBeckDev/a11y-witness/main/packages/worker-fleet/src/provisioning/bootstrap-windows-worker.ps1 | iex
+#   irm https://raw.githubusercontent.com/a11ign/a11ign/main/packages/worker-fleet/src/provisioning/bootstrap-windows-worker.ps1 | iex
 #
 # ...or, if you already have the repo, just run this file. It installs the
 # prerequisites, makes the box reachable over SSH, clones the repo, and then hands
@@ -17,7 +17,7 @@
 # Style constraints match the other scripts: `#` line comments and env-var config, no
 # `<# #>` block comment and no param() block -- see diagnose-nvda-worker.ps1 beside this file.
 #   A11Y_REPO_URL   (default the public GitHub repo)
-#   A11Y_REPO_PATH  (default %USERPROFILE%\a11y-witness)
+#   A11Y_REPO_PATH  (default %USERPROFILE%\a11ign)
 #
 # Auto-logon needs NO configuration and NO password: provisioning gives the console account a
 # blank password and points Winlogon at it. Nothing is stored, so there is nothing to distribute
@@ -25,8 +25,8 @@
 
 $ErrorActionPreference = 'Stop'
 
-$RepoUrl  = if ($env:A11Y_REPO_URL) { $env:A11Y_REPO_URL } else { 'https://github.com/DanBeckDev/a11y-witness.git' }
-$RepoPath = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11y-witness' }
+$RepoUrl  = if ($env:A11Y_REPO_URL) { $env:A11Y_REPO_URL } else { 'https://github.com/a11ign/a11ign.git' }
+$RepoPath = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11ign' }
 
 # What each step did, so the end of a re-run says which steps were already good and which
 # were retried. Without this the second run looks identical to the first and you cannot tell
@@ -261,7 +261,7 @@ try {
   Set-Service -Name sshd -StartupType Automatic
   Start-Service sshd
   if (-not (Get-NetFirewallRule -Name 'sshd-a11y' -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -Name 'sshd-a11y' -DisplayName 'OpenSSH Server (a11y-witness)' `
+    New-NetFirewallRule -Name 'sshd-a11y' -DisplayName 'OpenSSH Server (a11ign)' `
       -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
   }
   # PowerShell as the SSH shell, not cmd.
@@ -299,7 +299,7 @@ try {
     # Two ways in, one code path. A11Y_OPERATOR_KEY is what a human sets before running this by hand;
     # the file is what first-boot.cmd stages off the install media, because the unattended path may run
     # this through a scheduled task -- a fresh session that inherits no environment at all.
-    $stagedKey = Join-Path $env:ProgramData 'a11y-witness\operator-key.pub'
+    $stagedKey = Join-Path $env:ProgramData 'a11ign\operator-key.pub'
     $operatorKey = if ($env:A11Y_OPERATOR_KEY) { $env:A11Y_OPERATOR_KEY }
                    elseif (Test-Path $stagedKey) { Get-Content -Path $stagedKey -Raw }
                    else { $null }

@@ -1,12 +1,12 @@
 /**
  * `doctor.mjs` never asked WHOSE dist a cross-package import resolves to (#256). Measured 2026-09-07: 5
- * of 26 live worktrees resolved `@a11y-witness/*` to the PRIMARY checkout's `dist` via a shared
+ * of 26 live worktrees resolved `@a11ign/*` to the PRIMARY checkout's `dist` via a shared
  * `node_modules` symlink. Two agents running the identical command in adjacent worktrees could get
  * answers built from different code, and nothing anywhere said so.
  *
  * The remedy CLAUDE.md already recorded and nothing automated: "Verify WHOSE, by resolving the exact
  * specifier you import" -- not the package name, since a package can export subpaths from elsewhere and
- * resolving `@a11y-witness/judge` does not prove `@a11y-witness/judge/rules` came from the same tree.
+ * resolving `@a11ign/judge` does not prove `@a11ign/judge/rules` came from the same tree.
  *
  * FRESHNESS IS `tsc --build --dry`, NEVER A RAW MTIME COMPARISON -- a wrong first version of this file
  * compared `newestMtimeMs(srcDir)` against `newestMtimeMs(distDir)`, and the row's own filer retracted
@@ -55,7 +55,7 @@ test("MUTATION target: a resolution genuinely OUTSIDE the checkout is genuinely 
   // If this ever reads true unconditionally (the mutation this row's acceptance names -- "make the
   // resolution check always report own-tree"), this assertion is exactly what catches it.
   assert.equal(
-    resolvesToThisCheckout("/Users/x/a11y-witness/packages/judge/dist/rules.js", "/Users/x/wt-a"),
+    resolvesToThisCheckout("/Users/x/a11ign/packages/judge/dist/rules.js", "/Users/x/wt-a"),
     false,
   );
 });
@@ -64,8 +64,8 @@ test("MUTATION target: a resolution genuinely OUTSIDE the checkout is genuinely 
 
 test("checkoutRootFor: everything before the first /packages/ segment", () => {
   assert.equal(
-    checkoutRootFor("/Users/x/a11y-witness/packages/judge/dist/rules.js"),
-    "/Users/x/a11y-witness",
+    checkoutRootFor("/Users/x/a11ign/packages/judge/dist/rules.js"),
+    "/Users/x/a11ign",
   );
 });
 
@@ -148,7 +148,7 @@ test("LIVE: tscProjectUpToDate against this repo's own freshly built judge packa
 
 test("THE #256 SHAPE: a foreign checkout's dist is detected as foreign, and its freshness is asked independently", () => {
   withTempDir((dir) => {
-    const foreignRoot = join(dir, "a11y-witness");
+    const foreignRoot = join(dir, "a11ign");
     mkdirSync(join(foreignRoot, "packages", "judge", "dist"), { recursive: true });
     const resolvedRealPath = join(foreignRoot, "packages", "judge", "dist", "rules.js");
     const thisCheckoutRoot = join(dir, "wt-mine");

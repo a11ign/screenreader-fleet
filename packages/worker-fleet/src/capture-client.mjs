@@ -22,8 +22,8 @@
  *
  * MOVED HERE from `packages/lab/src/capture/capture-client.mjs` — architecture-audit.md §5, item 6: the
  * product CLI sent no `captureId` at all, so this recovery path was unavailable to the one caller that is
- * a user. `packages/cli` can depend on `@a11y-witness/worker-fleet` (it already does, for `requestJson`)
- * but must never depend on `@a11y-witness/lab`, which is private and never published — so this is the
+ * a user. `packages/cli` can depend on `@a11ign/worker-fleet` (it already does, for `requestJson`)
+ * but must never depend on `@a11ign/lab`, which is private and never published — so this is the
  * seventh capture client and the last one, not an eighth copy of the recovery logic beside it.
  */
 import { randomUUID } from "node:crypto";

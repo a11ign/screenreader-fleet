@@ -139,7 +139,7 @@ test("BOTH deploy paths are found, so neither can go unguarded unnoticed", () =>
  *
  * `CAPTURE_PROTOCOL_VERSION` moved out of `capture-core.mjs` into its own dependency-free
  * `protocol-version.mjs`, precisely so a WORKER-FLEET script (which already depends on
- * `@a11y-witness/nvda-worker`) can import the number directly instead of parsing it out of a file it
+ * `@a11ign/nvda-worker`) can import the number directly instead of parsing it out of a file it
  * cannot safely import wholesale. A scraper whose regex or target path has quietly drifted reports the
  * OLD number as though nothing changed — this has teeth now that the value has actually moved once
  * (14 -> 15). The git-HEAD half of each guard still has to scrape TEXT (`git show` returns historical
@@ -149,7 +149,7 @@ test("deploy-worker and check-worker-code IMPORT the working-tree protocol versi
   const root = resolve(import.meta.dirname, "../../..");
   for (const file of ["packages/worker-fleet/src/deploy-worker.mjs", "packages/worker-fleet/src/check-worker-code.mjs"]) {
     const source = readFileSync(resolve(root, file), "utf8");
-    assert.match(source, /from\s+["']@a11y-witness\/nvda-worker\/protocol-version["']/,
+    assert.match(source, /from\s+["']@a11ign\/nvda-worker\/protocol-version["']/,
       `${file} must import CAPTURE_PROTOCOL_VERSION from the dependency-free protocol-version.mjs`);
     assert.doesNotMatch(source, /readFileSync\([^)]*capture-core\.mjs/,
       `${file} still reads capture-core.mjs's TEXT for the working-tree value -- the whole point of the `

@@ -3,7 +3,7 @@
  * actually afford to run.
  *
  * None of this touches guidepup or NVDA — it runs on the machine that *drives* the workers, which is why it is
- * a separate package from `@a11y-witness/nvda-worker` (ADR 0004). The split is not cosmetic: the worker is
+ * a separate package from `@a11ign/nvda-worker` (ADR 0004). The split is not cosmetic: the worker is
  * Windows-only and the fleet is not.
  *
  * The measurement internals — `host-metrics`, `worker-stats`, `fleet-consistency` — are deliberately NOT

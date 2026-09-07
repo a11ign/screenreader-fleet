@@ -17,14 +17,14 @@
 #
 # Config comes from the environment rather than param(), so the same file works in
 # either invocation mode:
-#   A11Y_REPO_PATH        checkout location (default %USERPROFILE%\a11y-witness)
+#   A11Y_REPO_PATH        checkout location (default %USERPROFILE%\a11ign)
 #   A11Y_PORT             worker port; must match the client's A11Y_WORKER (default 8765)
 #   A11Y_TASK_NAME        scheduled-task name (default a11ysrv)
 #   A11Y_SKIP_NPM_INSTALL set to 1 to re-apply only OS/NVDA configuration
 
 $ErrorActionPreference = 'Stop'
 
-$RepoPath       = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11y-witness' }
+$RepoPath       = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11ign' }
 
 # Resolve a repo file by NAME rather than by a hardcoded relative path.
 #
@@ -139,7 +139,7 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
     # fails argument binding rather than truncating -- "Cannot validate argument on parameter
     # 'Description'", which does not mention a length. This one is 43.
     New-LocalUser -Name $WorkerAccount -NoPassword `
-      -FullName 'a11y-witness capture worker' `
+      -FullName 'a11ign capture worker' `
       -Description 'Console-only worker. No password by design.' | Out-Null
     # Separate call: -PasswordNeverExpires lives in a different parameter set from -NoPassword,
     # so combining them fails to bind rather than doing what it reads like.
@@ -180,7 +180,7 @@ if ($me -and (-not $me.PrincipalSource -or $me.PrincipalSource -eq 'Local')) {
   # on the profile of the human who happened to unbox it.
   $bootstrapSrc = Resolve-RepoFile 'bootstrap-windows-worker.ps1'
   if ($bootstrapSrc) {
-    $shared = 'C:\ProgramData\a11y-witness'
+    $shared = 'C:\ProgramData\a11ign'
     New-Item -ItemType Directory -Force -Path $shared | Out-Null
     $bootstrapDst = Join-Path $shared 'bootstrap.ps1'
     Copy-Item $bootstrapSrc $bootstrapDst -Force
@@ -341,7 +341,7 @@ if ($elevated) {
   Set-NetFirewallProfile -Profile Domain, Private, Public -NotifyOnListen False
   OK 'firewall NotifyOnListen = False (no allow-app dialogs)'
 
-  $ruleName = "a11y-witness worker $Port"
+  $ruleName = "a11ign worker $Port"
   if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
       -Protocol TCP -LocalPort $Port -Profile Any | Out-Null
@@ -556,7 +556,7 @@ $profileNames = @('edge-profile', 'chrome-profile')
 foreach ($name in $profileNames) {
   $dir = if ($env:A11Y_BROWSER_PROFILE) { $env:A11Y_BROWSER_PROFILE }
          elseif ($name -eq 'edge-profile' -and $env:A11Y_EDGE_PROFILE) { $env:A11Y_EDGE_PROFILE }
-         else { Join-Path $env:LOCALAPPDATA "a11y-witness\$name" }
+         else { Join-Path $env:LOCALAPPDATA "a11ign\$name" }
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   OK "Browser profile dir $dir"
 }

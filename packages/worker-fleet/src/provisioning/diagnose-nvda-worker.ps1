@@ -17,12 +17,12 @@
 #
 # Config comes from the environment rather than param(), so the same file works in
 # either invocation mode:
-#   A11Y_REPO_PATH  (default %USERPROFILE%\a11y-witness)
+#   A11Y_REPO_PATH  (default %USERPROFILE%\a11ign)
 #   A11Y_PORT       (default 8765)
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$RepoPath = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11y-witness' }
+$RepoPath = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11ign' }
 $Port     = if ($env:A11Y_PORT) { [int] $env:A11Y_PORT } else { 8765 }
 $fails = @()
 

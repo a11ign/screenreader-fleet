@@ -12,9 +12,9 @@ import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { chdir } from "node:process";
 
-import { leaseWorker, leaseWorkerPool, isAfterRun, DEFAULT_WORKER, fleetScriptPaths } from "@a11y-witness/worker-fleet";
-import { assessWorker } from "@a11y-witness/worker-fleet/health";
-import { availableHostMemoryMb, workersHostCanRun } from "@a11y-witness/worker-fleet/capacity";
+import { leaseWorker, leaseWorkerPool, isAfterRun, DEFAULT_WORKER, fleetScriptPaths } from "@a11ign/worker-fleet";
+import { assessWorker } from "@a11ign/worker-fleet/health";
+import { availableHostMemoryMb, workersHostCanRun } from "@a11ign/worker-fleet/capacity";
 
 for (const [name, value] of Object.entries({ leaseWorker, leaseWorkerPool, isAfterRun, fleetScriptPaths, assessWorker, availableHostMemoryMb, workersHostCanRun })) {
   assert.equal(typeof value, "function", `${name} should be callable`);
@@ -56,5 +56,5 @@ const availableMb = availableHostMemoryMb();
 assert.ok(availableMb !== null, "availableHostMemoryMb() returned null — vm_stat produced nothing readable");
 assert.ok(availableMb > 0, `expected a positive memory reading, got ${availableMb}`);
 
-console.log(`@a11y-witness/worker-fleet works when installed: ${Object.keys(scripts).length - 1} provisioning `
+console.log(`@a11ign/worker-fleet works when installed: ${Object.keys(scripts).length - 1} provisioning `
   + `scripts present, ${availableMb} MB readable`);
