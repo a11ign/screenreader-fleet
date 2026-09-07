@@ -63,6 +63,13 @@ const GUARDED: Record<string, string> = {
     "already guards its own flags; classified here so the census records it as checked rather than "
     + "unseen. It takes none, and audits which rows are pickable -- a discarded argument would report on "
     + "a different label set than the one asked for",
+  "scripts/auto-arm-sweep.mjs":
+    "takes NO flags -- it arms every open, non-draft, unheld, tested PR against `main` that nothing has "
+    + "armed (#344) -- so it calls refuseUnknownFlags([]) with an EMPTY list, the same case as "
+    + "check-preregistered-verdict.mjs. An argument handed to it means the caller wanted something other "
+    + "than `arm the standing queue`, and a discarded one would have it sweep the whole queue while the "
+    + "caller believed they had narrowed it. Its import is RELATIVE rather than the package specifier, "
+    + "because its workflow job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
   "scripts/merge-guard.mjs":
     "it decides whether a PR has actually been TESTED, so a discarded argument would answer about a "
     + "different PR than the one asked about -- and its whole reason for existing is that a confident "
@@ -107,6 +114,11 @@ const GUARDED: Record<string, string> = {
     "takes no flags; the `--build` in the file is passed to tsc. Guarded rather than exempted because "
     + "a build that silently ignores an argument is how a stale `dist` gets shipped, which this repo "
     + "has paid for twice",
+  "scripts/acceptance-commands.mjs":
+    "takes no flags at all -- it reads the PR body from PR_BODY (an env var, never argv, because a PR "
+    + "body is adversarial input) and runs the author's own stated Acceptance: commands, which is the "
+    + "one thing standing between a row's claim and its evidence. A discarded flag here would be the "
+    + "identical shape this whole job exists to end, one layer up.",
   "scripts/changed-packages.mjs":
     "takes no flags; `--name-only` goes onward to git. Its output selects which CI jobs run, so a "
     + "discarded argument narrows a test run silently",
