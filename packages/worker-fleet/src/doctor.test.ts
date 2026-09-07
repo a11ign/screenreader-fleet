@@ -1,22 +1,31 @@
 /**
  * `doctor.mjs` never asked WHOSE dist a cross-package import resolves to (#256). Measured 2026-09-07: 5
  * of 26 live worktrees resolved `@a11y-witness/*` to the PRIMARY checkout's `dist` via a shared
- * `node_modules` symlink, and the primary's own `dist` was older than its own source -- nine commits and
- * roughly 36 hours stale. Two agents running the identical command in adjacent worktrees got answers built
- * from code nine commits apart, and nothing anywhere said so.
+ * `node_modules` symlink. Two agents running the identical command in adjacent worktrees could get
+ * answers built from different code, and nothing anywhere said so.
  *
  * The remedy CLAUDE.md already recorded and nothing automated: "Verify WHOSE, by resolving the exact
  * specifier you import" -- not the package name, since a package can export subpaths from elsewhere and
  * resolving `@a11y-witness/judge` does not prove `@a11y-witness/judge/rules` came from the same tree.
+ *
+ * FRESHNESS IS `tsc --build --dry`, NEVER A RAW MTIME COMPARISON -- a wrong first version of this file
+ * compared `newestMtimeMs(srcDir)` against `newestMtimeMs(distDir)`, and the row's own filer retracted
+ * their initial "36 hours stale" claim once it was measured against a directory mtime (which does not
+ * move on rewrite) rather than a real one. The corrected, LIVE measurement: `git checkout` resets file
+ * mtimes on every file it touches with no content change at all, so switching branches alone makes
+ * several source files read newer than an already-correct `dist` -- and `tsc --build --dry` still
+ * correctly reports "is up to date" in exactly that case, because it is content-addressed, not mtime-
+ * addressed. A raw mtime comparison would flag every worktree as stale the moment `git checkout` runs,
+ * permanently -- the "readiness command that cries wolf" `advise`'s own doc warns against.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  resolvesToThisCheckout, checkoutRootFor, newestMtimeMs, distIsStale,
+  resolvesToThisCheckout, checkoutRootFor, tscProjectUpToDate,
 } from "./doctor.mjs";
 
 // --- resolvesToThisCheckout: pure ---
@@ -64,7 +73,7 @@ test("checkoutRootFor: null for a path that does not look like this repo's own l
   assert.equal(checkoutRootFor("/usr/local/lib/node_modules/something/index.js"), null);
 });
 
-// --- newestMtimeMs: real filesystem, real mtimes ---
+// --- tscProjectUpToDate: the real authority, mocked at the run() boundary ---
 
 function withTempDir(fn: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "doctor-dist-fixture-"));
@@ -75,64 +84,72 @@ function withTempDir(fn: (dir: string) => void): void {
   }
 }
 
-test("newestMtimeMs finds the newest file mtime recursively, across subdirectories", () => {
-  withTempDir((dir) => {
-    writeFileSync(join(dir, "old.js"), "old");
-    mkdirSync(join(dir, "sub"));
-    writeFileSync(join(dir, "sub", "new.js"), "new");
-    const oldTime = new Date("2020-01-01").getTime() / 1000;
-    const newTime = new Date("2026-01-01").getTime() / 1000;
-    utimesSync(join(dir, "old.js"), oldTime, oldTime);
-    utimesSync(join(dir, "sub", "new.js"), newTime, newTime);
-    const newest = newestMtimeMs(dir);
-    assert.ok(newest !== null);
-    assert.equal(Math.round(newest! / 1000), Math.round(newTime));
-  });
+function tscOutput(tsconfigPath: string, verdict: "up to date" | "would build"): string {
+  const line = verdict === "up to date"
+    ? `08:00:00 - Project '${tsconfigPath}' is up to date`
+    : `08:00:00 - A non-dry build would build project '${tsconfigPath}'`;
+  return `${line}\n`;
+}
+
+test("tscProjectUpToDate: TRUE when tsc's own report says 'is up to date' for THIS project", () => {
+  const tsconfigPath = "/repo/packages/judge/tsconfig.json";
+  const run = () => tscOutput(tsconfigPath, "up to date");
+  assert.equal(tscProjectUpToDate(tsconfigPath, { run }), true);
 });
 
-test("newestMtimeMs returns null for a directory that does not exist -- distinct from 0", () => {
-  assert.equal(newestMtimeMs("/does/not/exist/at/all"), null);
+test("tscProjectUpToDate: FALSE when tsc reports this project would (re)build", () => {
+  const tsconfigPath = "/repo/packages/judge/tsconfig.json";
+  const run = () => tscOutput(tsconfigPath, "would build");
+  assert.equal(tscProjectUpToDate(tsconfigPath, { run }), false);
 });
 
-test("newestMtimeMs returns null for a genuinely empty directory, never 0 standing in for 'oldest possible'", () => {
-  withTempDir((dir) => {
-    assert.equal(newestMtimeMs(dir), null);
-  });
+test("tscProjectUpToDate reads the line for THIS project, not a referenced dependency's", () => {
+  // `tsc --build --dry` reports on the whole reference chain in one run -- a dependency reading "up to
+  // date" must never be read as THIS project's own verdict.
+  const tsconfigPath = "/repo/packages/judge/tsconfig.json";
+  const run = () => [
+    tscOutput("/repo/packages/evidence/tsconfig.json", "up to date"),
+    tscOutput(tsconfigPath, "would build"),
+  ].join("");
+  assert.equal(tscProjectUpToDate(tsconfigPath, { run }), false);
 });
 
-// --- distIsStale: pure, and the null/false distinction is the whole point ---
-
-test("distIsStale: source strictly newer than dist is TRUE", () => {
-  assert.equal(distIsStale(2000, 1000), true);
+test("tscProjectUpToDate: NULL when tsc's report never mentions this project at all -- never guessed", () => {
+  const tsconfigPath = "/repo/packages/judge/tsconfig.json";
+  const run = () => tscOutput("/repo/packages/evidence/tsconfig.json", "up to date");
+  assert.equal(tscProjectUpToDate(tsconfigPath, { run }), null);
 });
 
-test("distIsStale: dist newer than or equal to source is FALSE -- a fresh build", () => {
-  assert.equal(distIsStale(1000, 2000), false);
-  assert.equal(distIsStale(1000, 1000), false);
+test("MUTATION target: tscProjectUpToDate is NULL when the run throws with no usable stdout, never coerced to true or false", () => {
+  const run = () => { throw new Error("npx: command not found"); };
+  assert.equal(tscProjectUpToDate("/repo/packages/judge/tsconfig.json", { run }), null);
 });
 
-test("distIsStale: either side unreadable is NULL, never coerced to false -- 'could not tell' and 'fresh' need opposite responses", () => {
-  assert.equal(distIsStale(null, 1000), null);
-  assert.equal(distIsStale(1000, null), null);
-  assert.equal(distIsStale(null, null), null);
+test("tscProjectUpToDate reads stdout off a thrown error too -- --dry can exit non-zero on a real config problem and still report", () => {
+  const tsconfigPath = "/repo/packages/judge/tsconfig.json";
+  const run = () => {
+    const error = new Error("tsc exited 1") as Error & { stdout?: string };
+    error.stdout = tscOutput(tsconfigPath, "would build");
+    throw error;
+  };
+  assert.equal(tscProjectUpToDate(tsconfigPath, { run }), false);
 });
 
-// --- END TO END, real fixture: a stale dist under a foreign checkout, reproducing the #256 incident shape ---
+test("LIVE: tscProjectUpToDate against this repo's own freshly built judge package reads TRUE", () => {
+  // Not a fixture -- the real package, the real tsconfig, right after this suite's own `pretest` build.
+  // If this ever reads anything but true on a clean build, the parsing itself has drifted from tsc's
+  // real output shape, which no fixture can catch on its own.
+  const repoRoot = new URL("../../../", import.meta.url).pathname;
+  const tsconfigPath = join(repoRoot, "packages/judge/tsconfig.json");
+  assert.equal(tscProjectUpToDate(tsconfigPath), true);
+});
 
-test("THE #256 SHAPE: a foreign checkout whose dist predates its own source is BOTH detected -- wrong checkout AND stale", () => {
+// --- END TO END: whose dist a resolution reaches is a SEPARATE fact from whether that dist is current ---
+
+test("THE #256 SHAPE: a foreign checkout's dist is detected as foreign, and its freshness is asked independently", () => {
   withTempDir((dir) => {
     const foreignRoot = join(dir, "a11y-witness");
-    const srcDir = join(foreignRoot, "packages", "judge", "src");
-    const distDir = join(foreignRoot, "packages", "judge", "dist");
-    mkdirSync(srcDir, { recursive: true });
-    mkdirSync(distDir, { recursive: true });
-    const distTime = new Date("2026-09-05T17:21:00Z").getTime() / 1000;
-    const srcTime = new Date("2026-09-07T04:58:00Z").getTime() / 1000; // newer -- source moved after the build
-    writeFileSync(join(distDir, "rules.js"), "compiled");
-    utimesSync(join(distDir, "rules.js"), distTime, distTime);
-    writeFileSync(join(srcDir, "rules.ts"), "source");
-    utimesSync(join(srcDir, "rules.ts"), srcTime, srcTime);
-
+    mkdirSync(join(foreignRoot, "packages", "judge", "dist"), { recursive: true });
     const resolvedRealPath = join(foreignRoot, "packages", "judge", "dist", "rules.js");
     const thisCheckoutRoot = join(dir, "wt-mine");
 
@@ -140,7 +157,9 @@ test("THE #256 SHAPE: a foreign checkout whose dist predates its own source is B
       "the whole incident starts here -- a worktree reading a DIFFERENT checkout's compiled output");
     assert.equal(checkoutRootFor(resolvedRealPath), foreignRoot);
 
-    const stale = distIsStale(newestMtimeMs(srcDir), newestMtimeMs(distDir));
-    assert.equal(stale, true, "the half a resolution check ALONE misses -- the foreign dist is also stale");
+    const tsconfigPath = join(foreignRoot, "packages", "judge", "tsconfig.json");
+    const run = () => tscOutput(tsconfigPath, "would build");
+    assert.equal(tscProjectUpToDate(tsconfigPath, { run }), false,
+      "the half a resolution check ALONE misses -- the foreign dist is also not up to date");
   });
 });

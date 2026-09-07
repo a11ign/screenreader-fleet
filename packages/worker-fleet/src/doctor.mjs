@@ -13,8 +13,8 @@
 // Exit codes: 0 ready, 1 something is broken (details in the report).
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
@@ -247,48 +247,46 @@ export function checkoutRootFor(resolvedRealPath) {
   return idx === -1 ? null : resolvedRealPath.slice(0, idx);
 }
 
-/**
- * Pure-ish (I/O injectable): the newest mtime, in ms, among every FILE recursively under `dir`. `null` when
- * `dir` does not exist or is empty -- distinct from `0`, which would read as "the oldest possible file" and
- * make every real file look newer by comparison.
- *
- * @param {string} dir
- * @param {{ readdir?: typeof readdirSync, stat?: typeof statSync }} [deps]
- * @returns {number | null}
- */
-export function newestMtimeMs(dir, { readdir = readdirSync, stat = statSync } = {}) {
-  /** @type {string[]} */
-  let relativePaths;
-  try {
-    relativePaths = /** @type {string[]} */ (readdir(dir, { recursive: true }));
-  } catch {
-    return null;
-  }
-  let newest = -Infinity;
-  for (const rel of relativePaths) {
-    let info;
-    try {
-      info = stat(join(dir, rel));
-    } catch {
-      continue; // a race between listing and stat-ing (removed, or a broken symlink) -- skip, don't guess
-    }
-    if (info.isFile() && info.mtimeMs > newest) newest = info.mtimeMs;
-  }
-  return newest === -Infinity ? null : newest;
-}
+/** @type {(cmd: string, args: string[]) => string} */
+const defaultTscRun = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8" });
 
 /**
- * Pure: is the source genuinely newer than the dist it was compiled to? `null`, not `false`, when either
- * side could not be read -- "stale" and "could not tell" need opposite responses (build vs. investigate),
- * and collapsing them would report a filesystem error as a clean build.
+ * Whether `tsc --build --dry` -- the SAME authority the real build uses, deferred to rather than
+ * reimplemented -- considers `tsconfigPath`'s own outputs up to date.
  *
- * @param {number | null} srcNewestMs
- * @param {number | null} distNewestMs
+ * NOT a timestamp comparison, and that correction cost a wrong first version of this check (#256, live-
+ * measured): a directory's mtime does not move on rewrite; a file's mtime moves on `git checkout` with no
+ * content change at all, which is the ordinary case of switching branches; and `tsc --build` itself is
+ * content-addressed for the files it actually recompiles, so a real build can be legitimately up to date
+ * with source files whose mtimes are newer than its outputs. Measured on two live worktrees straight
+ * after a branch switch: several source files newer than `dist/index.js`, and `tsc --build --dry` still
+ * correctly reported "is up to date". A raw mtime comparison would have flagged both as stale --
+ * permanently, on every worktree, the moment `git checkout` runs -- which is exactly the "readiness
+ * command that cries wolf" this file's own `advise` doc warns against.
+ *
+ * `null`, not `false`, when the run failed outright or its report never mentioned this project at all --
+ * "could not tell" and "not up to date" need opposite responses (investigate vs. rebuild), and this repo's
+ * own rule is that a lookup failure is never silently read as a clean answer.
+ *
+ * @param {string} tsconfigPath
+ * @param {{ run?: (cmd: string, args: string[]) => string }} [deps]
  * @returns {boolean | null}
  */
-export function distIsStale(srcNewestMs, distNewestMs) {
-  if (srcNewestMs == null || distNewestMs == null) return null;
-  return srcNewestMs > distNewestMs;
+export function tscProjectUpToDate(tsconfigPath, { run = defaultTscRun } = {}) {
+  /** @type {string} */
+  let output;
+  try {
+    output = run("npx", ["tsc", "--build", "--dry", tsconfigPath]);
+  } catch (error) {
+    // `--dry` still exits 0 for a stale project (measured); a thrown error here is a REAL failure --
+    // a missing tsconfig, a syntax error blocking even the dry check -- and its stdout, if any, is still
+    // worth reading rather than discarded.
+    output = /** @type {{stdout?: string}} */ (error)?.stdout ?? "";
+    if (!output) return null;
+  }
+  const line = output.split("\n").find((l) => l.includes(tsconfigPath));
+  if (!line) return null;
+  return /is up to date/.test(line);
 }
 
 /**
@@ -345,22 +343,20 @@ function checkCrossPackageDist() {
 
   // THE HALF A RESOLUTION CHECK ALONE MISSES: resolving to your OWN tree is no protection if your own
   // dist is stale -- so this checks freshness of whichever checkout the specifier ACTUALLY resolved to,
-  // not always this one.
+  // not always this one. `tsc --build --dry`, never a raw mtime comparison -- see `tscProjectUpToDate`'s
+  // own doc for the live-measured reason.
   const distRoot = checkoutRootFor(resolvedRealPath) ?? thisCheckoutRoot;
-  const distDir = resolve(distRoot, "packages/judge/dist");
-  const srcDir = resolve(distRoot, "packages/judge/src");
-  const distNewest = newestMtimeMs(distDir);
-  const srcNewest = newestMtimeMs(srcDir);
-  const stale = distIsStale(srcNewest, distNewest);
-  if (stale === null) {
-    return advise("dist-freshness", `could not compare packages/judge/src and dist under ${distRoot} -- `
-      + "one or both are unreadable", "npm run build");
+  const tsconfigPath = resolve(distRoot, "packages/judge/tsconfig.json");
+  const upToDate = tscProjectUpToDate(tsconfigPath);
+  if (upToDate === null) {
+    return advise("dist-freshness", `could not ask tsc whether ${tsconfigPath} is up to date`,
+      "npm run build");
   }
-  if (!stale) {
-    return add("dist-freshness", true, `packages/judge/dist under ${distRoot} is newer than its own source`);
+  if (upToDate) {
+    return add("dist-freshness", true, `packages/judge under ${distRoot} is up to date (tsc --build --dry)`);
   }
-  advise("dist-freshness", `packages/judge/dist under ${distRoot} is OLDER than its own source -- a build `
-    + "compiled before the source it now reflects", "npm run build   # in that checkout");
+  advise("dist-freshness", `packages/judge under ${distRoot} is NOT up to date (tsc --build --dry) -- a `
+    + "build compiled before the source it now reflects", "npm run build   # in that checkout");
 }
 
 // The DEFAULT here was "codex", and every part of that was wrong. `judge.ts` has no codex case at all —
