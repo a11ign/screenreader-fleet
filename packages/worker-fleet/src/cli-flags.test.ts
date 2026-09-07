@@ -395,9 +395,21 @@ test("CLAUDE.md states the real guarded count, and that nothing is exempt", () =
   const stated = doc.match(/\*\*ALL (\d+) are guarded/);
   assert.ok(stated, "CLAUDE.md must state the count as `**ALL N are guarded`");
   assert.equal(Number(stated[1]), Object.keys(GUARDED).length, "CLAUDE.md's guarded count is stale");
-  // And the claim that nothing is exempt must be true, not just written.
-  assert.equal(UNGUARDED.size, 0,
-    "CLAUDE.md says the exemption list is empty; if you add one, say so there and give a reason here");
+  // AND EVERY EXEMPTION IS NAMED IN THE PROSE, rather than the prose asserting there are none.
+  //
+  // This read `assert.equal(UNGUARDED.size, 0)` with a message telling the next person to "say so there
+  // and give a reason here" — advice the assertion itself made impossible to follow, because no edit to
+  // CLAUDE.md can satisfy `=== 0`. The first real exemption walked straight into it: `#164` added one,
+  // for a measured constraint, and the only ways forward were to delete a correct exemption or to edit a
+  // test the row was not about.
+  //
+  // Checking that each exemption is NAMED costs the same and cannot go stale as a count does: it is the
+  // difference between pinning a NUMBER a human retypes and pinning the FACT that the two lists agree.
+  // #205 removes the remaining numeral above; this is the same move applied to the claim beside it.
+  for (const path of UNGUARDED) {
+    assert.ok(doc.includes(path), `CLAUDE.md must NAME the exemption \`${path}\` and say why it is one. `
+      + "An exemption the documentation does not mention is one nobody reviews.");
+  }
 });
 
 
