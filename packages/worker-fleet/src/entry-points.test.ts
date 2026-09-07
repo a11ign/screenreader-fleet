@@ -48,7 +48,65 @@ function entryPoints(): string[] {
       if (!match[1].endsWith(".test.ts")) found.add(match[1]);
     }
   }
+  // AND EVERY WORKFLOW, because an entry point CI runs directly was invisible here.
+  //
+  // Discovery read `package.json` alone, so a script invoked by a GitHub workflow and by nothing else was
+  // never checked. Widening it on 2026-09-07 found THREE unguarded entry points that had never been seen:
+  // `scripts/ci-changed.mjs` (the concatenated form this file's second test forbids),
+  // `packages/lab/src/harnesses/assert-action-report.mjs` (the path-suffix form, the first test's
+  // subject), and `packages/cli/src/action/run.ts`, which had no guard at all -- 95 lines of top-level
+  // code ending in `process.exit`, in a PUBLISHED package.
+  //
+  // This is the same widening the comment above records for `scripts/` versus `packages/`, one source
+  // further out, and it is the third instance in this one file of a guard reaching some of the paths that
+  // need it. `#164` found the identical population boundary in the guarded-CLI census the same night, in a
+  // different guard -- which makes it a class rather than an oversight.
+  //
+  // It matters MORE in a workflow than in an npm script. The concatenated form silently never fires on a
+  // path containing a space, and the RUNNER's checkout path is not something anybody here chooses -- so
+  // the failure arrives as a job exiting 0 having done nothing, indistinguishable from a clean run.
+  for (const file of workflowFiles()) {
+    for (const match of file.matchAll(/(?:^|\s)((?:packages|scripts)\/[^\s]+\.(?:mjs|ts))/g)) {
+      // A WORKFLOW MENTIONS GLOBS AS WELL AS PATHS. `scripts/*.mjs` in a lint or paths-filter line reads
+      // exactly like an entry point to a regex, and the first version of this crashed ENOENT on it.
+      // Requiring the file to exist is the honest filter: a glob is not an entry point, and a path that
+      // has been deleted is `referenced-scripts.test.ts`'s question rather than this one's.
+      if (match[1].endsWith(".test.ts") || match[1].includes("*")) continue;
+      if (existsSync(`${REPO}${match[1]}`)) found.add(match[1]);
+    }
+  }
   return [...found].sort();
+}
+
+/**
+ * The entry points discovered from `package.json` ALONE — the population before the workflow widening.
+ *
+ * Exported from the same regex the discovery uses rather than a second spelling of it, so the two halves
+ * cannot disagree about what an entry point looks like. It exists only so the test can assert that the
+ * widening is contributing something, which a total count cannot say.
+ */
+function npmScriptEntryPoints(): string[] {
+  const pkg = JSON.parse(readFileSync(`${REPO}package.json`, "utf8"));
+  const found = new Set<string>();
+  for (const command of Object.values(pkg.scripts as Record<string, string>)) {
+    for (const match of String(command).matchAll(/(?:^|\s)((?:packages|scripts)\/[^\s]+\.(?:mjs|ts))/g)) {
+      if (!match[1].endsWith(".test.ts")) found.add(match[1]);
+    }
+  }
+  return [...found];
+}
+
+/** Every workflow's text, plus `action.yml` — the other places this repo invokes a script by path. */
+function workflowFiles(): string[] {
+  const out: string[] = [];
+  const action = `${REPO}action.yml`;
+  if (existsSync(action)) out.push(readFileSync(action, "utf8"));
+  const dir = `${REPO}.github/workflows`;
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir)) {
+    if (name.endsWith(".yml") || name.endsWith(".yaml")) out.push(readFileSync(`${dir}/${name}`, "utf8"));
+  }
+  return out;
 }
 
 test("every npm entry point refuses to run when imported", () => {
@@ -64,6 +122,18 @@ test("every npm entry point refuses to run when imported", () => {
   const typescript = points.filter((p) => p.endsWith(".ts"));
   assert.ok(typescript.length >= 5,
     `found ${typescript.length} .ts entry points; the pattern has stopped matching TypeScript`);
+
+  // AND THE WORKFLOW HALF, PINNED SEPARATELY, for the same reason the `.ts` count is: a total of 80
+  // cannot tell 80 from `package.json` + 0 from workflows apart from 77 + 3, and the all-npm reading is
+  // exactly the blindness this widening was added to end. Measured 2026-09-07: 77 from `package.json`
+  // alone, 80 with workflows, and the three additions were all unguarded.
+  //
+  // Named rather than counted. A count would survive the set changing to three DIFFERENT files, and what
+  // this pins is that CI's own directly-invoked scripts are in the population at all.
+  const fromWorkflows = points.filter((p) => !npmScriptEntryPoints().includes(p));
+  assert.ok(fromWorkflows.length >= 1,
+    "no entry point was discovered from a workflow, so the widening has stopped matching. `ci.yml` "
+    + "invokes `scripts/ci-changed.mjs` with `node` directly; if that is still true this cannot be empty.");
 
   const unguarded = points.filter((path) => {
     const src = readFileSync(`${REPO}${path}`, "utf8");
