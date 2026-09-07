@@ -265,6 +265,10 @@ const GUARDED: Record<string, string> = {
   "packages/control/src/fleet-status.mjs": JSON_REPORTER,
   "packages/lab/src/training/capture-status.mjs": JSON_REPORTER,
   "packages/lab/scripts/lab-inventory.mjs": JSON_REPORTER,
+  "scripts/pr-hold.mjs":
+    "it WRITES a `session:` label that decides whether `merge-guard` refuses a PR (#266). `--session` "
+    + "says who is taking the hold and `--steal` displaces whoever has it, so a discarded flag either "
+    + "takes a hold in nobody's name or fails to displace the person it just announced displacing",
   // Landed on `main` while this branch was open — the third such batch, which is itself the argument for
   // #205: a census pinned to a hand-written number is stale the moment anyone else merges a CLI.
   "scripts/changeset-precise.mjs":
