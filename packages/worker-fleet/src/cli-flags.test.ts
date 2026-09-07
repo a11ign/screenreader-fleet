@@ -84,6 +84,13 @@ const GUARDED: Record<string, string> = {
   "scripts/merge-queue.mjs":
     "it MERGES. `--merge` takes the PR number as the next argv entry, so a mistyped flag does not "
     + "merely run the default -- it drops the target and the command acts on whatever the default is",
+  "scripts/close-rows-for-merged-pr.mjs":
+    "takes the PR number POSITIONALLY and no flags, so refuseUnknownFlags([]) with an EMPTY list -- the "
+    + "same case as merge-guard.mjs, and for a sharper reason: it CLOSES ISSUES. A discarded argument "
+    + "would have it answer about a different PR than the one that merged, and closing the wrong row is "
+    + "not a wrong answer you can read and dismiss, it is a write. Its import is RELATIVE rather than the "
+    + "package specifier, because its workflow job has only actions/checkout -- no npm ci, no build, no "
+    + "dist (#330/#331).",
   "scripts/close-merged-rows.mjs":
     "it CLOSES issues. Takes a positional commit range; the `--json`/`--jq` in the file are passed "
     + "onward to `gh` and are not this command's own",
