@@ -290,7 +290,7 @@ const GUARDED: Record<string, string> = {
  * CLI cannot join them without a test failing, which is the difference between a known gap and an unknown
  * one. Guarding one means deleting its line.
  */
-const UNGUARDED = new Set<string>([
+const UNGUARDED: Record<string, string> = {
   // NO LONGER EMPTY, as of 2026-09-07 (#164), and the single entry is a real constraint rather than an
   // oversight — which is exactly what this set exists to record.
   //
@@ -308,8 +308,12 @@ const UNGUARDED = new Set<string>([
   // ITS ONE FLAG IS `--evaluating`, read at the top of `main()`. A mistyped one is discarded and the
   // command answers the stricter question instead — which fails closed, and is the reason this exemption
   // is affordable at all.
-  "scripts/check-schema-migration.mjs",
-]);
+  "scripts/check-schema-migration.mjs":
+    "copied into a throwaway directory and run there by `migration-gate-refuses.test.ts`, so a workspace "
+    + "import of `cli-flags.mjs` dies on startup with ERR_MODULE_NOT_FOUND. Its one flag, `--evaluating`, "
+    + "fails CLOSED when discarded -- the command answers the stricter question -- which is what makes "
+    + "this exemption affordable rather than a hole",
+};
 
 /**
  * Does this file take a command line? The guard itself reads argv, and is the implementation.
@@ -380,7 +384,7 @@ test("every guarded CLI still calls the guard", () => {
   for (const [path, why] of Object.entries(GUARDED)) {
     const source = readFileSync(join(REPO, path), "utf8");
     assert.match(source, /refuseUnknownFlags\(/, `${path} must refuse unknown flags — ${why}`);
-    assert.ok(!UNGUARDED.has(path), `${path} is guarded; delete its UNGUARDED line`);
+    assert.ok(!(path in UNGUARDED), `${path} is guarded; delete its UNGUARDED line`);
   }
 });
 
@@ -388,7 +392,7 @@ test("the unguarded list names files that exist", () => {
   // A stale entry is a list that lies: it silently exempts nothing while making the gap look larger than
   // it is, and it would hide a rename — the renamed file would fail the next test as a surprise, and the
   // obvious fix would be to add it rather than to notice it was already meant to be there.
-  for (const path of UNGUARDED) {
+  for (const path of Object.keys(UNGUARDED)) {
     assert.ok(existsSync(join(REPO, path)), `${path} is on the unguarded list and does not exist`);
   }
 });
@@ -397,37 +401,39 @@ test("a new CLI cannot quietly join the unguarded ones", () => {
   // The rollout is partial and that is a decision, but an UNCOUNTED gap is not one. Anything discovered
   // that is neither guarded nor on the known list fails here, so the list can only shrink.
   const surprises = commandLineModules()
-    .filter((path) => !(path in GUARDED) && !UNGUARDED.has(path));
+    .filter((path) => !(path in GUARDED) && !(path in UNGUARDED));
   assert.deepEqual(surprises, [],
     "these read argv and neither refuse unknown flags nor appear in UNGUARDED. Guard them "
     + "(preferred — an ignored flag runs the default and reports success), or add them with a reason");
 });
 
-test("CLAUDE.md states the real guarded count, and that nothing is exempt", () => {
-  // I updated this number by hand three times and TWICE the edit silently did not match, so the doc read
-  // "Guarded on the five" through several commits whose messages said otherwise. A number a human retypes
-  // is a number that drifts — this repo's own rule, which I broke while applying it elsewhere.
-  const doc = readFileSync(join(REPO, "CLAUDE.md"), "utf8");
-  const stated = doc.match(/\*\*ALL (\d+) are guarded/);
-  assert.ok(stated, "CLAUDE.md must state the count as `**ALL N are guarded`");
-  assert.equal(Number(stated[1]), Object.keys(GUARDED).length, "CLAUDE.md's guarded count is stale");
-  // AND EVERY EXEMPTION IS NAMED IN THE PROSE, rather than the prose asserting there are none.
-  //
-  // This read `assert.equal(UNGUARDED.size, 0)` with a message telling the next person to "say so there
-  // and give a reason here" — advice the assertion itself made impossible to follow, because no edit to
-  // CLAUDE.md can satisfy `=== 0`. The first real exemption walked straight into it: `#164` added one,
-  // for a measured constraint, and the only ways forward were to delete a correct exemption or to edit a
-  // test the row was not about.
-  //
-  // Checking that each exemption is NAMED costs the same and cannot go stale as a count does: it is the
-  // difference between pinning a NUMBER a human retypes and pinning the FACT that the two lists agree.
-  // #205 removes the remaining numeral above; this is the same move applied to the claim beside it.
-  for (const path of UNGUARDED) {
-    assert.ok(doc.includes(path), `CLAUDE.md must NAME the exemption \`${path}\` and say why it is one. `
-      + "An exemption the documentation does not mention is one nobody reviews.");
+test("every exemption declares its own reason HERE — no count, and CLAUDE.md is not read", () => {
+  /*
+   * #205. This test used to read CLAUDE.md for two figures: `**ALL N are guarded**` and a claim that the
+   * exemption list was empty. Both were true when written and both went stale by ordinary merging.
+   *
+   * The count moved SIX times in one night — 75, 76, 77, 79, 82, 85 — each value correct at the commit
+   * that wrote it. The last move happened TWENTY MINUTES after it was corrected, because three CLIs
+   * landed on `main` in between. That is not a number going wrong; it is a number that cannot stay right
+   * for longer than the interval between merges, and this repository's own rule already names the shape:
+   * a derived artefact is true of exactly one commit range.
+   *
+   * So nothing here counts anything. The INVARIANT is asserted instead, by the discovery test above:
+   * every argv-reading module is guarded or classified. That claim cannot go stale, because it is
+   * recomputed from the tree on every run rather than compared against a sentence somebody retyped.
+   *
+   * What remains worth pinning is that an exemption is a DECISION with a reason attached, not a line
+   * somebody added to make a test pass — so the reason lives beside the entry and is asserted to be
+   * substantive. `git-spawn-classification.test.ts` classifies rather than counts for the same reason.
+   */
+  // Existence is NOT re-checked here: "the unguarded list names files that exist" above already does it,
+  // and a second spelling of one fact is the shape this repo pays for most.
+  for (const [path, why] of Object.entries(UNGUARDED)) {
+    assert.ok(why.length > 40,
+      `${path} is exempt from the flag guard with no real reason given. An exemption without one is `
+      + "indistinguishable from an oversight, which is the whole thing this list exists to prevent.");
   }
 });
-
 
 test("the guard never fires on an IMPORTING command's flags", () => {
   // THE DEFECT THIS INTRODUCED, an hour after the guards went in. These calls sit at module top level, so
