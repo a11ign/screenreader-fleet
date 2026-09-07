@@ -18,14 +18,14 @@ import { execFileSync } from "node:child_process";
 import { sandboxGitEnv } from "./git-safe-env.mjs";
 // The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
 // `protocol-version.mjs` is dependency-free for exactly this: safe to import from a portable tree.
-import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11y-witness/nvda-worker/protocol-version";
+import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11ign/nvda-worker/protocol-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
 // the same question before every run and a second copy of "is this worker stale" is a second answer.
 import { expectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
-import { errorText } from "@a11y-witness/nvda-worker/error-text";
+import { errorText } from "@a11ign/nvda-worker/error-text";
 import { requestJson } from "./worker-http.mjs";
 
 /**

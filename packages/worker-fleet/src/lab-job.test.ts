@@ -398,7 +398,7 @@ test("a setenv value reaches systemd without a backreference", () => {
 });
 
 test("a job that pulled rebuilds, or a gate scores compiled code that is not the code", () => {
-  // `@a11y-witness/judge/rules` resolves to `dist/rules.js`, so `rules:gate` runs COMPILED output while a
+  // `@a11ign/judge/rules` resolves to `dist/rules.js`, so `rules:gate` runs COMPILED output while a
   // pull only updates source. Measured 2026-08-22: a newly added 2.4.2 rule fired when imported from source
   // and the gate reported `0/1 MISSING EVIDENCE`, because the lab's dist contained zero occurrences of it.
   //

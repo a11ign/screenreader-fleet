@@ -67,7 +67,7 @@ import { request as httpsRequest } from "node:https";
  * the original 560,000 kept above 520,000. `budget-ladder.test.ts` asserts the full sequence, not only the
  * capture attempt inside it.
  *
- * Deliberately NOT imported from `@a11y-witness/nvda-worker`: this package runs on macOS and Linux and must
+ * Deliberately NOT imported from `@a11ign/nvda-worker`: this package runs on macOS and Linux and must
  * not depend on a win32-only one. `budget-ladder.test.ts` enforces the relationship instead, over every
  * client it DISCOVERS rather than a list -- which is how the 300 s clients stayed invisible while a guard
  * for exactly this existed and read one hardcoded path.

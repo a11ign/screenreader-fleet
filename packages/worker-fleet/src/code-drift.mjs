@@ -4,7 +4,7 @@
  * of `worker-code-check.mjs` that has no opinion about what "expected" means.
  *
  * Split out on 2026-09-05 so a SECOND caller could reach it. `worker-code-check.mjs`'s `expectedWorkerCode`
- * imports `codeVersion`/`workerSourceDir` through a SUBPATH export (`@a11y-witness/nvda-worker/code-version`)
+ * imports `codeVersion`/`workerSourceDir` through a SUBPATH export (`@a11ign/nvda-worker/code-version`)
  * rather than a relative path, because a relative one drags `nvda-worker`'s `.mjs` files into
  * `worker-fleet`'s own tsc project and the build dies with TS5055 ("would overwrite input file"). That
  * subpath resolves through `node_modules` — fine for `worker-fleet`, which is a normal installed package,

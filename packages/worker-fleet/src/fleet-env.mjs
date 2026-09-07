@@ -80,7 +80,7 @@ export function configuredWorkers() {
 // never published (ADR 0012), so this constant is a real cycle -- audit §3.2 -- and NOT the sanctioned
 // direction: `control` reaching `worker-fleet` by relative import is fine (control has no
 // `node_modules`); this file, reaching back into a package that will not exist in an installed
-// `node_modules/@a11y-witness/worker-fleet`, is what the audit calls "ships code whose data file lives in
+// `node_modules/@a11ign/worker-fleet`, is what the audit calls "ships code whose data file lives in
 // a package that is never published".
 //
 // FIXED 2026-09-06 by injection, not by moving this module: `doctor.mjs` and `check-worker-code.mjs` are

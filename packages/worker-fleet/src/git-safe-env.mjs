@@ -7,7 +7,7 @@
 //
 // This package publishes `check-worker-code.mjs` and `deploy-worker.mjs` as `bin` entries
 // (`package.json`), so every file they import -- `code-drift.mjs` among them -- ships in the published
-// tarball and can only import from INSIDE `@a11y-witness/worker-fleet`. The repo-root `scripts/` directory
+// tarball and can only import from INSIDE `@a11ign/worker-fleet`. The repo-root `scripts/` directory
 // does not exist once this package is installed from npm, so importing it here would work in this
 // monorepo and break for every real consumer. That is the entire reason this file exists rather than a
 // relative import to the root: not stylistic preference, a publish-boundary constraint (see ADR 0004).

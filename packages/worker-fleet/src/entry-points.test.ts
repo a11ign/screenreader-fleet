@@ -318,7 +318,7 @@ test("every declared bin's entry-point guard survives being reached through a sy
   assert.ok(sources.length >= 6, `only found ${sources.length} declared bin sources; the discovery is `
     + "broken, not the codebase clean");
 
-  // `a11y-nvda-worker` is Windows-only by ADR 0001, and npm's Windows bin shim is a `.cmd`/`.ps1` wrapper
+  // `a11ign-nvda-worker` is Windows-only by ADR 0001, and npm's Windows bin shim is a `.cmd`/`.ps1` wrapper
   // that does not depend on a shebang or a symlink the way POSIX's does — so this exposure is real on
   // every platform this repo actually ships the bin FOR except this one. It carries the identical pattern
   // and should still be fixed, but `server.mjs` is a capture-path file held under this repo's own

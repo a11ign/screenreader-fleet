@@ -36,8 +36,8 @@ rem the bootstrap through a scheduled task, which starts a fresh session and inh
 rem here -- so an exported variable would work on the elevated path and silently vanish on the other,
 rem which is the kind of "works when I tested it" difference this project keeps paying for.
 if exist "%~dp0operator-key.pub" (
-  if not exist "C:\ProgramData\a11y-witness" mkdir "C:\ProgramData\a11y-witness" >> "%LOG%" 2>&1
-  copy /y "%~dp0operator-key.pub" "C:\ProgramData\a11y-witness\operator-key.pub" >> "%LOG%" 2>&1
+  if not exist "C:\ProgramData\a11ign" mkdir "C:\ProgramData\a11ign" >> "%LOG%" 2>&1
+  copy /y "%~dp0operator-key.pub" "C:\ProgramData\a11ign\operator-key.pub" >> "%LOG%" 2>&1
   echo [%DATE% %TIME%] operator key staged from the install media >> "%LOG%"
 ) else (
   echo [%DATE% %TIME%] no operator-key.pub beside this script; this box will need one console >> "%LOG%"
