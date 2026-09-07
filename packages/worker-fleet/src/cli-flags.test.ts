@@ -48,6 +48,13 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "scripts/merge-guard.mjs":
+    "it decides whether a PR has actually been TESTED, so a discarded argument would answer about a "
+    + "different PR than the one asked about -- and its whole reason for existing is that a confident "
+    + "answer to the wrong question reads exactly like a correct one. It takes the PR number "
+    + "POSITIONALLY and no flags, which is why the guarded list is empty rather than absent. Added to "
+    + "this table the same night it merged, because it landed on `main` from #167 while #164's own "
+    + "branch was open and turned that branch red: a derived count is only true of one commit range",
   "scripts/row-claim.mjs":
     "THE COMMAND THE PULL LOOP RESTS ON. Measured 2026-09-07, before the guard: `check 161 --jsonn` "
     + "printed the ordinary claim line and exited 0, and so did `--format=json` -- both read as a "
