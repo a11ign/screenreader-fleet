@@ -62,6 +62,7 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@a11y-witness/judge": "0.1.0",
     "@a11y-witness/nvda-worker": "0.1.0"
   },
   "devDependencies": {

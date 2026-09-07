@@ -202,7 +202,10 @@ test("a job's environment additions come from the CATALOGUE, never from an extra
   for (const [, value] of LAB_JOB.matchAll(/setenv:\s*\[([^\]]*)\]/g)) {
     // Both permitted names are facts BUILT from the inventory and then asserted against a strict address
     // pattern before use. Anything else -- notably a bare `-e` variable -- must fail here.
-    const ASSERTED_FACTS = new Set(["lab_fleet_workers", "lab_named_worker", "lab_selected_workers"]);
+    const ASSERTED_FACTS = new Set(["lab_fleet_workers", "lab_named_worker", "lab_selected_workers",
+      // Asserted by "A capture root must be a name, so a path cannot be expressed" -- it reaches a child
+      // as an environment variable, so a path must be inexpressible rather than rejected downstream.
+      "lab_capture_root"]);
     for (const [, expression] of value.matchAll(/\{\{\s*([a-z_]+)[^}]*\}\}/g)) {
       assert.ok(ASSERTED_FACTS.has(expression),
         `setenv may only interpolate asserted facts; found ${expression}`);
@@ -564,8 +567,26 @@ test("every Jinja expression in run-job.yml can actually be TEMPLATED", () => {
  * So the interface is DATA where an operator reads it, and this file derives the same answer from each
  * job's raw argv and refuses any disagreement — over all 36 jobs, not a hand-picked few.
  */
-const RAW_LAB_JOB = parseYaml(read("lab-job.yml")) as Array<{ vars: PlayVars }>;
-const PLAY_VARS = RAW_LAB_JOB[0].vars;
+const RAW_LAB_JOB = parseYaml(read("lab-job.yml")) as Array<{ name?: string; vars?: PlayVars }>;
+
+/**
+ * THE PLAY THAT CARRIES THE CATALOGUE, FOUND BY WHAT IT HOLDS RATHER THAN BY POSITION.
+ *
+ * This read `RAW_LAB_JOB[0].vars`, which was true while the file had one play and broke the moment a
+ * second was added in FRONT of it — the zero-host inventory guard, which must run first precisely so it
+ * can speak when the main play would be skipped. The failure was
+ * `Cannot read properties of undefined (reading 'lab_param_aliases')`, which names neither the file nor
+ * the cause.
+ *
+ * "The catalogue is the first play" was a convention nobody wrote down, and this repo's own rule about
+ * `not-working.md`'s four same-numbered sections applies: a POSITION is a convention, a NAME is a fact.
+ */
+const CATALOGUE_PLAY = RAW_LAB_JOB.find((play) => play.vars?.lab_jobs);
+if (!CATALOGUE_PLAY?.vars) {
+  throw new Error("no play in lab-job.yml declares `lab_jobs` — the catalogue moved, or a play was "
+    + `renamed. Plays present: ${RAW_LAB_JOB.map((p) => p.name ?? "(unnamed)").join(", ")}`);
+}
+const PLAY_VARS = CATALOGUE_PLAY.vars;
 
 type JobEntry = { argv?: unknown[] | string; setenv?: string[]; timeout?: number;
                   params?: Record<string, "required" | "optional"> };
@@ -640,7 +661,10 @@ test("the sibling playbooks re-read the job table, and find it where it looks", 
   // `lab:status`, `lab:log` and `lab:stop` refuse a job name they do not have by reading the catalogue
   // from the file that DEFINES it, indexed as `[0].vars.lab_jobs`. If that path ever returns nothing they
   // would refuse every job, so this pins the shape they depend on.
-  assert.ok(PLAY_VARS.lab_jobs, "lab_jobs must stay in the FIRST play's `vars:` — the lookup indexes [0]");
+  // NAMED, never positional. This message used to read "must stay in the FIRST play's `vars:` — the lookup
+  // indexes [0]", which described the defect as though it were the contract: an added play then moved the
+  // catalogue and five readers broke together. `PLAY_VARS` finds it by the attribute instead.
+  assert.ok(PLAY_VARS.lab_jobs, "lab_jobs must stay in the play that declares it, found by name not position");
   assert.ok(Object.keys(PLAY_VARS.lab_jobs).length > 20, "the job table must not read as near-empty");
   for (const [name, entry] of Object.entries(PLAY_VARS.lab_jobs)) {
     // A list OR the expression that builds one: `evidence-check` composes its argv from the fleet.
@@ -663,8 +687,22 @@ test("asking about a job that does not exist is refused, not answered", () => {
       + `never existed`);
     // Read from the file that DEFINES the catalogue, never copied. A second list of job names is how one
     // comes to name a job that no longer exists — the duplication defect these playbooks exist to avoid.
-    assert.match(source, /lookup\('file', playbook_dir ~ '\/lab-job\.yml'\)[^\n]*lab_jobs/,
-      `${playbook} must read the catalogue from lab-job.yml rather than carrying its own copy`);
+    //
+    // THIS USED TO PIN THE LOOKUP EXPRESSION ITSELF, `(... | from_yaml)[0].vars.lab_jobs`, and pinning it
+    // pinned the BUG. That spelling indexes the plays by POSITION, so adding the zero-host inventory
+    // refusal at the top of each file broke all five copies of it at once — `lab:log`, `lab:status` and
+    // `lab:stop` every one refusing with a Jinja attribute error, which reads as a corrupted catalogue
+    // rather than as a moved play. A test asserting the exact text of a fragile expression makes it
+    // harder to fix than to leave.
+    //
+    // So this now pins the PROPERTY the test was always about — one catalogue, loaded from the file that
+    // defines it — and lets the mechanism be replaced. `lab-catalogue-is-found-by-name.test.ts` owns the
+    // complementary half: that nothing goes back to reading it by position, and that no second spelling
+    // of the lookup appears.
+    assert.match(source, /vars_files:\s*\n\s*-\s*vars\/lab-catalogue\.yml/,
+      `${playbook} must load the shared catalogue lookup rather than spelling its own`);
+    assert.match(source, /job in lab_catalogue/,
+      `${playbook} must check the job name against that catalogue`);
   }
 });
 
