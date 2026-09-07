@@ -48,6 +48,17 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "scripts/board-only-check.mjs":
+    "takes no flags; it decides whether a change is board-only, and an ignored argument would answer "
+    + "about a different change than the one asked about",
+  "scripts/piped-exit-status-guard.mjs":
+    "takes the command to inspect POSITIONALLY (argv[2]) and no flags. It exists because a piped exit "
+    + "status reads as the pipe's -- a tool built to end that class must not join it by discarding an "
+    + "argument and reporting on the default",
+  "scripts/ready-label-audit.mjs":
+    "already guards its own flags; classified here so the census records it as checked rather than "
+    + "unseen. It takes none, and audits which rows are pickable -- a discarded argument would report on "
+    + "a different label set than the one asked for",
   "scripts/merge-guard.mjs":
     "it decides whether a PR has actually been TESTED, so a discarded argument would answer about a "
     + "different PR than the one asked about -- and its whole reason for existing is that a confident "
