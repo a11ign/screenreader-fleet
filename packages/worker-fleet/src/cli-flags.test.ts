@@ -269,6 +269,10 @@ const GUARDED: Record<string, string> = {
     "it WRITES a `session:` label that decides whether `merge-guard` refuses a PR (#266). `--session` "
     + "says who is taking the hold and `--steal` displaces whoever has it, so a discarded flag either "
     + "takes a hold in nobody's name or fails to displace the person it just announced displacing",
+  "scripts/stash-whose.mjs":
+    "it reports who holds each stash in a pile SHARED between every worktree (#290). It takes no "
+    + "flags, and a discarded argument would answer about a different question than the one asked -- "
+    + "on the command a worker consults before deciding whether a stash is safe to pop",
   // Landed on `main` while this branch was open — the third such batch, which is itself the argument for
   // #205: a census pinned to a hand-written number is stale the moment anyone else merges a CLI.
   "scripts/changeset-precise.mjs":
