@@ -70,6 +70,13 @@ const GUARDED: Record<string, string> = {
     + "than `arm the standing queue`, and a discarded one would have it sweep the whole queue while the "
     + "caller believed they had narrowed it. Its import is RELATIVE rather than the package specifier, "
     + "because its workflow job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
+  "scripts/queue-stalled.mjs":
+    "takes NO flags -- it REPORTS which armed, green open PRs cannot ever merge as-is against `main` "
+    + "(#361), and never acts (no rebase, no branch update, no close). A discarded argument means the "
+    + "caller wanted something narrower than `examine the standing queue`, and running it anyway silently "
+    + "reports on a different population than the one asked about. Its import is RELATIVE rather than the "
+    + "package specifier, for the same reason as auto-arm-sweep.mjs: it rides the same pull_request "
+    + "trigger, whose job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
   "scripts/merge-guard.mjs":
     "it decides whether a PR has actually been TESTED, so a discarded argument would answer about a "
     + "different PR than the one asked about -- and its whole reason for existing is that a confident "
