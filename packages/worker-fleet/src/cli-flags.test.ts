@@ -225,6 +225,9 @@ const GUARDED: Record<string, string> = {
     "takes its sites POSITIONALLY; the flags in the file are passed onward",
   "packages/lab/scripts/corpus-backup.mjs":
     "--verify-only is the difference between checking a backup and WRITING one",
+  // Its ONLY flag, and the one that decides whether it destroys anything. A mistyped `--aply` must be
+  // refused rather than silently running the reporting default and reading as "nothing to prune".
+  "packages/lab/scripts/corpus-prune-orphans.mjs": "--apply",
   "packages/lab/scripts/corpus-snapshot.mjs":
     "a mistyped --out= writes the snapshot where you will not look for it",
   "packages/lab/scripts/corpus-release.mjs":
