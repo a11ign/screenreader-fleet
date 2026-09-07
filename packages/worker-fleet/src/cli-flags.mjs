@@ -23,6 +23,7 @@
  * two equal, which is this repo's remedy when a duplication is forced.
  */
 import { basename } from "node:path";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /** How far apart two flags may be and still be worth suggesting. One typo, or one word. */
@@ -153,7 +154,38 @@ export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2),
     throw new TypeError("refuseUnknownFlags needs { entry: import.meta.url } — without it the guard runs "
       + "on import and inspects the importing process's flags");
   }
-  if (entry !== pathToFileURL(process.argv[1] ?? "").href) return;
+  // REALPATH'D, and without it this guard silently does not fire through a symlink — #237.
+  //
+  // The entry guards at every call site read
+  // `import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href`, and
+  // this comparison had no `realpathSync`. So when `argv[1]` reaches a script through a symlink — npm's
+  // own `.bin` links are symlinks, which is why the call sites resolve — the OUTER condition is true and
+  // this one is FALSE. `main()` runs; the flag guard returns early and inspects nothing.
+  //
+  // Measured on `piped-exit-status-guard.mjs`, same file, same flag:
+  //
+  //   node scripts/tmp-symlink-probe.mjs --bogus 'echo hi'   -> ran, exit 0, flag IGNORED
+  //   node scripts/piped-exit-status-guard.mjs --bogus '...'  -> refused, exit 2
+  //
+  // Through the symlink the mistyped flag is ignored and the command reports success — which is the
+  // sentence this refusal itself prints as the reason it exists.
+  //
+  // It is a remedy whose TRIGGER is narrower than the thing it guards, the `refreshBrowseBuffer` shape:
+  // reachable from the right path, with a condition that could not be true there. And the census
+  // (`cli-flags.test.ts`) cannot see it, because it asserts a file CONTAINS `refuseUnknownFlags(` — it
+  // cannot ask whether that call can FIRE, so every guarded CLI reads GUARDED either way.
+  //
+  // `realpathSync` THROWS on a path that does not exist, and `process.argv[1]` is absent for `node -e`
+  // and `node --eval`. Absent stays absent rather than becoming a throw: the guard must be inert when
+  // there is no script, never fatal.
+  /** The invoking script's REAL path as a URL, so a symlinked `argv[1]` still matches `entry`. */
+  let invoked;
+  try {
+    invoked = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : "";
+  } catch {
+    invoked = pathToFileURL(process.argv[1] ?? "").href; // unresolvable: compare what we were given
+  }
+  if (entry !== invoked) return;
   const unknown = unknownFlags(argv, known);
   if (unknown.length === 0) return;
   const name = command ?? basename(process.argv[1] ?? "this command");
