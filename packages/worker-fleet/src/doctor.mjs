@@ -11,12 +11,15 @@
 // observed AND the exact command that fixes it, so nothing has to be deduced.
 //
 // Exit codes: 0 ready, 1 something is broken (details in the report).
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
+// The canonical scrubber for this package -- `scripts/git-env.mjs` re-exports the same function for the
+// repo-root scripts. One helper, two entry points, so a git spawn cannot inherit GIT_DIR by either door.
+import { sandboxGitEnv } from "./git-safe-env.mjs";
 import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 import { assessWorker } from "./worker-health.mjs";
@@ -137,6 +140,58 @@ async function httpJson(/** @type {any} */ url) {
  * Reported by `doctor` because that is the command whose whole promise is that every check names its own
  * fix, and because a check nobody runs is one this repo has learned not to write.
  */
+/**
+ * IS THIS CHECKOUT MARKED AS THE PRIMARY, and does that match what it looks like?
+ *
+ * The primary-checkout guards (`pre-commit`, `post-checkout`) are OPT-IN as of #198: they fire only where
+ * `git config --local a11y.primaryCheckout` is `true`. That is the correct default — inferring it from
+ * `.git` being a directory made the hook fire on the lab, which is an ordinary clone, and broke every
+ * `lab:job -e ref=<branch>`.
+ *
+ * But an opt-in guard nobody can find the switch for is an OFF guard, and "unmarked" must not read the
+ * same as "safe". So this reports the state on every run rather than only when something is wrong — the
+ * `isolation` check above takes the same shape for the same reason: a debt that is reported every run is
+ * a known one, and a debt reported never is a forgotten one.
+ *
+ * ADVISORY, never a hard failure. `doctor` exits 0 when a RUN can proceed, and an unmarked checkout can
+ * run perfectly well — it is the fleet-driving machine's protection that is missing, not its capability.
+ * A doctor that refused READY over this would be ignored, which is how a guard gets switched off.
+ *
+ * It does not GUESS which machine deserves the mark. `doctor` runs on laptops, worktrees, the lab and CI,
+ * and telling four of those five to mark themselves would be the #198 defect wearing an advisory's
+ * clothes. It states what is true and names the command; the operator decides.
+ */
+function checkPrimaryCheckoutMark() {
+  const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+  // A linked worktree's `.git` is a FILE (`gitdir: ...`) and it SHARES `.git/config` with the repository
+  // it was created from -- so the mark alone reads true inside every worktree off a marked primary. Both
+  // conditions, exactly as `scripts/git-hooks/lib/is-primary-checkout.sh` requires them; a doctor that
+  // disagreed with the hook it reports on would be worse than silent.
+  /** A linked worktree's `.git` is a FILE; an absent one is neither, and neither is the primary. */
+  let linked;
+  try { linked = !statSync(resolve(root, ".git")).isDirectory(); } catch { linked = false; }
+  /** `git config --get` exits 1 on an absent key: not marked, not an error. */
+  let marked;
+  try {
+    marked = execFileSync("git", ["config", "--local", "--get", "a11y.primaryCheckout"],
+      { cwd: root, encoding: "utf8", env: sandboxGitEnv() }).trim() === "true";
+  } catch {
+    marked = false;
+  }
+  if (linked) {
+    return add("primary checkout", true,
+      "a linked worktree — never the primary, whatever the shared .git/config says");
+  }
+  if (marked) {
+    return add("primary checkout", true,
+      "MARKED — pre-commit refuses commits here and post-checkout keeps it detached at origin/main");
+  }
+  advise("primary checkout",
+    "not marked, so the primary-checkout guards are INERT here. Correct for the lab, a worker or a "
+    + "colleague's clone; wrong for the machine that drives the fleet.",
+    "npm run primary:mark -- --set   (only on the fleet-driving checkout — see docs/primary-checkout.md)");
+}
+
 function checkControlPlaneIsolation() {
   // `~` is a SHELL expansion, not a filesystem one: `existsSync("~/.ssh/...")` is always false, which
   // would make this guard report every machine as compliant. The silent-pass failure mode, in the guard
@@ -472,6 +527,7 @@ function nextCommand() {
  * spot, which is why these guards were placed by reading each file rather than by running a tool over them.
  */
 async function main() {
+  checkPrimaryCheckoutMark();
   checkControlPlaneIsolation();
   await checkJudge();
   await checkWorker();
