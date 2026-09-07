@@ -28,9 +28,19 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 /**
  * The CLIs whose flags are guarded, and the cost each one's silent default has.
  *
- * A partial rollout, deliberately: these are the five where an ignored flag has a MEASURED cost, and the
- * flag list was read out of each file rather than derived. `UNGUARDED` below is the rest, listed so the
- * gap is countable instead of invisible.
+ * NOT A PARTIAL ROLLOUT ANY MORE, and this sentence used to say it was — "these are the five where an
+ * ignored flag has a MEASURED cost" outlived both its number and its premise, since `UNGUARDED` is empty
+ * and every discovered CLI is here. The flag list is still READ OUT of each file rather than derived, for
+ * the reason the header gives.
+ *
+ * WIDENED TO TOP-LEVEL `scripts/` ON 2026-09-07 (#164), which is where this census was blind. The walk
+ * covered two packages, so the claim it backs — *every argv-reading module is guarded or exempted* — was
+ * true of `packages/lab` and `packages/worker-fleet` and silent about a third location holding 22 CLIs,
+ * eleven of them unguarded. Nothing was missed that this test was asked about; it was asked the wrong
+ * question, and no result could have said so. `install-git-hooks.mjs`'s own header had already recorded
+ * the identical gap in a SIBLING guard — *"entry-points.test.ts ... only matches paths under packages/,
+ * so this scripts/ file was invisible to it"* — which is the same population boundary, written down and
+ * never generalised.
  */
 /** Shared by the `--json` reporters, whose only flag is the one that decides who the output is for. */
 const JSON_REPORTER =
@@ -38,6 +48,62 @@ const JSON_REPORTER =
   + "caller then parses the prose";
 
 const GUARDED: Record<string, string> = {
+  "scripts/row-claim.mjs":
+    "THE COMMAND THE PULL LOOP RESTS ON. Measured 2026-09-07, before the guard: `check 161 --jsonn` "
+    + "printed the ordinary claim line and exited 0, and so did `--format=json` -- both read as a "
+    + "machine-readable request that was honoured. Two workers pulled one row twice today; a claim tool "
+    + "that discards a flag is the same failure waiting on the command that coordination runs through",
+  "scripts/merge-queue.mjs":
+    "it MERGES. `--merge` takes the PR number as the next argv entry, so a mistyped flag does not "
+    + "merely run the default -- it drops the target and the command acts on whatever the default is",
+  "scripts/close-merged-rows.mjs":
+    "it CLOSES issues. Takes a positional commit range; the `--json`/`--jq` in the file are passed "
+    + "onward to `gh` and are not this command's own",
+  "scripts/prune-worktrees.mjs":
+    "it REMOVES worktrees. Takes a positional repo root; the `--is-ancestor`/`--porcelain`/`--verify` "
+    + "in the file go onward to git",
+  "scripts/isolation-gate.mjs":
+    "`--all`, plus positional package directories. The npm flags in the file (`--pack-destination`, "
+    + "`--omit=`, `--no-workspaces`) are passed to npm and are not accepted from a caller -- a derived "
+    + "flag list would have accepted all of them",
+  "scripts/known-gaps-index.mjs":
+    "`--write` is the difference between reporting the index and rewriting a tracked document",
+  "scripts/build-packages.mjs":
+    "takes no flags; the `--build` in the file is passed to tsc. Guarded rather than exempted because "
+    + "a build that silently ignores an argument is how a stale `dist` gets shipped, which this repo "
+    + "has paid for twice",
+  "scripts/changed-packages.mjs":
+    "takes no flags; `--name-only` goes onward to git. Its output selects which CI jobs run, so a "
+    + "discarded argument narrows a test run silently",
+  "scripts/check-retired-heads.mjs":
+    "takes no flags at all, and it gates a promotion -- the cheapest possible guard on the most "
+    + "expensive possible mistake",
+  "scripts/install-git-hooks.mjs":
+    "takes no flags; `--get` goes to `git config`. Guarded at the entry rather than inside the "
+    + "exported `installHooks`, which tests drive with injected dependencies",
+  "scripts/update-primary.mjs":
+    "takes no flags; `--detach`/`--quiet` go onward to git",
+  "scripts/board-document.mjs":
+    "renders the PDF a board reads; a discarded flag publishes the wrong document",
+  "scripts/board-report.mjs":
+    "publishes the daily edition as an issue comment",
+  "scripts/board-schedule-liveness.mjs":
+    "reports whether the scheduled board jobs are alive",
+  "scripts/board-summary-check.mjs":
+    "the 21:00 check; `--post` is the difference between reporting and commenting",
+  "scripts/check-scheduled-jobs.mjs":
+    "reports on scheduled jobs",
+  "scripts/ci-changed.mjs":
+    "decides which CI jobs run for a change",
+  "scripts/control-plane-hygiene.mjs":
+    "audits the control plane",
+  "scripts/mutation-check.mjs":
+    "MUTATES A FILE ON DISK and restores it; a discarded `--file` or `--test` would mutate or verify "
+    + "the wrong thing",
+  "scripts/npm-token-liveness.mjs":
+    "checks the publish token",
+  "scripts/reconstitution-drill.mjs":
+    "the recovery drill",
   "packages/lab/scripts/collect-promotion.mjs":
     "it OVERWRITES the shipped model weights, so an unrecognised flag running the default is not a "
     + "wasted run but a promotion installed when somebody asked for --dry-run. It takes exactly one "
@@ -84,7 +150,7 @@ const GUARDED: Record<string, string> = {
   "packages/lab/scripts/build-realism-tier.mjs":
     "run by the `build-realism` job and by `training:train`; a mistyped `--out=` writes the realism tier somewhere the trainer will not read, and the train",
   "packages/lab/scripts/calibrate-abstention.mjs":
-    "takes NO flags — it is configured entirely by environment, so any flag passed to it today is discarded in silence. The `--model` in its output is `-e ",
+    "takes NO flags — it is configured entirely by environment, so any flag passed to it today is discarded in silence. The `--model` in its output is `-e",
   "packages/lab/scripts/evidence-check.mjs":
     "the check that decides whether 2,122 cached captures survive a change. It also takes worker URLs POSITIONALLY, which this guard does not touch",
   "packages/lab/scripts/stability-gate.mjs":
@@ -179,11 +245,24 @@ const GUARDED: Record<string, string> = {
  * one. Guarding one means deleting its line.
  */
 const UNGUARDED = new Set<string>([
-  // EMPTY, as of 2026-08-27. Every `.mjs` that reads argv refuses a flag it does not know.
+  // NO LONGER EMPTY, as of 2026-09-07 (#164), and the single entry is a real constraint rather than an
+  // oversight — which is exactly what this set exists to record.
   //
-  // Kept rather than deleted: the test below discovers every argv-reading module and requires each to be
-  // guarded or listed here WITH A REASON. An empty set means the discovery has nothing to forgive, and
-  // deleting it would remove the only place a future exemption has to justify itself.
+  // `check-schema-migration.mjs` is COPIED INTO A THROWAWAY DIRECTORY AND RUN THERE by
+  // `migration-gate-refuses.test.ts`, which is how that gate is proved end to end rather than by reading
+  // its source. A copied script has no `node_modules`, so importing `@a11y-witness/worker-fleet/cli-flags`
+  // makes it die on startup: measured, `ERR_MODULE_NOT_FOUND: Cannot find package
+  // '@a11y-witness/worker-fleet'`, three tests red. Guarding it would trade a real proof that the
+  // migration gate refuses for a guard against a mistyped flag, which is the worse bargain.
+  //
+  // The alternative — a second copy of `refuseUnknownFlags` with no workspace import — is the
+  // fact-stated-twice shape this repo pays for most, and `git-safe-env.mjs` is the one place a duplicate
+  // was accepted, under a documented publish-boundary constraint that does not apply here.
+  //
+  // ITS ONE FLAG IS `--evaluating`, read at the top of `main()`. A mistyped one is discarded and the
+  // command answers the stricter question instead — which fails closed, and is the reason this exemption
+  // is affordable at all.
+  "scripts/check-schema-migration.mjs",
 ]);
 
 /**
@@ -215,8 +294,17 @@ function commandLineModules(): string[] {
       else if (!entry.isDirectory() && isCommandLine(rel)) found.push(rel);
     }
   };
-  const roots = ["packages/lab", "packages/worker-fleet"]
-    .flatMap((pkg) => ["src", "scripts"].map((sub) => `${pkg}/${sub}`));
+  // TOP-LEVEL `scripts/` IS IN THE POPULATION, and its absence was this census's own defect (#164).
+  //
+  // The walk covered two packages, so `**ALL N are guarded** … DISCOVERS every argv-reading module` was
+  // true of `packages/lab` and `packages/worker-fleet` and SILENT about a third location holding 22
+  // argv-reading CLIs, eleven of them unguarded — `row-claim.mjs` among them, the command the whole pull
+  // loop rests on, where a mistyped `--jsonn` was discarded and the default ran at exit 0. Nothing was
+  // missed that this test was asked about; it was asked the wrong question, and no result could say so.
+  //
+  // Found while adding a CLI under `scripts/` for #161 and noticing this census did not react to it.
+  const roots = ["scripts", ...["packages/lab", "packages/worker-fleet"]
+    .flatMap((pkg) => ["src", "scripts"].map((sub) => `${pkg}/${sub}`))];
   for (const root of roots) {
     // A package without a `scripts/` directory is not a fault; anything else is, and must not be swallowed.
     try { statSync(join(REPO, root)); } catch { continue; }
