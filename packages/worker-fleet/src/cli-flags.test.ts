@@ -70,6 +70,12 @@ const GUARDED: Record<string, string> = {
     + "POSITIONALLY and no flags, which is why the guarded list is empty rather than absent. Added to "
     + "this table the same night it merged, because it landed on `main` from #167 while #164's own "
     + "branch was open and turned that branch red: a derived count is only true of one commit range",
+  "scripts/trunk-revert.mjs":
+    "decides whether a push to main that just failed its own gate is safe to REVERT, so a discarded "
+    + "--push-sha or --before-sha would decide about the wrong commit while reading as a correct answer "
+    + "-- the identical hazard `merge-guard.mjs` is guarded against, one door over. It takes "
+    + "--push-sha=/--before-sha=/--run-url= and no positional argument (unlike merge-guard.mjs's PR "
+    + "number), because a push event carries no PR to number.",
   "scripts/row-claim.mjs":
     "THE COMMAND THE PULL LOOP RESTS ON. Measured 2026-09-07, before the guard: `check 161 --jsonn` "
     + "printed the ordinary claim line and exited 0, and so did `--format=json` -- both read as a "
