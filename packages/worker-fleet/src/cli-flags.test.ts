@@ -370,6 +370,10 @@ const GUARDED: Record<string, string> = {
     + "current branch would silently miss the branches with more instances of the defect than main has "
     + "(measured: 72 vs 48, #310). `--repo` decides WHICH repository is scanned; a discarded one falls "
     + "back to this checkout, reporting on the wrong tree entirely for a rehearsal clone.",
+  "scripts/generate-commands-doc.mjs":
+    "`--check` decides whether this only verifies docs/commands.md against the tree (CI mode, exits 1 "
+    + "on drift) or writes it (default mode); a mistyped `--check` would silently fall into the write "
+    + "branch and overwrite the file instead of catching the staleness a check is supposed to report",
   "scripts/history-purge-rehearsal.mjs":
     "`--source` names the real repository to mirror-clone from; a discarded flag would fail closed "
     + "(refuses without one) rather than silently rewriting the wrong tree, but `--clone-into` and "
