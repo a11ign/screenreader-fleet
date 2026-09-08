@@ -88,6 +88,13 @@ const GUARDED: Record<string, string> = {
     + "reports on a different population than the one asked about. Its import is RELATIVE rather than the "
     + "package specifier, for the same reason as auto-arm-sweep.mjs: it rides the same pull_request "
     + "trigger, whose job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
+  "scripts/update-branch-sweep.mjs":
+    "takes NO flags -- it pushes every armed, green-or-running, behind open PR up to `main`'s current tip "
+    + "after a merge lands (C2, #416's sibling), and never acts on a PR outside that population. A "
+    + "discarded argument would mean the caller wanted something narrower than `catch the whole queue up "
+    + "to main`, and running it anyway silently acts on a different population than the one asked about. "
+    + "Its import is RELATIVE rather than the package specifier, same reason as auto-arm-sweep.mjs and "
+    + "queue-stalled.mjs: its job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
   "scripts/merge-guard.mjs":
     "it decides whether a PR has actually been TESTED, so a discarded argument would answer about a "
     + "different PR than the one asked about -- and its whole reason for existing is that a confident "
