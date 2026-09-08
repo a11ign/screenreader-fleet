@@ -9,7 +9,7 @@
  *
  * MEASURED 2026-08-29, on the control plane the ADR describes:
  *
- *     /root/a11ign/node_modules   56M, 121 packages
+ *     /root/a11y-witness/node_modules   56M, 121 packages
  *     /root/.ssh/a11y-witness_ed25519   the fleet key
  *
  * Exactly the configuration it forbids, on the machine it was written about, for as long as nobody looked.
