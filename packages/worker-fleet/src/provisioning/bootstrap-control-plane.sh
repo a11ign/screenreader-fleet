@@ -202,7 +202,7 @@ fi
 # Generated rather than copied, so this box is self-contained. The PUBLIC half is printed, because it
 # has to reach the workers -- serve-bootstrap.sh hands it to a PXE install, and ssh-key.yml installs it
 # on a box that is already up.
-FLEET_KEY="$HOME/.ssh/a11ign_ed25519"
+FLEET_KEY="$HOME/.ssh/a11y-witness_ed25519"
 if [ -f "$FLEET_KEY" ]; then
   ok "fleet key present ($(ssh-keygen -lf "$FLEET_KEY.pub" 2>/dev/null | awk '{print $2}'))"
 else
@@ -354,7 +354,7 @@ cat <<EOF
     eval "\$(npm run --silent fleet:env)"   # A11Y_WORKERS, derived from that inventory
 
   Build one:
-    packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11ign_ed25519.pub
+    packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub
 
   Manage them (from packages/control/ansible):
     ansible-playbook provision-role.yml -l <host> --check --diff

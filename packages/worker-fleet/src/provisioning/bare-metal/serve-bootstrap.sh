@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Serve the three files a PXE-installing worker fetches at first logon.
 #
-#   ./serve-bootstrap.sh ~/.ssh/a11ign_ed25519.pub
-#   ./serve-bootstrap.sh ~/.ssh/a11ign_ed25519.pub 8099
+#   ./serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub
+#   ./serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub 8099
 #
 # Run it on the machine whose address is in autounattend.xml — normally the iVentoy host, because the
 # box PXE-booted from there moments earlier and can certainly reach it.
@@ -40,7 +40,7 @@ PORT="${2:-8099}"
 
 if [ -z "$KEY" ] || [ ! -f "$KEY" ]; then
   echo "usage: $0 <path-to-public-key> [port]" >&2
-  echo "  e.g. $0 ~/.ssh/a11ign_ed25519.pub" >&2
+  echo "  e.g. $0 ~/.ssh/a11y-witness_ed25519.pub" >&2
   exit 2
 fi
 
