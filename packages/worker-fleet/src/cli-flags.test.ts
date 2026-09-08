@@ -83,6 +83,11 @@ const GUARDED: Record<string, string> = {
     + "-- the identical hazard `merge-guard.mjs` is guarded against, one door over. It takes "
     + "--push-sha=/--before-sha=/--run-url= and no positional argument (unlike merge-guard.mjs's PR "
     + "number), because a push event carries no PR to number.",
+  "scripts/trunk-revert-guard.mjs":
+    "decides whether a merge onto main silently deleted work already there, so a discarded --merge would "
+    + "check the wrong commit while reading as a clean pass -- the identical hazard trunk-revert.mjs is "
+    + "guarded against, and this one runs BEFORE the revert decision even exists: a false PASS here is "
+    + "how the #411 incident happened in the first place. Takes only --merge=<sha>, no positional.",
   "scripts/row-claim.mjs":
     "THE COMMAND THE PULL LOOP RESTS ON. Measured 2026-09-07, before the guard: `check 161 --jsonn` "
     + "printed the ordinary claim line and exited 0, and so did `--format=json` -- both read as a "
