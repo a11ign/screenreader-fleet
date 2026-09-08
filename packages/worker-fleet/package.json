@@ -77,8 +77,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepack": "tsc --build",
-    "prepare": "tsc --build"
+    "prepack": "tsc --build"
   },
   "repository": {
     "type": "git",
