@@ -386,6 +386,14 @@ const GUARDED: Record<string, string> = {
  * one. Guarding one means deleting its line.
  */
 const UNGUARDED: Record<string, string> = {
+  "scripts/run.mjs":
+    "the command DISPATCHER (A3). Its argv is `<command name> [everything the command takes]`, and "
+    + "everything after the name belongs to the child, not to it -- `refuseUnknownFlags` here would "
+    + "refuse `node scripts/run.mjs merge-guard --pr=123` for a flag that is `merge-guard`'s and is "
+    + "perfectly valid. It refuses on its own terms instead, which is the same guarantee by the only "
+    + "route open to it: an unrecognised command NAME is refused with the near miss named, never ignored, "
+    + "because a dispatcher that ran nothing and exited 0 would make \"no such command\" and \"the "
+    + "command found nothing\" the same observation. `command-dispatcher.test.ts` pins that refusal.",
   // NO LONGER EMPTY, as of 2026-09-07 (#164), and the single entry is a real constraint rather than an
   // oversight — which is exactly what this set exists to record.
   //
