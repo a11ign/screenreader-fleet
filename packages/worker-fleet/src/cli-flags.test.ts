@@ -121,6 +121,17 @@ const GUARDED: Record<string, string> = {
     + "not a wrong answer you can read and dismiss, it is a write. Its import is RELATIVE rather than the "
     + "package specifier, because its workflow job has only actions/checkout -- no npm ci, no build, no "
     + "dist (#330/#331).",
+  "scripts/close-rows-sweep.mjs":
+    "it CLOSES ISSUES, the identical reason close-rows-for-merged-pr.mjs is guarded -- takes an OPTIONAL "
+    + "--window (minutes), refuseUnknownFlags([\"--window\"]). A mistyped flag silently running the "
+    + "default window is comparatively low-risk here since the window is generous by design (#394), but "
+    + "the discovery test does not carve out exceptions for low-risk writes. Its import is RELATIVE, "
+    + "same reason as its sibling: the job it runs in has only actions/checkout.",
+  "scripts/trunk-sweep.mjs":
+    "it TRIGGERS a real workflow run (`gh workflow run trunk-guard.yml`) when main's tip has zero check "
+    + "runs -- takes NO flags, so refuseUnknownFlags([]) with an EMPTY list, the same case as auto-arm-"
+    + "sweep.mjs. A discarded argument means the caller wanted something narrower than `check and trigger "
+    + "the standing gate`, and running it anyway silently acts on a different question than the one asked.",
   "scripts/close-merged-rows.mjs":
     "it CLOSES issues. Takes a positional commit range; the `--json`/`--jq` in the file are passed "
     + "onward to `gh` and are not this command's own",
