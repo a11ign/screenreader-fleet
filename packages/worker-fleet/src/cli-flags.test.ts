@@ -90,6 +90,20 @@ const UNGUARDED: Record<string, string> = {
     + "import of `cli-flags.mjs` dies on startup with ERR_MODULE_NOT_FOUND. Its one flag, `--evaluating`, "
     + "fails CLOSED when discarded -- the command answers the stricter question -- which is what makes "
     + "this exemption affordable rather than a hole",
+  // #535: THE IDENTICAL BIND, hit for real rather than only in a test. `pre-commit` runs this guard in
+  // EVERY worktree, including one created before `node_modules` is symlinked in -- and there, importing
+  // `@a11ign/worker-fleet/cli-flags` threw `ERR_MODULE_NOT_FOUND` before this guard's own code ever ran,
+  // which `pre-commit`'s `>/dev/null 2>&1` swallowed and misread as a #180 hazard on EVERY staged line
+  // (18 of them measured live: `fi`, `else`, `run: |`, prose comments -- none of them pipe anything).
+  // Fixed by removing the workspace import outright, following `check-schema-migration.mjs`'s own
+  // precedent above rather than accepting the same bind twice. Its unknown-flag check is now a bare
+  // `process.argv.slice(3).length > 0` and fails CLOSED (exit 2) on anything unexpected -- the same
+  // affordability argument as its sibling entry.
+  "scripts/piped-exit-status-guard.mjs":
+    "runs in every fresh worktree via `scripts/git-hooks/pre-commit`, including one with no `node_modules` "
+    + "yet -- a workspace import of `cli-flags.mjs` there threw ERR_MODULE_NOT_FOUND and was misread as a "
+    + "hazard finding on every staged line (#535). Its extra-argument check is now a bare argv length "
+    + "check and fails CLOSED (a distinct exit code, never silently ignored) on anything unrecognised",
 };
 
 /**
