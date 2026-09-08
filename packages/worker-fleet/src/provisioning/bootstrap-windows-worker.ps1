@@ -17,7 +17,7 @@
 # Style constraints match the other scripts: `#` line comments and env-var config, no
 # `<# #>` block comment and no param() block -- see diagnose-nvda-worker.ps1 beside this file.
 #   A11Y_REPO_URL   (default the public GitHub repo)
-#   A11Y_REPO_PATH  (default %USERPROFILE%\a11ign)
+#   A11Y_REPO_PATH  (default %USERPROFILE%\a11y-witness)
 #
 # Auto-logon needs NO configuration and NO password: provisioning gives the console account a
 # blank password and points Winlogon at it. Nothing is stored, so there is nothing to distribute
@@ -26,7 +26,7 @@
 $ErrorActionPreference = 'Stop'
 
 $RepoUrl  = if ($env:A11Y_REPO_URL) { $env:A11Y_REPO_URL } else { 'https://github.com/a11ign/a11ign.git' }
-$RepoPath = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11ign' }
+$RepoPath = if ($env:A11Y_REPO_PATH) { $env:A11Y_REPO_PATH } else { Join-Path $env:USERPROFILE 'a11y-witness' }
 
 # What each step did, so the end of a re-run says which steps were already good and which
 # were retried. Without this the second run looks identical to the first and you cannot tell
@@ -299,7 +299,7 @@ try {
     # Two ways in, one code path. A11Y_OPERATOR_KEY is what a human sets before running this by hand;
     # the file is what first-boot.cmd stages off the install media, because the unattended path may run
     # this through a scheduled task -- a fresh session that inherits no environment at all.
-    $stagedKey = Join-Path $env:ProgramData 'a11ign\operator-key.pub'
+    $stagedKey = Join-Path $env:ProgramData 'a11y-witness\operator-key.pub'
     $operatorKey = if ($env:A11Y_OPERATOR_KEY) { $env:A11Y_OPERATOR_KEY }
                    elseif (Test-Path $stagedKey) { Get-Content -Path $stagedKey -Raw }
                    else { $null }

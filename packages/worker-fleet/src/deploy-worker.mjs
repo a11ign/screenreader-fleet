@@ -62,7 +62,7 @@ const NVDA_DIR = workerSourceDir();
 // where the scheduled task points, so renaming it means re-provisioning every guest — and M5 moving the host
 // directory to `packages/nvda-worker/src` changed nothing here. All the worker needs is that its files land in
 // one directory together.
-const GUEST_DIR = "C:\\Users\\witness\\a11ign\\src\\capture\\nvda";
+const GUEST_DIR = "C:\\Users\\witness\\a11y-witness\\src\\capture\\nvda";
 // Resolved from THIS module: the fleet scripts ship with this package, so a cwd-relative path was only ever
 // right when run from the repo root.
 const CTL = fleetScriptPaths().workerCtl;
