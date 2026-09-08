@@ -192,6 +192,9 @@ const GUARDED: Record<string, string> = {
     "checks the publish token",
   "scripts/reconstitution-drill.mjs":
     "the recovery drill",
+  "scripts/select-changed-tests.mjs":
+    "A1b: decides which test files a PR's own `ts` job runs; a discarded `--base` would select against "
+    + "the wrong diff and either run nothing or the whole repo",
   "packages/lab/scripts/collect-promotion.mjs":
     "it OVERWRITES the shipped model weights, so an unrecognised flag running the default is not a "
     + "wasted run but a promotion installed when somebody asked for --dry-run. It takes exactly one "
