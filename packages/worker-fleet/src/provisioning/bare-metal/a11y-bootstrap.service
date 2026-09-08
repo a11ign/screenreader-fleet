@@ -45,7 +45,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/root/a11ign/packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh /root/.ssh/a11ign_ed25519.pub 8099
+ExecStart=/root/a11ign/packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh /root/.ssh/a11y-witness_ed25519.pub 8099
 Restart=always
 RestartSec=5
 

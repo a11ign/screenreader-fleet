@@ -10,7 +10,7 @@
  * MEASURED 2026-08-29, on the control plane the ADR describes:
  *
  *     /root/a11ign/node_modules   56M, 121 packages
- *     /root/.ssh/a11ign_ed25519   the fleet key
+ *     /root/.ssh/a11y-witness_ed25519   the fleet key
  *
  * Exactly the configuration it forbids, on the machine it was written about, for as long as nobody looked.
  * The ADR was accurate about the intent and described a system that did not exist — which is worse than no
@@ -53,7 +53,7 @@ export function controlPlaneIsolation({ hasNodeModules, hasFleetKey, packages, i
   // whose advice cannot be taken is one that gets muted.
   const remedy = isWorkspace
     ? "This is a WORKSPACE, so the dependencies belong here and the KEY does not. Dispatch fleet work "
-      + "through the control plane instead of holding `a11ign_ed25519` beside 100 MB of packages "
+      + "through the control plane instead of holding `a11y-witness_ed25519` beside 100 MB of packages "
       + "you did not audit — see docs/control-plane-plan.md L3."
     : "Nothing on a control plane needs them — `code-version.mjs` has no bare imports and `deploy.yml` "
       + "imports it by path. Remove them: `rm -rf ~/a11ign/node_modules` (measured 2026-08-29: "

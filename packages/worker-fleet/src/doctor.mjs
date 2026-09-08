@@ -203,7 +203,7 @@ function checkControlPlaneIsolation() {
   // `~` is a SHELL expansion, not a filesystem one: `existsSync("~/.ssh/...")` is always false, which
   // would make this guard report every machine as compliant. The silent-pass failure mode, in the guard
   // written because a document silently passed.
-  const raw = process.env.A11Y_SSH_KEY || "~/.ssh/a11ign_ed25519";
+  const raw = process.env.A11Y_SSH_KEY || "~/.ssh/a11y-witness_ed25519";
   const keyPath = raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
   const hasFleetKey = existsSync(keyPath);
   const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
