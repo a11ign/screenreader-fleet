@@ -11,7 +11,13 @@
   // import comes from -- a real dependency now, not a synthetic probe. `tsc --build` follows `references`
   // to decide build ORDER, so without this a first `npm install` can compile worker-fleet before judge
   // exists to resolve against, the same race `lab`'s own reference to `evidence`/`scorer` documents.
+  //
+  // `../evidence` (A2, #453): `command-line-census.mjs` imports `stripComments` from
+  // `@a11ign/evidence/source-text` -- the first REAL (non-test) cross-package edge from this package to
+  // that one. `cli-flags.test.ts` imported the same thing earlier, but `exclude` above keeps test files
+  // out of this package's build graph, so it never needed the reference; a plain `.mjs` under `src/` does.
   "references": [
-    { "path": "../judge" }
+    { "path": "../judge" },
+    { "path": "../evidence" }
   ]
 }

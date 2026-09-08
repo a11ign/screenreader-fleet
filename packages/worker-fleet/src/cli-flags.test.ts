@@ -6,391 +6,51 @@
  * one layer out. Measured twice here: a blocker told the reader to run `--write-baseline` when the flag is
  * `--update-baseline`, and `--only=route-title-stale` covered 1 of that family's 7 cases.
  *
- * ## Why this pins a list rather than deriving one
+ * ## "guarded" is DERIVED from source, never a hand-typed census — A2, #453, 2026-09-08
+ *
+ * This file used to carry a `GUARDED: Record<path, reason>` map, one entry per CLI, and every new argv-
+ * reading script needed a PR to THIS file adding one. That map was this repo's second-hottest hotspot: 20
+ * PRs touched it, and five checks went blind to their own population in the same week for the identical
+ * shape — a registry a human has to remember to update is a registry that falls behind the tree.
+ *
+ * `callsTheGuard()` below answers the only question that ever mattered — does this file's own source
+ * contain a real call to `refuseUnknownFlags(` — by reading the file, not a list about the file. A new
+ * guarded CLI registers itself by calling the guard; nothing here needs editing. What each entry's REASON
+ * used to hold is not lost: every one of those ~100 reason strings duplicated commentary that already
+ * lives in the file itself (verified before deleting the map — every file this test now derives against
+ * carries well over a thousand characters of its own header prose), which is the fact-stated-twice shape
+ * this repo's own `CLAUDE.md` names repeatedly. Comments explaining a specific flag's risk belong beside
+ * that flag, in the file that has it — not in a second copy a reviewer has to trust is still current.
+ *
+ * `UNGUARDED` is the one list still hand-typed, deliberately: it is a small, closed set of GENUINE
+ * exemptions, each a decision with a reason attached, not a population to enumerate. "Guarded or exempt"
+ * is a fact about two different things — what the tree already does, and what somebody decided not to
+ * require — and only the second one is the kind of fact worth a human writing down.
+ *
+ * ## Why the flag LIST inside a guarded file still pins rather than derives
  *
  * The obvious test — read each CLI's source, regex out its `--flags`, assert the declared list matches —
- * CANNOT be trusted here, and finding that out is the reason this file is shaped as it is. `stability-gate`
- * builds its flags from a variable (`startsWith(`--${name}=`)`), and `repeat-capture` reads all seven of
- * its value flags through an `arg(name)` helper. A derivation reports ZERO flags for both, so the
- * assertion would pass having examined nothing — this repo's most-repeated defect, in the guard written
- * to prevent it.
+ * CANNOT be trusted here, and finding that out is the reason `unknownFlags`/`refuseUnknownFlags` take an
+ * explicit list rather than inferring one. `stability-gate` builds its flags from a variable
+ * (`startsWith(`--${name}=`)`), and `repeat-capture` reads all seven of its value flags through an
+ * `arg(name)` helper. A derivation reports ZERO flags for both, so the assertion would pass having
+ * examined nothing — this repo's most-repeated defect, in the guard written to prevent it. That is a
+ * narrower claim than "never derive": WHICH FILES call the guard is safe to derive by reading for the
+ * call itself; WHICH FLAGS a guard accepts is not, because a flag can be read through an alias, a loop or
+ * a helper a regex cannot see through.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { stripComments } from "@a11ign/evidence/source-text";
 import { unknownFlags, didYouMean, nameOf, refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
+import { commandLineModules } from "./command-line-census.mjs";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
-
-/**
- * The CLIs whose flags are guarded, and the cost each one's silent default has.
- *
- * NOT A PARTIAL ROLLOUT ANY MORE, and this sentence used to say it was — "these are the five where an
- * ignored flag has a MEASURED cost" outlived both its number and its premise, since `UNGUARDED` is empty
- * and every discovered CLI is here. The flag list is still READ OUT of each file rather than derived, for
- * the reason the header gives.
- *
- * WIDENED TO TOP-LEVEL `scripts/` ON 2026-09-07 (#164), which is where this census was blind. The walk
- * covered two packages, so the claim it backs — *every argv-reading module is guarded or exempted* — was
- * true of `packages/lab` and `packages/worker-fleet` and silent about a third location holding 22 CLIs,
- * eleven of them unguarded. Nothing was missed that this test was asked about; it was asked the wrong
- * question, and no result could have said so. `install-git-hooks.mjs`'s own header had already recorded
- * the identical gap in a SIBLING guard — *"entry-points.test.ts ... only matches paths under packages/,
- * so this scripts/ file was invisible to it"* — which is the same population boundary, written down and
- * never generalised.
- */
-/** Shared by the `--json` reporters, whose only flag is the one that decides who the output is for. */
-const JSON_REPORTER =
-  "a mistyped `--json` prints for a human where a script expected a machine-readable answer, and the "
-  + "caller then parses the prose";
-
-const GUARDED: Record<string, string> = {
-  "packages/lab/scripts/check-preregistered-verdict.mjs":
-    "takes NO flags -- it reads docs/board/reported.json and nothing else -- so it calls refuseUnknownFlags([]) with an EMPTY list. That is the case worth guarding rather than skipping: a command with no flags is exactly where a mistyped one would otherwise be discarded in silence and the default reported as success.",
-  "scripts/board-only-check.mjs":
-    "takes no flags; it decides whether a change is board-only, and an ignored argument would answer "
-    + "about a different change than the one asked about",
-  "scripts/prune-stale-workspace-scope.mjs":
-    "takes NO flags -- it runs from `prepare` on every plain `npm install` (#376) to remove a stale "
-    + "workspace scope's node_modules symlinks, and it already calls refuseUnknownFlags([]). Classified "
-    + "here so the census records it as checked rather than unseen; it predates the census widening to "
-    + "top-level scripts/ (#164) and so was invisible to this test until now, which is the shape #164's "
-    + "own header already names -- a population boundary written down and never generalised.",
-  "scripts/piped-exit-status-guard.mjs":
-    "takes the command to inspect POSITIONALLY (argv[2]) and no flags. It exists because a piped exit "
-    + "status reads as the pipe's -- a tool built to end that class must not join it by discarding an "
-    + "argument and reporting on the default",
-  "scripts/ready-label-audit.mjs":
-    "already guards its own flags; classified here so the census records it as checked rather than "
-    + "unseen. It takes none, and audits which rows are pickable -- a discarded argument would report on "
-    + "a different label set than the one asked for",
-  "scripts/board-snapshot.mjs":
-    "takes no flags at all -- run directly it only ever takes a snapshot of the Project board, and there "
-    + "is nothing for a flag to configure. Guarded anyway (#399): a mistyped flag discarded silently would "
-    + "still write a snapshot and report success, and this file exists specifically because a board "
-    + "mutation once reported success while destroying 112 rows' Status.",
-  "scripts/auto-arm-sweep.mjs":
-    "takes NO flags -- it arms every open, non-draft, unheld, tested PR against `main` that nothing has "
-    + "armed (#344) -- so it calls refuseUnknownFlags([]) with an EMPTY list, the same case as "
-    + "check-preregistered-verdict.mjs. An argument handed to it means the caller wanted something other "
-    + "than `arm the standing queue`, and a discarded one would have it sweep the whole queue while the "
-    + "caller believed they had narrowed it. Its import is RELATIVE rather than the package specifier, "
-    + "because its workflow job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
-  "scripts/queue-stalled.mjs":
-    "takes NO flags -- it REPORTS which armed, green open PRs cannot ever merge as-is against `main` "
-    + "(#361), and never acts (no rebase, no branch update, no close). A discarded argument means the "
-    + "caller wanted something narrower than `examine the standing queue`, and running it anyway silently "
-    + "reports on a different population than the one asked about. Its import is RELATIVE rather than the "
-    + "package specifier, for the same reason as auto-arm-sweep.mjs: it rides the same pull_request "
-    + "trigger, whose job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
-  "scripts/update-branch-sweep.mjs":
-    "takes NO flags -- it pushes every armed, green-or-running, behind open PR up to `main`'s current tip "
-    + "after a merge lands (C2, #416's sibling), and never acts on a PR outside that population. A "
-    + "discarded argument would mean the caller wanted something narrower than `catch the whole queue up "
-    + "to main`, and running it anyway silently acts on a different population than the one asked about. "
-    + "Its import is RELATIVE rather than the package specifier, same reason as auto-arm-sweep.mjs and "
-    + "queue-stalled.mjs: its job has only actions/checkout -- no npm ci, no build, no dist (#330/#331).",
-  "scripts/merge-guard.mjs":
-    "it decides whether a PR has actually been TESTED, so a discarded argument would answer about a "
-    + "different PR than the one asked about -- and its whole reason for existing is that a confident "
-    + "answer to the wrong question reads exactly like a correct one. It takes the PR number "
-    + "POSITIONALLY and no flags, which is why the guarded list is empty rather than absent. Added to "
-    + "this table the same night it merged, because it landed on `main` from #167 while #164's own "
-    + "branch was open and turned that branch red: a derived count is only true of one commit range",
-  "scripts/trunk-revert.mjs":
-    "decides whether a push to main that just failed its own gate is safe to REVERT, so a discarded "
-    + "--push-sha or --before-sha would decide about the wrong commit while reading as a correct answer "
-    + "-- the identical hazard `merge-guard.mjs` is guarded against, one door over. It takes "
-    + "--push-sha=/--before-sha=/--run-url= and no positional argument (unlike merge-guard.mjs's PR "
-    + "number), because a push event carries no PR to number.",
-  "scripts/trunk-revert-guard.mjs":
-    "decides whether a merge onto main silently deleted work already there, so a discarded --merge would "
-    + "check the wrong commit while reading as a clean pass -- the identical hazard trunk-revert.mjs is "
-    + "guarded against, and this one runs BEFORE the revert decision even exists: a false PASS here is "
-    + "how the #411 incident happened in the first place. Takes only --merge=<sha>, no positional.",
-  "scripts/row-claim.mjs":
-    "THE COMMAND THE PULL LOOP RESTS ON. Measured 2026-09-07, before the guard: `check 161 --jsonn` "
-    + "printed the ordinary claim line and exited 0, and so did `--format=json` -- both read as a "
-    + "machine-readable request that was honoured. Two workers pulled one row twice today; a claim tool "
-    + "that discards a flag is the same failure waiting on the command that coordination runs through",
-  "scripts/merge-queue.mjs":
-    "it MERGES. `--merge` takes the PR number as the next argv entry, so a mistyped flag does not "
-    + "merely run the default -- it drops the target and the command acts on whatever the default is",
-  "scripts/close-rows-for-merged-pr.mjs":
-    "takes the PR number POSITIONALLY and no flags, so refuseUnknownFlags([]) with an EMPTY list -- the "
-    + "same case as merge-guard.mjs, and for a sharper reason: it CLOSES ISSUES. A discarded argument "
-    + "would have it answer about a different PR than the one that merged, and closing the wrong row is "
-    + "not a wrong answer you can read and dismiss, it is a write. Its import is RELATIVE rather than the "
-    + "package specifier, because its workflow job has only actions/checkout -- no npm ci, no build, no "
-    + "dist (#330/#331).",
-  "scripts/close-rows-sweep.mjs":
-    "it CLOSES ISSUES, the identical reason close-rows-for-merged-pr.mjs is guarded -- takes an OPTIONAL "
-    + "--window (minutes), refuseUnknownFlags([\"--window\"]). A mistyped flag silently running the "
-    + "default window is comparatively low-risk here since the window is generous by design (#394), but "
-    + "the discovery test does not carve out exceptions for low-risk writes. Its import is RELATIVE, "
-    + "same reason as its sibling: the job it runs in has only actions/checkout.",
-  "scripts/trunk-sweep.mjs":
-    "it TRIGGERS a real workflow run (`gh workflow run trunk-guard.yml`) when main's tip has zero check "
-    + "runs -- takes NO flags, so refuseUnknownFlags([]) with an EMPTY list, the same case as auto-arm-"
-    + "sweep.mjs. A discarded argument means the caller wanted something narrower than `check and trigger "
-    + "the standing gate`, and running it anyway silently acts on a different question than the one asked.",
-  "scripts/close-merged-rows.mjs":
-    "it CLOSES issues. Takes a positional commit range; the `--json`/`--jq` in the file are passed "
-    + "onward to `gh` and are not this command's own",
-  "scripts/prune-worktrees.mjs":
-    "it REMOVES worktrees. Takes a positional repo root; the `--is-ancestor`/`--porcelain`/`--verify` "
-    + "in the file go onward to git",
-  "scripts/isolation-gate.mjs":
-    "`--all`, plus positional package directories. The npm flags in the file (`--pack-destination`, "
-    + "`--omit=`, `--no-workspaces`) are passed to npm and are not accepted from a caller -- a derived "
-    + "flag list would have accepted all of them",
-  "scripts/known-gaps-index.mjs":
-    "`--write` is the difference between reporting the index and rewriting a tracked document",
-  "scripts/build-packages.mjs":
-    "takes no flags; the `--build` in the file is passed to tsc. Guarded rather than exempted because "
-    + "a build that silently ignores an argument is how a stale `dist` gets shipped, which this repo "
-    + "has paid for twice",
-  "scripts/acceptance-commands.mjs":
-    "takes no flags at all -- it reads the PR body from PR_BODY (an env var, never argv, because a PR "
-    + "body is adversarial input) and runs the author's own stated Acceptance: commands, which is the "
-    + "one thing standing between a row's claim and its evidence. A discarded flag here would be the "
-    + "identical shape this whole job exists to end, one layer up.",
-  "scripts/changed-packages.mjs":
-    "takes no flags; `--name-only` goes onward to git. Its output selects which CI jobs run, so a "
-    + "discarded argument narrows a test run silently",
-  "scripts/check-retired-heads.mjs":
-    "takes no flags at all, and it gates a promotion -- the cheapest possible guard on the most "
-    + "expensive possible mistake",
-  "scripts/install-git-hooks.mjs":
-    "takes no flags; `--get` goes to `git config`. Guarded at the entry rather than inside the "
-    + "exported `installHooks`, which tests drive with injected dependencies",
-  "scripts/update-primary.mjs":
-    "takes no flags; `--detach`/`--quiet` go onward to git",
-  "scripts/board-document.mjs":
-    "renders the PDF a board reads; a discarded flag publishes the wrong document",
-  "scripts/board-report.mjs":
-    "publishes the daily edition as an issue comment",
-  "scripts/board-schedule-liveness.mjs":
-    "reports whether the scheduled board jobs are alive",
-  "scripts/board-summary-check.mjs":
-    "the 21:00 check; `--post` is the difference between reporting and commenting",
-  "scripts/check-scheduled-jobs.mjs":
-    "reports on scheduled jobs",
-  "scripts/ci-changed.mjs":
-    "decides which CI jobs run for a change",
-  "scripts/control-plane-hygiene.mjs":
-    "audits the control plane",
-  "scripts/mutation-check.mjs":
-    "MUTATES A FILE ON DISK and restores it; a discarded `--file` or `--test` would mutate or verify "
-    + "the wrong thing",
-  "scripts/npm-token-liveness.mjs":
-    "checks the publish token",
-  "scripts/reconstitution-drill.mjs":
-    "the recovery drill",
-  "scripts/select-changed-tests.mjs":
-    "A1b: decides which test files a PR's own `ts` job runs; a discarded `--base` would select against "
-    + "the wrong diff and either run nothing or the whole repo",
-  "packages/lab/scripts/collect-promotion.mjs":
-    "it OVERWRITES the shipped model weights, so an unrecognised flag running the default is not a "
-    + "wasted run but a promotion installed when somebody asked for --dry-run. It takes exactly one "
-    + "flag, which is the whole reason a typo is plausible",
-  "packages/lab/scripts/explain-capture.mjs":
-    "it exists BECAUSE a mistyped question gets a confident wrong answer. Every enquiry into a capture "
-    + "used to be ssh plus hand-written Python plus a guess at the JSON shape, and that produced four "
-    + "wrong answers in one session — a wrapper read instead of `capture` reported 0 of 20 tab stops. A "
-    + "tool built to end that class must not join it: an unrecognised flag here would run the default "
-    + "report and look like the one that was asked for",
-  "packages/lab/scripts/gate-probe-order.mjs":
-    "a mistyped `--pages=` would silently fall back to localhost:5050 and compare a DIFFERENT set of "
-    + "pages from the one asked for, then report PASS. This gate exists to prove the tool gives the same "
-    + "answer twice; a pass over pages nobody requested is that claim made about the wrong subject, which "
-    + "is the exact defect it was written to catch",
-  "packages/lab/scripts/fleet-hours.mjs":
-    "--dir picks a corpus other than runs/, and a mistyped one would silently report the DEFAULT "
-    + "corpus's hours under the name of the run you asked about — a cost figure attributed to the "
-    + "wrong run, which is the defect this whole tool was written around",
-  "packages/lab/scripts/emit-unclosable-vetoes.mjs":
-    "it takes NO flags, and an ignored one would emit the wrong set silently — a veto report that "
-    + "forgave the wrong pairs reads as a shorter work list rather than as an error",
-  "packages/lab/scripts/check-shipped-provenance.mjs":
-    "it takes NO flags, and that is the case worth guarding rather than the one to skip: an argument "
-    + "that looks like it narrows a release gate (`--allow-stale`, `--skip`) would be ignored, and the "
-    + "gate would report a pass having been asked for something it never did",
-  "packages/lab/src/training/capture-screenreader-dataset.mjs":
-    "a typo costs a full corpus run — `--resmue` silently means a fresh capture of 1,061 pairs",
-  "packages/lab/src/training/capture-real-pages.mjs":
-    "THE script that ran four shards against `--worker=http://:8765` for 29 minutes. Its `--shard=` "
-    + "arrives through `parseShard`, so a regex over this file would not find it",
-  "packages/control/src/lab-pipeline.mjs":
-    "a mistyped `--ref=` falls back to the local branch, which is how the fleet and the lab came to be "
-    + "on different commits, failing with a hash mismatch that reads like a corrupted checkout",
-  "packages/lab/scripts/promote-model.mjs":
-    "the most dangerous silent default in the repo: a mistyped `--dry-run` PROMOTES",
-  "packages/lab/src/training/check-signals.mjs":
-    "a mistyped `--require-complete` scores whatever is on disk and passes",
-  "packages/lab/src/training/repeat-capture.mjs":
-    "`--probe-forms` and `--probe-tables` are how a canary reaches the fields carrying interaction "
-    + "evidence, and a canary that cannot express the fault is worthless",
-  "packages/lab/scripts/everything-pipeline.mjs":
-    "hours long and unattended — a mistyped `--dry-run` would run the real thing",
-  "packages/lab/scripts/build-realism-tier.mjs":
-    "run by the `build-realism` job and by `training:train`; a mistyped `--out=` writes the realism tier somewhere the trainer will not read, and the train",
-  "packages/lab/scripts/calibrate-abstention.mjs":
-    "takes NO flags — it is configured entirely by environment, so any flag passed to it today is discarded in silence. The `--model` in its output is `-e",
-  "packages/lab/scripts/evidence-check.mjs":
-    "the check that decides whether 2,122 cached captures survive a change. It also takes worker URLs POSITIONALLY, which this guard does not touch",
-  "packages/lab/scripts/stability-gate.mjs":
-    "the canaries that must pass before a corpus run. `--probe-forms`, `--task` and `--url` appear in this file because it PASSES them to repeat-capture; t",
-  "packages/lab/src/training/export-screenreader-dataset.mjs":
-    "a mistyped `--out=` exports where nothing downstream reads, and the trainer then fits on the "
-    + "PREVIOUS export — which looks exactly like a successful run",
-  "packages/worker-fleet/src/deploy-worker.mjs":
-    "`--vm=` mistyped deploys to EVERY guest rather than the one named, and `--allow-protocol-change` "
-    + "is the flag that lets a CAPTURE_PROTOCOL_VERSION bump ship, invalidating 2,122 cached captures",
-  "packages/control/src/fleet-playbook.mjs":
-    "`--serial=` and `--limit=` decide how many of twelve machines an operation touches at once, and "
-    + "`--ref=` decides what code they end up running",
-  "packages/worker-fleet/src/check-worker-code.mjs":
-    "takes NO flags — it asks every worker what code it is running and compares. Any flag passed to it today is discarded in silence",
-  "packages/worker-fleet/src/guest-run.mjs":
-    "takes a VM name and a script POSITIONALLY, which this guard does not touch, plus `--timeout=`; a mistyped timeout silently falls back to 600s on an op",
-  "packages/lab/src/harnesses/capture-check.mjs":
-    "the capture-layer regression check; a mistyped --worker= falls back to in-process mode, which REFUSES while a worker is serving",
-  "packages/lab/src/harnesses/page-identity-rate.mjs":
-    "asks whether a capture ever reads the WRONG page; --rounds= sets the width of the 95% upper bound a zero count is reported as",
-  "packages/lab/src/harnesses/occurrence-verdict-stability.mjs":
-    "takes its worker positionally and no flags at all",
-  "packages/lab/src/harnesses/capture-fixtures.mjs":
-    "recaptures the eval fixtures; --ff-only appears in the file because it is passed to GIT",
-  "packages/worker-fleet/src/compare-workers.mjs":
-    "--runs= is a documented alias of --rounds=, so a guard listing one would refuse a spelling the code supports",
-  "packages/lab/scripts/check-dataset-distribution.mjs":
-    "a mistyped --data would silently check the DEFAULT export and report it clean, which is the "
-    + "examined-nothing failure this command exists to catch, committed by the command itself",
-  "packages/lab/scripts/audit-corpus-urls.mjs":
-    "a mistyped --timeout= silently uses 15s, and a slow government host then reports as MOVED when it "
-    + "merely did not answer in time",
-  "packages/lab/scripts/audit-corpus-starvation.mjs":
-    "takes no flags; any passed today is discarded",
-  "packages/lab/scripts/audit-observation-ambiguity.mjs":
-    "a mistyped --captures= silently audits the DEFAULT corpus root, so an answer about the wrong "
-    + "captures reads exactly like an answer about the right ones",
-  "packages/lab/scripts/audit-size-sensitivity.mjs":
-    "--evaluating and --stdin are passed ONWARD to the Python scorer, not read here",
-  "packages/lab/scripts/bench-capture.mjs":
-    "a mistyped --from-disk silently drives the fleet when you meant to replay a file",
-  "packages/lab/scripts/compare-layers.mjs":
-    "takes its sites POSITIONALLY; the flags in the file are passed onward",
-  "packages/lab/scripts/corpus-backup.mjs":
-    "--verify-only is the difference between checking a backup and WRITING one",
-  // Its ONLY flag, and the one that decides whether it destroys anything. A mistyped `--aply` must be
-  // refused rather than silently running the reporting default and reading as "nothing to prune".
-  "packages/lab/scripts/corpus-prune-orphans.mjs": "--apply",
-  "packages/lab/scripts/corpus-snapshot.mjs":
-    "a mistyped --out= writes the snapshot where you will not look for it",
-  "packages/lab/scripts/corpus-release.mjs":
-    "a typo'd --dryrun UPLOADS the corpus while the operator believes they are rehearsing — the flag is "
-    + "the whole difference between describing an upload and performing one, and an ignored flag runs "
-    + "the default",
-  "packages/lab/scripts/emit-grants-map.mjs":
-    "takes no flags",
-  "packages/lab/scripts/explain-scorer.mjs":
-    "--name, --case and --weights appear in its prose, not its argv",
-  "packages/lab/scripts/retrain-pipeline.mjs":
-    "a mistyped --dry-run runs the REAL retrain",
-  "packages/lab/scripts/verify-safetensors.mjs":
-    "--inference decides which contract is verified, so a typo checks the wrong one and passes",
-  "packages/lab/src/harnesses/assert-action-report.mjs":
-    "the flags ARE the assertion: a mistyped --require-wcag= asserts nothing and reports success",
-  "packages/lab/src/training/generate-screenreader-acceptance.mjs":
-    "takes no flags",
-  "packages/lab/src/training/generate-screenreader-dataset.mjs":
-    "takes no flags",
-  "packages/lab/src/training/preflight-screenreader-dataset.mjs":
-    "takes no flags",
-  "packages/control/src/fleet-discover.mjs":
-    "--enroll WRITES to inventory.yml; mistyped it scans and enrols nothing",
-  "packages/worker-fleet/src/fleet-env.mjs":
-    "its output is eval-ed by a shell, so a wrong shape is executed rather than read",
-  "packages/control/src/fleet-wake.mjs":
-    "takes no flags",
-  "packages/worker-fleet/src/normalise-fleet.mjs":
-    "takes no flags",
-  "packages/lab/src/training/wait-for-capture.mjs":
-    "its EXIT CODE is the contract — 0 clean, 1 failures, 2 no run, 3 wedged — so a caller reading it "
-    + "has already committed to an output shape, and a mistyped `--json` gives it the other one",
-  "packages/worker-fleet/src/doctor.mjs": JSON_REPORTER,
-  "packages/control/src/fleet-status.mjs": JSON_REPORTER,
-  "packages/lab/src/training/capture-status.mjs": JSON_REPORTER,
-  "packages/lab/scripts/lab-inventory.mjs": JSON_REPORTER,
-  "scripts/owned-path-signoff.mjs":
-    "it decides whether a change to a CORPUS-INVALIDATING path may merge (#356). `--diff` and `--body` "
-    + "are the two things it compares; a discarded one leaves it comparing an empty set and "
-    + "reporting SATISFIED -- a check passing having examined nothing, on the paths where a mistake "
-    + "costs a corpus rather than a revert",
-  "scripts/pr-hold.mjs":
-    "it WRITES a `session:` label that decides whether `merge-guard` refuses a PR (#266). `--session` "
-    + "says who is taking the hold and `--steal` displaces whoever has it, so a discarded flag either "
-    + "takes a hold in nobody's name or fails to displace the person it just announced displacing",
-  "scripts/stash-whose.mjs":
-    "it reports who holds each stash in a pile SHARED between every worktree (#290). It takes no "
-    + "flags, and a discarded argument would answer about a different question than the one asked -- "
-    + "on the command a worker consults before deciding whether a stash is safe to pop",
-  // Landed on `main` while this branch was open — the third such batch, which is itself the argument for
-  // #205: a census pinned to a hand-written number is stale the moment anyone else merges a CLI.
-  "scripts/changeset-precise.mjs":
-    "its answer decides whether the pre-push FAST gate demands a changeset at all. It takes its base ref "
-    + "POSITIONALLY and no flags, so a mistyped one would be dropped while the positional is read from "
-    + "the wrong slot — guarded with an empty list here, same shape as `merge-guard.mjs`",
-  "scripts/coverage-failure-classifier.mjs":
-    "`--ci-outcome`, `--build-outcome`, `--log` and `--run-url` are the four facts it classifies a "
-    + "nightly failure FROM; a discarded one silently narrows the evidence and the comment then "
-    + "describes a failure nobody had",
-  "scripts/stranded-branches.mjs":
-    "it reports pushed branches with no PR — the invisible-work check. It takes no flags, and a "
-    + "discarded argument would report on a population other than the one asked about, which is exactly "
-    + "the fault it exists to find",
-  // Landed on `main` while this branch was open, and all three arrived ALREADY GUARDED — which is the
-  // census working in the direction it was built for: the failing assertion is what told this branch they
-  // existed at all, and the source it then had to read said the guard was already there.
-  "scripts/mark-primary-checkout.mjs":
-    "`--set` and `--unset` are OPPOSITE ACTS on a repo-local git config, and it writes when it sees one — "
-    + "a mistyped `--unser` that ran the default would leave the operator believing a checkout was marked",
-  "scripts/row-reachability.mjs":
-    "`--row=<n>` decides WHICH row is examined; ignoring a mistyped one falls back to the number it finds "
-    + "positionally, so the answer would describe a different row than the one asked about",
-  "scripts/workflow-run-liveness.mjs":
-    "`--sha` falls back to $GITHUB_SHA, so a mistyped flag silently answers about a DIFFERENT commit — "
-    + "and the question it answers is whether that commit was tested before it reached main",
-  "scripts/history-secret-scan.mjs":
-    "`--all` is required and not optional -- a mistyped or dropped flag would run neither branch, since "
-    + "the script REFUSES rather than defaulting when it is absent, precisely because scanning only the "
-    + "current branch would silently miss the branches with more instances of the defect than main has "
-    + "(measured: 72 vs 48, #310). `--repo` decides WHICH repository is scanned; a discarded one falls "
-    + "back to this checkout, reporting on the wrong tree entirely for a rehearsal clone.",
-  "scripts/generate-commands-doc.mjs":
-    "`--check` decides whether this only verifies docs/commands.md against the tree (CI mode, exits 1 "
-    + "on drift) or writes it (default mode); a mistyped `--check` would silently fall into the write "
-    + "branch and overwrite the file instead of catching the staleness a check is supposed to report",
-  "scripts/history-purge-rehearsal.mjs":
-    "`--source` names the real repository to mirror-clone from; a discarded flag would fail closed "
-    + "(refuses without one) rather than silently rewriting the wrong tree, but `--clone-into` and "
-    + "`--replacements` deciding the WRONG path or pattern set silently is exactly the failure this tool "
-    + "exists to make impossible for a history rewrite, #310",
-  "scripts/assert-glob-not-empty.mjs":
-    "`--min` decides the floor a test glob must clear (#355); a discarded typo would silently check "
-    + "against the default of 1 instead of the real floor, passing a glob that lost most of its files. "
-    + "`--run` and `--test-concurrency` decide whether this command executes `tsx --test` on the globs it "
-    + "just checked, or only checks them -- a discarded `--run` would make a caller believe the real "
-    + "suite ran when only the vacuity check did, which is silence exactly where this tool exists to "
-    + "refuse it.",
-};
-
 
 /**
  * Not yet guarded. THIS LIST MAY ONLY SHRINK.
@@ -433,51 +93,28 @@ const UNGUARDED: Record<string, string> = {
 };
 
 /**
- * Does this file take a command line? The guard itself reads argv, and is the implementation.
- *
- * COMMENTS ARE STRIPPED FIRST, and that is not a nicety. This matched the raw source, so a module that
- * merely MENTIONED `process.argv` in a comment was classified as a CLI — which happened on 2026-08-29 to
- * `gates/dispatch.mjs`, a library whose comment said it deliberately does NOT read `process.argv`. The
- * test's own subject, in the test: this repo's rule is that a check must not derive its expectations from
- * source TEXT, because text includes the prose about the code as well as the code.
- *
- * The direction of the change is safe: stripping comments can only REMOVE a file from the set, and a file
- * whose only mention is in prose is not a command line. Verified against the real tree — the discovered
- * set is unchanged apart from `dispatch.mjs`, which is the false positive.
+ * `commandLineModules()` -- every `.mjs` under this repo's known CLI roots that reads argv -- now lives in
+ * `command-line-census.mjs`, a sibling of `cli-flags.mjs` (A2, #453). Moved there rather than kept local
+ * so a SECOND consumer asking a DIFFERENT question about the same population (A6b: which scripts declare
+ * an entry-point guard) filters the same walk instead of writing its own `readdirSync` that could silently
+ * narrow from this one's -- that file's own header has the full reasoning for why the walk is shared and
+ * the predicate is not. `commandLineModules(REPO)` below is what this file was calling `commandLineModules()`
+ * before the move; nothing about ITS behaviour changed.
  */
-function isCommandLine(rel: string): boolean {
-  if (!rel.endsWith(".mjs")) return false;
-  const source = stripComments(readFileSync(join(REPO, rel), "utf8"));
-  return source.includes("process.argv") && !source.includes("export function refuseUnknownFlags");
-}
 
-/** Every `.mjs` that reads argv — DISCOVERED, so a new one cannot arrive unnoticed. */
-function commandLineModules(): string[] {
-  const found: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(join(REPO, dir), { withFileTypes: true })) {
-      const rel = `${dir}/${entry.name}`;
-      if (entry.isDirectory() && entry.name !== "node_modules") walk(rel);
-      else if (!entry.isDirectory() && isCommandLine(rel)) found.push(rel);
-    }
-  };
-  // TOP-LEVEL `scripts/` IS IN THE POPULATION, and its absence was this census's own defect (#164).
-  //
-  // The walk covered two packages, so `**ALL N are guarded** … DISCOVERS every argv-reading module` was
-  // true of `packages/lab` and `packages/worker-fleet` and SILENT about a third location holding 22
-  // argv-reading CLIs, eleven of them unguarded — `row-claim.mjs` among them, the command the whole pull
-  // loop rests on, where a mistyped `--jsonn` was discarded and the default ran at exit 0. Nothing was
-  // missed that this test was asked about; it was asked the wrong question, and no result could say so.
-  //
-  // Found while adding a CLI under `scripts/` for #161 and noticing this census did not react to it.
-  const roots = ["scripts", ...["packages/lab", "packages/worker-fleet"]
-    .flatMap((pkg) => ["src", "scripts"].map((sub) => `${pkg}/${sub}`))];
-  for (const root of roots) {
-    // A package without a `scripts/` directory is not a fault; anything else is, and must not be swallowed.
-    try { statSync(join(REPO, root)); } catch { continue; }
-    walk(root);
-  }
-  return found;
+/**
+ * IS THIS FILE ITSELF GUARDED? — read from its own source, never from a registry about it.
+ *
+ * This is the whole of A2/#453's fix for this census: "guarded" used to mean "has an entry in a
+ * hand-typed `GUARDED` map", which meant every new guarded CLI needed a PR to THIS file. It now means
+ * "its own source calls `refuseUnknownFlags(`", which a new CLI satisfies by calling the guard — nothing
+ * here to edit. Comments are stripped first, for the identical reason `command-line-census.mjs`'s
+ * `readsArgv` strips them: a file that only MENTIONS the call in prose (a README-style comment, a "TODO:
+ * guard this") must not read as already guarded.
+ */
+function callsTheGuard(rel: string): boolean {
+  const source = stripComments(readFileSync(join(REPO, rel), "utf8"));
+  return /refuseUnknownFlags\s*\(/.test(source);
 }
 
 test("only flags a command reads are accepted; the rest are named", () => {
@@ -495,33 +132,29 @@ test("a near miss is named, and a wild guess is not", () => {
     "suggesting anything for an unrelated flag sends the reader somewhere wrong with confidence");
 });
 
-test("every guarded CLI still calls the guard", () => {
-  // A rename or a merge could drop the call, and nothing else would notice: the command would go back to
-  // ignoring flags, which is silent by definition.
-  for (const [path, why] of Object.entries(GUARDED)) {
-    const source = readFileSync(join(REPO, path), "utf8");
-    assert.match(source, /refuseUnknownFlags\(/, `${path} must refuse unknown flags — ${why}`);
-    assert.ok(!(path in UNGUARDED), `${path} is guarded; delete its UNGUARDED line`);
-  }
-});
-
-test("the unguarded list names files that exist", () => {
-  // A stale entry is a list that lies: it silently exempts nothing while making the gap look larger than
-  // it is, and it would hide a rename — the renamed file would fail the next test as a surprise, and the
-  // obvious fix would be to add it rather than to notice it was already meant to be there.
+test("the unguarded list names files that exist and are not already guarded", () => {
+  // A stale entry is a list that lies two different ways: it silently exempts nothing while making the
+  // gap look larger than it is (a rename, checked below), or it goes on claiming an exemption for a file
+  // that has since started calling the guard itself (checked here) — the second is the direction that
+  // matters most now that "guarded" is derived, because nothing else would ever notice a stale UNGUARDED
+  // line once its file was fixed.
   for (const path of Object.keys(UNGUARDED)) {
     assert.ok(existsSync(join(REPO, path)), `${path} is on the unguarded list and does not exist`);
+    assert.ok(!callsTheGuard(path),
+      `${path} now calls refuseUnknownFlags -- delete its UNGUARDED line, the file is guarded`);
   }
 });
 
 test("a new CLI cannot quietly join the unguarded ones", () => {
-  // The rollout is partial and that is a decision, but an UNCOUNTED gap is not one. Anything discovered
-  // that is neither guarded nor on the known list fails here, so the list can only shrink.
-  const surprises = commandLineModules()
-    .filter((path) => !(path in GUARDED) && !(path in UNGUARDED));
+  // NO LIST TO EDIT for the guarded case, which is the entire point of A2/#453: a file is classified by
+  // calling the guard, not by somebody adding it here. Only a DELIBERATE exemption still needs a line, in
+  // UNGUARDED, with a reason.
+  const surprises = commandLineModules(REPO)
+    .filter((path) => !callsTheGuard(path) && !(path in UNGUARDED));
   assert.deepEqual(surprises, [],
-    "these read argv and neither refuse unknown flags nor appear in UNGUARDED. Guard them "
-    + "(preferred — an ignored flag runs the default and reports success), or add them with a reason");
+    "these read argv and neither call refuseUnknownFlags nor appear in UNGUARDED. Call the guard in the "
+    + "file itself (preferred — an ignored flag runs the default and reports success), or add an entry "
+    + "to UNGUARDED with a reason.");
 });
 
 test("every exemption declares its own reason HERE — no count, and CLAUDE.md is not read", () => {
@@ -575,9 +208,10 @@ test("the guard never fires on an IMPORTING command's flags", () => {
 
 test("every call site passes its own import.meta.url", () => {
   // The runtime guard above fires wherever the call happens to run. This one fires here, and covers the
-  // call sites that no test happens to execute.
+  // call sites that no test happens to execute. Iterates the DISCOVERED guarded set, not a registry --
+  // a new guarded file is covered the moment it calls the guard, same as the census test above.
   const offenders: string[] = [];
-  for (const path of [...Object.keys(GUARDED)]) {
+  for (const path of commandLineModules(REPO).filter(callsTheGuard)) {
     const source = readFileSync(join(REPO, path), "utf8");
     const call = source.slice(source.indexOf("refuseUnknownFlags("));
     const args = call.slice(0, call.indexOf(");") + 2);
