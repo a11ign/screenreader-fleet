@@ -55,6 +55,12 @@ const GUARDED: Record<string, string> = {
   "scripts/board-only-check.mjs":
     "takes no flags; it decides whether a change is board-only, and an ignored argument would answer "
     + "about a different change than the one asked about",
+  "scripts/prune-stale-workspace-scope.mjs":
+    "takes NO flags -- it runs from `prepare` on every plain `npm install` (#376) to remove a stale "
+    + "workspace scope's node_modules symlinks, and it already calls refuseUnknownFlags([]). Classified "
+    + "here so the census records it as checked rather than unseen; it predates the census widening to "
+    + "top-level scripts/ (#164) and so was invisible to this test until now, which is the shape #164's "
+    + "own header already names -- a population boundary written down and never generalised.",
   "scripts/piped-exit-status-guard.mjs":
     "takes the command to inspect POSITIONALLY (argv[2]) and no flags. It exists because a piped exit "
     + "status reads as the pipe's -- a tool built to end that class must not join it by discarding an "
