@@ -69,6 +69,11 @@ const GUARDED: Record<string, string> = {
     "already guards its own flags; classified here so the census records it as checked rather than "
     + "unseen. It takes none, and audits which rows are pickable -- a discarded argument would report on "
     + "a different label set than the one asked for",
+  "scripts/board-snapshot.mjs":
+    "takes no flags at all -- run directly it only ever takes a snapshot of the Project board, and there "
+    + "is nothing for a flag to configure. Guarded anyway (#399): a mistyped flag discarded silently would "
+    + "still write a snapshot and report success, and this file exists specifically because a board "
+    + "mutation once reported success while destroying 112 rows' Status.",
   "scripts/auto-arm-sweep.mjs":
     "takes NO flags -- it arms every open, non-draft, unheld, tested PR against `main` that nothing has "
     + "armed (#344) -- so it calls refuseUnknownFlags([]) with an EMPTY list, the same case as "
@@ -109,6 +114,12 @@ const GUARDED: Record<string, string> = {
     + "not a wrong answer you can read and dismiss, it is a write. Its import is RELATIVE rather than the "
     + "package specifier, because its workflow job has only actions/checkout -- no npm ci, no build, no "
     + "dist (#330/#331).",
+  "scripts/close-rows-sweep.mjs":
+    "it CLOSES ISSUES, the identical reason close-rows-for-merged-pr.mjs is guarded -- takes an OPTIONAL "
+    + "--window (minutes), refuseUnknownFlags([\"--window\"]). A mistyped flag silently running the "
+    + "default window is comparatively low-risk here since the window is generous by design (#394), but "
+    + "the discovery test does not carve out exceptions for low-risk writes. Its import is RELATIVE, "
+    + "same reason as its sibling: the job it runs in has only actions/checkout.",
   "scripts/close-merged-rows.mjs":
     "it CLOSES issues. Takes a positional commit range; the `--json`/`--jq` in the file are passed "
     + "onward to `gh` and are not this command's own",
