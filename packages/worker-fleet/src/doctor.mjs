@@ -28,7 +28,7 @@ import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
-import { npmCliExecutable } from "./npm-cli-executable.mjs";
+import { npmCliInvocation } from "./npm-cli-executable.mjs";
 import { requestJson } from "./worker-http.mjs";
 
 /**
@@ -277,7 +277,8 @@ export function tscProjectUpToDate(tsconfigPath, { run = defaultTscRun } = {}) {
   /** @type {string} */
   let output;
   try {
-    output = run(npmCliExecutable("npx"), ["tsc", "--build", "--dry", tsconfigPath]);
+    const npx = npmCliInvocation("npx", ["tsc", "--build", "--dry", tsconfigPath]);
+    output = run(npx.command, npx.args);
   } catch (error) {
     // `--dry` still exits 0 for a stale project (measured); a thrown error here is a REAL failure --
     // a missing tsconfig, a syntax error blocking even the dry check -- and its stdout, if any, is still
