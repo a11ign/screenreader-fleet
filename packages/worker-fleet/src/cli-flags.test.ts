@@ -63,6 +63,11 @@ const GUARDED: Record<string, string> = {
     "already guards its own flags; classified here so the census records it as checked rather than "
     + "unseen. It takes none, and audits which rows are pickable -- a discarded argument would report on "
     + "a different label set than the one asked for",
+  "scripts/board-snapshot.mjs":
+    "takes no flags at all -- run directly it only ever takes a snapshot of the Project board, and there "
+    + "is nothing for a flag to configure. Guarded anyway (#399): a mistyped flag discarded silently would "
+    + "still write a snapshot and report success, and this file exists specifically because a board "
+    + "mutation once reported success while destroying 112 rows' Status.",
   "scripts/auto-arm-sweep.mjs":
     "takes NO flags -- it arms every open, non-draft, unheld, tested PR against `main` that nothing has "
     + "armed (#344) -- so it calls refuseUnknownFlags([]) with an EMPTY list, the same case as "
