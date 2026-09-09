@@ -47,7 +47,7 @@ refuseUnknownFlags(["--timeout="], { entry: import.meta.url, command: "npm run g
 const run = promisify(execFile);
 
 const UTMCTL = "/Applications/UTM.app/Contents/MacOS/utmctl";
-const GUEST_DIR = "C:\\Users\\witness\\a11ign";
+const GUEST_DIR = "C:\\Users\\witness\\a11y-witness";
 const TASK_NAME = "a11yguestrun";
 /** Written by the wrapper as its last act. Absent means still running, or it died. */
 export const DONE_SENTINEL = "---GUEST-RUN-DONE---";
