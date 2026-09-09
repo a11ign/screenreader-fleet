@@ -14,6 +14,12 @@ import { resolve } from "node:path";
 
 import { protocolVerdict } from "./protocol-guard.mjs";
 import { sandboxGitEnv } from "./git-safe-env.mjs";
+import { declareTreeWideGuard } from "../../../scripts/tree-wide-guard.mjs";
+
+// #716/#704: this file's own population is the whole tracked tree, not one file -- declared here
+// rather than inferred from its source, per ceo's ruling (2026-09-09) that the tree-wide-guard
+// population must be derived from a real import, never from scanning source text.
+declareTreeWideGuard();
 
 const fleet = (...protocols: (number | null)[]) =>
   protocols.map((protocol, i) => ({ worker: `w${i + 1}`, protocol }));
