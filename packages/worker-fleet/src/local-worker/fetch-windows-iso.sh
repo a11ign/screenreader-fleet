@@ -20,6 +20,14 @@ set -euo pipefail
 echo "DEPRECATED: fetch-windows-iso.sh feeds a local UTM worker VM build. UTM was a testing path and is not the fleet." >&2
 echo "Capture on the bare-metal fleet instead: npm run fleet:status, npm run fleet:deploy." >&2
 
+# #636: a warning on a path nobody watches is a warning nobody reads -- so this REFUSES, rather than
+# merely printing the two lines above and continuing. The measurements and reasoning behind the local-VM
+# work stay in docs/local-worker-vm.md as history; only the path that runs is fenced.
+if [ "${A11Y_LOCAL_VM:-}" != "1" ]; then
+  echo "refusing: set A11Y_LOCAL_VM=1 to run this deprecated local-VM script anyway." >&2
+  exit 1
+fi
+
 OUT_DIR="${1:-$HOME/a11y-worker-vm/iso-build}"
 EDITION="${A11Y_WIN_EDITION:-professional}"
 LANG_CODE="${A11Y_WIN_LANG:-en-us}"
