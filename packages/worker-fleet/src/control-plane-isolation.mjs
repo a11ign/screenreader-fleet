@@ -56,7 +56,7 @@ export function controlPlaneIsolation({ hasNodeModules, hasFleetKey, packages, i
       + "through the control plane instead of holding `a11y-witness_ed25519` beside 100 MB of packages "
       + "you did not audit — see docs/control-plane-plan.md L3."
     : "Nothing on a control plane needs them — `code-version.mjs` has no bare imports and `deploy.yml` "
-      + "imports it by path. Remove them: `rm -rf ~/a11ign/node_modules` (measured 2026-08-29: "
+      + "imports it by path. Remove them: `rm -rf ~/a11y-witness/node_modules` (measured 2026-08-29: "
       + "codeVersion was byte-identical afterwards).";
   return {
     violated: true,
