@@ -36,6 +36,12 @@ export const MUST_MATCH = [
   { path: "windowsVersion", why: "a second OS image would blend two corpora into one" },
   { path: "architecture", why: "ARM64 and x64 guests are not interchangeable evidence" },
   { path: "captureProtocol", why: "a guest on an older protocol produces evidence that means something else" },
+  { path: "browserProfile", why: "a COLD browser profile is not the same evidence as a warm one: a fresh " +
+      "`--user-data-dir` shows Edge's first-run surface, which NVDA's quick-nav escapes into and records " +
+      "as phantom page content, and a learning profile is what drove the U+FFFC artefact from 3% to 31% " +
+      "of affected captures. Two guests on different profiles are not interchangeable, and it is in the " +
+      "cache key for the same reason. `adopted` on both sides means both predate the stamp, which is a " +
+      "match rather than an unknown" },
   { path: "screenReaderSettings", why: "a guest capturing with `reportLanguage` off is blind to 3.1.2 and " +
       "one with it on is not — the same page yields different transcripts, so the two are not " +
       "interchangeable evidence. It is in the cache key for the same reason" },
