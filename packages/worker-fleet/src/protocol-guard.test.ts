@@ -9,12 +9,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 import { protocolVerdict } from "./protocol-guard.mjs";
-import { sandboxGitEnv } from "./git-safe-env.mjs";
-import { declareTreeWideGuard } from "../../../scripts/tree-wide-guard.mjs";
+import { declareTreeWideGuard, walkTree } from "../../../scripts/tree-wide-guard.mjs";
 
 // #716/#704: this file's own population is the whole tracked tree, not one file -- declared here
 // rather than inferred from its source, per ceo's ruling (2026-09-09) that the tree-wide-guard
@@ -103,9 +101,8 @@ test("a string protocol from an older worker compares equal to the number", () =
 function deployClients(): { file: string; guarded: boolean }[] {
   const root = resolve(import.meta.dirname, "../../..");
   const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-  return execFileSync("git", ["ls-files", "packages"], { cwd: root, env: sandboxGitEnv(), encoding: "utf8" })
-    .split("\n")
-    .filter((f) => /\.(ts|mjs)$/.test(f) && !f.includes(".test.") && !f.includes("/dist/"))
+  return walkTree({ kind: "both", roots: ["packages"] }).map((f) => f.path)
+    .filter((f) => !f.includes(".test.") && !f.includes("/dist/"))
     .map((file) => ({ file, source: strip(readFileSync(resolve(root, file), "utf8")) }))
     // Two real shapes, and both must be here: Ansible running deploy.yml (bare metal, the live path) and
     // `utmctl file push` of WORKER_FILES (the UTM path, deprecated but still present).

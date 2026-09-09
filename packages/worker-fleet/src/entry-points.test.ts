@@ -21,11 +21,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { sandboxGitEnv } from "../../../scripts/git-env.mjs";
 import { fileURLToPath } from "node:url";
 import { join, dirname, basename } from "node:path";
-import { declareTreeWideGuard } from "../../../scripts/tree-wide-guard.mjs";
+import { declareTreeWideGuard, walkTree } from "../../../scripts/tree-wide-guard.mjs";
 
 // #716/#704: this file's own population is the whole tracked tree, not one file -- declared here
 // rather than inferred from its source, per ceo's ruling (2026-09-09) that the tree-wide-guard
@@ -237,9 +235,8 @@ test("every npm entry point refuses to run when imported", () => {
  */
 /** Every tracked source, excluding built output and tests — the population the FILE question needs. */
 function trackedSources(): string[] {
-  return execFileSync("git", ["ls-files"], { cwd: REPO, encoding: "utf8", env: sandboxGitEnv() })
-    .split("\n")
-    .filter((f) => /\.(mjs|ts)$/.test(f) && !f.includes("/dist/") && !f.endsWith(".test.ts"));
+  return walkTree({ kind: "both", roots: [] }).map((f) => f.path)
+    .filter((f) => !f.includes("/dist/") && !f.endsWith(".test.ts"));
 }
 
 /**
