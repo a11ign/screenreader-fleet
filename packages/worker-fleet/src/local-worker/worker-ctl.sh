@@ -393,12 +393,27 @@ case "$CMD" in
     action=pause; [ "$CMD" = "idle-stop" ] && action=stop
     echo "watching $VM_NAME; will $action after $mins idle minutes (Ctrl-C to stop watching)"
     idle=0
+    # #635: `health()` already retries internally, but its budget is tuned for "is the box up right
+    # now" -- a few tries over seconds -- not for an hours-long watch. One round of THAT budget
+    # exhausting used to end the whole watch on the spot, so a single transient blip (this fleet has
+    # measured EHOSTUNREACH for 48 straight requests before a worker recovered) silently abandoned
+    # hours of monitoring. Require several consecutive OUTER-LOOP misses, at this loop's own cadence,
+    # before concluding the worker is actually gone.
+    misses=0
+    max_misses=5
     while :; do
       body="$(health "$UUID" || true)"
       if [ -z "$body" ]; then
-        echo "worker unreachable (state: $(vm_state "$UUID")) -- nothing to do"
-        exit 0
+        misses=$((misses + 1))
+        echo "worker unreachable (state: $(vm_state "$UUID"), miss $misses/$max_misses)"
+        if [ "$misses" -ge "$max_misses" ]; then
+          echo "worker unreachable for $max_misses consecutive checks -- giving up the watch"
+          exit 0
+        fi
+        sleep 60
+        continue
       fi
+      misses=0
       # `busy` is true only while a capture is in flight, so it is the honest activity
       # signal. Any capture resets the clock.
       if echo "$body" | grep -q '"busy":true'; then

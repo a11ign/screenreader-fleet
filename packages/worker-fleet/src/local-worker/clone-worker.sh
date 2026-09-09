@@ -98,6 +98,10 @@ say "new MAC $NEW_MAC (source keeps its own)"
 
 open -a UTM
 for _ in $(seq 1 15); do sleep 2; utmctl list >/dev/null 2>&1 && break; done
+# #635: without this, a UTM that never becomes responsive falls straight through into the loop below,
+# whose `utmctl list` would fail again, iterate zero names, and let the script finish having started
+# nothing -- with no error anywhere. Refuse instead.
+utmctl list >/dev/null 2>&1 || die "UTM did not become responsive after relaunch"
 
 # Start the source first. Both guests carry the same Windows machine identity, and letting one
 # settle before the other avoids two identical hostnames racing for the same DHCP server.

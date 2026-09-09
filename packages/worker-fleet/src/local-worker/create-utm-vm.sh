@@ -132,6 +132,10 @@ info "created $VM_NAME ($VM_ID)"
 info "Rewriting the ISO drives as CD-ROMs (not expressible via scripting)"
 osascript -e 'tell application "UTM" to quit' >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do pgrep -x UTM >/dev/null || break; sleep 1; done
+# #635: the loop above exits EITHER because UTM quit OR because 20s ran out -- and the edit below only
+# survives if UTM is actually gone (it caches config.plist in memory and would overwrite the edit on its
+# own next flush). Refuse rather than silently proceeding into an edit that would be lost.
+pgrep -x UTM >/dev/null && die "UTM did not quit; the config.plist edit below would be lost to its cache"
 sleep 2
 
 cp "$STAGE/windows.iso" "$BUNDLE/Data/windows.iso"
@@ -156,6 +160,10 @@ rm -f "$BUNDLE/Data/windows.qcow2" "$BUNDLE/Data/support.qcow2"
 info "Starting the VM (Windows installs unattended from support.iso)"
 open -a UTM
 for _ in $(seq 1 20); do pgrep -x UTM >/dev/null && break; sleep 1; done
+# #635: without this, a UTM that never relaunches falls straight through into `utmctl start`, which
+# (per this file's own documented quirks) may report a misleading `unknown` state instead of a clear
+# failure -- die here, with the actual cause, instead.
+pgrep -x UTM >/dev/null || die "UTM did not relaunch before starting the VM"
 sleep 3
 # Operate by UUID, never by name. If two registrations ever share a name, `utmctl start
 # <name>` silently picks the wrong one -- and `utmctl delete <name>` will remove the
