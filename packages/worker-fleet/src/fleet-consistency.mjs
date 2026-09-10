@@ -78,12 +78,15 @@ const get = (object, key) => (object ?? {})[key];
  * Compare guests field by field.
  *
  * @param {Array<{worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}>} guests
- * @returns {{consistent: boolean, mismatches: Mismatch[]}}
+ * @returns {{consistent: boolean, mismatches: Mismatch[], compared: number}}
+ *   `compared` is how many guests the verdict is actually ABOUT -- #920. A guest with no `environment`
+ *   and no `policy` is dropped below before comparing, so it is not the length of what was passed in,
+ *   and a caller that reports `consistent` without it is stating agreement over a set it cannot name.
  */
 export function fleetConsistency(guests) {
   const present = (guests ?? []).filter((g) => g && (g.environment || g.policy));
   // One guest is trivially consistent with itself, and zero is not a fleet. Neither is a finding.
-  if (present.length < 2) return { consistent: true, mismatches: [] };
+  if (present.length < 2) return { consistent: true, mismatches: [], compared: present.length };
 
   /** @type {Mismatch[]} */
   const mismatches = [];
@@ -109,7 +112,7 @@ export function fleetConsistency(guests) {
     check(`edgePolicy.${name}`, "guests with different browser behaviour are not interchangeable",
       (g) => get(g.policy, name));
   }
-  return { consistent: mismatches.length === 0, mismatches };
+  return { consistent: mismatches.length === 0, mismatches, compared: present.length };
 }
 
 /**
