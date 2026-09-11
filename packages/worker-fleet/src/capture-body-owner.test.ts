@@ -41,10 +41,19 @@
  * the same "discover, then require classification" shape `worker-code-check.test.ts` already uses for
  * "who posts to `/capture` at all", reused rather than reinvented.
  */
+// FIRST, so it observes every read below it -- #929. See `scripts/walk-scope.mjs`.
+import { declareWalkScope } from "../../../scripts/walk-scope.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+/**
+ * WHAT THIS GUARD READS, declared so a diff outside it does not run it -- #929. It reads the capture-body owners under `packages/lab/src` and nothing else outside its own imports.
+ * Its own run checks that, and fails if it ever reads wider.
+ */
+export const WALK_SCOPE = ["packages/lab/src"];
+await declareWalkScope(import.meta.url);
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const read = (path: string) => readFileSync(`${REPO}${path}`, "utf8");
