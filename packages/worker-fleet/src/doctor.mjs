@@ -795,6 +795,9 @@ export function readyFrom(checkList) {
   return checkList.every((c) => c.ok || GATES[c.name] === false);
 }
 
+/** Every DECLARED check name, gating or not -- so a test can compare the two sets without a literal. */
+export const allChecks = () => Object.keys(GATES);
+
 /** Which checks decide `ready`, for a test that must not retype the list. */
 export const gatingChecks = () => Object.entries(GATES).filter(([, gates]) => gates).map(([name]) => name);
 
