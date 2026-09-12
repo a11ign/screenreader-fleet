@@ -14,6 +14,7 @@ import { sandboxGitEnv } from "./git-safe-env.mjs";
 const LAB_SCRIPTS = fileURLToPath(new URL("../../lab/scripts/", import.meta.url));
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { stripComments } from "../../../scripts/local-import-closure.mjs";
 
 const read = (name: string) =>
   readFileSync(fileURLToPath(new URL(`../../control/ansible/${name}`, import.meta.url)), "utf8");
@@ -1013,4 +1014,129 @@ test("every `job=<name>` a message tells an operator to run is a job the catalog
   assert.deepEqual(unknown, [],
     `these job names are named to an operator somewhere in the tree and are NOT in lab-job.yml, so the `
     + `command they are told to run would be refused: ${unknown.join(", ")}`);
+});
+
+// --- #1041: a job that needs a worker must be TOLD one, asserted over the catalogue ---
+
+/**
+ * The npm scripts, so `npm run <name>` in an argv can be followed to the file it eventually runs.
+ *
+ * 29 of the 49 catalogue entries invoke `npm run` rather than a script path. A predicate that only reads
+ * argv sees none of them — including every fleet capture job — so it would examine 20 entries and report a
+ * clean sheet about a catalogue it had mostly not looked at.
+ */
+const NPM_SCRIPTS: Record<string, string> = ((
+  JSON.parse(readFileSync(fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8"))
+) as { scripts?: Record<string, string> }).scripts ?? {};
+
+const SCRIPT_PATH = /[\w./-]+\.(?:mjs|ts|py)\b/g;
+
+/** Every script file an argv reaches, following `npm run <name>` through package.json. */
+function scriptsReached(text: string, depth = 0, seen = new Set<string>()): Set<string> {
+  const out = new Set([...text.matchAll(SCRIPT_PATH)].map((m) => m[0]));
+  if (depth > 4) return out; // a script chain deeper than this is a cycle, not a job
+  for (const match of text.matchAll(/npm run (?:--silent )?([\w:.-]+)/g)) {
+    const name = match[1];
+    if (seen.has(name) || !NPM_SCRIPTS[name]) continue;
+    seen.add(name);
+    for (const script of scriptsReached(NPM_SCRIPTS[name], depth + 1, seen)) out.add(script);
+  }
+  return out;
+}
+
+const WORKER_ENV = /A11Y_WORKERS?\b/;
+
+/**
+ * Whether a reached script READS a worker from the environment, in code rather than in prose.
+ *
+ * Comments are stripped, and this measurement is why: over the whole closure of every reached script the
+ * predicate flagged **eleven** entries, nearly all of them false — `shortcuts`, `promote`, `starvation`
+ * and the rest reach a module that merely MENTIONS the variable. Narrowed to the reached scripts' own code
+ * it is **one**. The over-broad version would have made this assertion unusable on the day it landed, and
+ * the usual response to an unusable guard is to delete the rule rather than the noise.
+ *
+ * DIRECTION OF ERROR, stated because it is not symmetric: this can MISS a job whose need is only visible
+ * deeper than the scripts its argv reaches. It errs toward silence, so it is a floor and not a census.
+ */
+const readsWorkerFromEnv = (script: string): boolean => {
+  let text: string;
+  try { text = readFileSync(script, "utf8"); } catch { return false; }
+  const code = script.endsWith(".py") ? text.replace(/#[^\n]*/g, "") : stripComments(text);
+  return WORKER_ENV.test(code);
+};
+
+/**
+ * Whether the ENTRY declares a worker — by any of the three ways the catalogue actually does it.
+ *
+ * Found by measurement, not by reading the two entries in the row: `setenv` is how `stability` does it,
+ * `params: {worker: required}` is how `capture-check` does it, and `evidence-check` interpolates
+ * `lab_fleet_workers` straight into `argv` with no setenv at all. A predicate checking only `setenv` would
+ * have called two correct entries broken.
+ */
+function declaresWorker(job: { argv?: unknown; setenv?: unknown; params?: unknown }): boolean {
+  const argvText = Array.isArray(job.argv) ? job.argv.map(String).join(" ") : String(job.argv ?? "");
+  const setenvText = Array.isArray(job.setenv) ? job.setenv.map(String).join(" ") : "";
+  return WORKER_ENV.test(setenvText)
+    || Boolean((job.params as Record<string, unknown> | undefined)?.worker)
+    || /lab_fleet_workers|lab_named_worker/.test(argvText)
+    || WORKER_ENV.test(argvText);
+}
+
+/** Every job, with whether it needs a worker and whether it is told one. */
+function workerNeeds() {
+  return Object.entries(catalogueJobs()).map(([name, job]) => {
+    const argvText = Array.isArray(job.argv) ? job.argv.map(String).join(" ") : String(job.argv ?? "");
+    const scripts = [...scriptsReached(argvText)];
+    return { name, scripts, needs: scripts.some(readsWorkerFromEnv), declares: declaresWorker(job) };
+  });
+}
+
+test("#1041: every job whose script reads a worker from the environment is TOLD one", () => {
+  // `gate-stability` ran `stability-gate.mjs --local` — the identical script and flag as `stability` — and
+  // passed no worker at all, so every dispatch died on `no workers in A11Y_WORKERS and none in
+  // inventory.yml`. The script was right to refuse rather than guess; the entry that dispatched it was the
+  // defect. Its recorded failures were then read as the OS split and were never that.
+  //
+  // ASSERTED OVER THE CATALOGUE, never over a list of job names: a job added next month is covered without
+  // anyone remembering, which is the only version of this that survives the person who wrote it.
+  const undeclared = workerNeeds().filter((j) => j.needs && !j.declares);
+  assert.deepEqual(undeclared.map((j) => `${j.name} (${j.scripts.filter(readsWorkerFromEnv).join(", ")})`), [],
+    "these jobs run a script that reads a worker from the environment and are told none, so they fail "
+    + "every time they are dispatched");
+});
+
+test("#1041: a job that legitimately needs no worker still passes -- the rule is not 'every job names one'", () => {
+  // Named counter-examples, because the over-broad fix is the one that gets routed around: requiring every
+  // entry to name a worker would refuse `train`, `sweep` and `rules-gate`, none of which touch a guest.
+  const byName = new Map(workerNeeds().map((j) => [j.name, j]));
+  for (const name of ["train", "sweep", "rules-gate", "promote", "python-tests"]) {
+    const job = byName.get(name);
+    assert.ok(job, `${name} is missing from the catalogue — this counter-example no longer examines anything`);
+    assert.equal(job.needs, false, `${name} must not be read as needing a worker`);
+  }
+});
+
+test("#1041 MUTATION TARGET: the rule reads the ENTRIES, not one hard-coded name", () => {
+  // The row's own mutation, expressed as a test: strip `stability`'s worker declaration and the catalogue
+  // assertion must notice. If this ever fails, the guard above is pinning `gate-stability` by name and
+  // would say nothing about the job added next month.
+  const stability = catalogueJobs().stability;
+  assert.ok(stability, "the fixture job is gone; this mutation examines nothing");
+  assert.equal(declaresWorker(stability), true, "stability declares a worker today");
+  assert.equal(declaresWorker({ ...stability, setenv: undefined, params: {} }), false,
+    "and stripped of both declarations it reads as undeclared -- which is what makes the assertion above "
+    + "a statement about the entries rather than about a name");
+});
+
+test("#1041: the population is real -- this cannot pass having examined nothing", () => {
+  // A `npm run` chain that stopped resolving, or a catalogue parsed into an empty object, would otherwise
+  // report a clean sheet. Both counts are asserted because they fail differently: zero jobs means the YAML
+  // shape moved, and zero NEEDS means the script walk did.
+  const rows = workerNeeds();
+  assert.ok(rows.length >= 40, `expected the whole catalogue, examined ${rows.length} job(s)`);
+  const needing = rows.filter((j) => j.needs);
+  assert.ok(needing.length >= 5,
+    `only ${needing.length} job(s) read a worker from the environment; the npm-run resolution is broken, `
+    + "not the catalogue empty. 29 of 49 entries invoke `npm run` rather than a script path, and a walk "
+    + "that stops following them examines 20 entries while reporting on 49");
 });
