@@ -101,6 +101,18 @@ const GATES = Object.freeze({
   "dist-freshness": true,
   "dist-resolution": true,
   dataset: false,        // #1073: lab work. Reported, never a reason a capture cannot happen.
+
+  // THE THREE BELOW ALWAYS PASS `ok: true` TODAY, so their gating value is not currently observable --
+  // stated so nobody reads these as decisions that were tested. They are declared because the throw
+  // demands it, and the reasons are what make the table a decision rather than a list.
+  "primary checkout": false,  // a capture runs fine in a linked worktree; this guards the SHARED tree's
+                              // read-only rule, which is a different kind of cannot-proceed and not one
+                              // that stops a run. It reports, loudly, via `advise` on the unmarked case.
+  "fleet reach": false,       // it fires only when SOME box is unreachable and says "the run will dispatch
+                              // to the rest" -- a partial fleet is a smaller fleet, not no fleet. `fleet`
+                              // above is the check that decides whether there is a fleet at all.
+  "host memory": false,       // reports how many workers the host has room for; the run starts fewer
+                              // rather than failing, which is the whole point of the number.
 });
 
 /**
