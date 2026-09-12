@@ -813,32 +813,85 @@ export const allChecks = () => Object.keys(GATES);
 /** Which checks decide `ready`, for a test that must not retype the list. */
 export const gatingChecks = () => Object.entries(GATES).filter(([, gates]) => gates).map(([name]) => name);
 
-async function main() {
-  checkPrimaryCheckoutMark();
-  checkControlPlaneIsolation();
-  checkCrossPackageDist();
-  await checkJudge();
-  await checkWorker();
-  await checkDatasetPages();
-  checkRunState();
+/** The checks `doctor` runs, in order. Injectable so a throwing one can be driven without breaking a tree. */
+const DEFAULT_STEPS = [checkPrimaryCheckoutMark, checkControlPlaneIsolation, checkCrossPackageDist,
+  checkJudge, checkWorker, checkDatasetPages, checkRunState];
 
+/**
+ * #1082: A `--json` RUN THAT CANNOT PRODUCE JSON STILL PRODUCES JSON.
+ *
+ * Measured on `1e74e3d0`: a check threw, `doctor --json` exited 1 with **zero bytes on stdout** and 1,155
+ * bytes of stack on stderr — where a `--json` consumer never looks. **"Could not ask" and "no output" are
+ * different for a caller**, and only the first is actionable; the second is indistinguishable from a
+ * command that was never run.
+ *
+ * `2>&1` IS NOT THE FIX HERE, which is what makes this different from #1068's watch job. That job's stdout
+ * is prose, so merging stderr in was free. This stdout is a PARSED format, and redirecting into it
+ * produces invalid JSON — **worse than nothing, because a consumer that parses gets a syntax error rather
+ * than a document.** The fix has to be in the tool.
+ *
+ * `checks` is present and EMPTY rather than absent OR PARTIAL — and the partial list is the one actually
+ * worth refusing. A consumer reading `.checks[]` off an absent key crashes; off a partial one it reads a
+ * list that looks exactly like a complete verdict, with **no way to tell a check that is missing because
+ * it passed from one that is missing because the run died under it.** Empty says "no verdict" and cannot
+ * be mistaken for a short one.
+ * @param {unknown} error
+ * @returns {{ready: false, error: string, checks: never[]}}
+ */
+export function errorDocument(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return { ready: false, error: message, checks: [] };
+}
+
+/**
+ * The whole run, as a function of its steps and its streams, returning an exit code.
+ *
+ * @param {{ steps?: (() => unknown)[], json?: boolean, out?: (line: string) => void,
+ *           err?: (line: string) => void }} [deps]
+ * @returns {Promise<number>}
+ */
+export async function doctorRun(deps = {}) {
+  const { steps = DEFAULT_STEPS, json = JSON_OUT, out = console.log, err = console.error } = deps;
+  try {
+    for (const step of steps) await step();
+  } catch (error) {
+    // NOTHING BUT JSON REACHES STDOUT IN `--json` MODE. A `console.log` here would corrupt the document
+    // for every consumer, which is the failure this exists to prevent rather than to introduce.
+    if (json) out(JSON.stringify(errorDocument(error), null, 2));
+    // The HUMAN path keeps the stack. Only the parsed format has to give it up, and it gives it up for a
+    // document a consumer can read -- not to make the failure quieter.
+    else err(error instanceof Error && error.stack ? error.stack : `doctor: ${errorDocument(error).error}`);
+    return 1;
+  }
+  return renderDoctor({ json, out });
+}
+
+/**
+ * @param {{ json: boolean, out: (line: string) => void }} deps
+ * @returns {number}
+ */
+function renderDoctor({ json, out }) {
   const ready = readyFrom(checks);
 
-  if (JSON_OUT) {
-    console.log(JSON.stringify({ ready, next_command: nextCommand(), checks }, null, 2));
+  if (json) {
+    out(JSON.stringify({ ready, next_command: nextCommand(), checks }, null, 2));
   } else {
     for (const c of checks) {
-      console.log(`${c.advisory ? "DEBT" : c.ok ? "OK  " : "FAIL"}  ${c.name.padEnd(11)} ${c.detail}`);
-      if ((!c.ok || c.advisory) && c.fix) console.log(`        fix: ${c.fix}`);
+      out(`${c.advisory ? "DEBT" : c.ok ? "OK  " : "FAIL"}  ${c.name.padEnd(11)} ${c.detail}`);
+      if ((!c.ok || c.advisory) && c.fix) out(`        fix: ${c.fix}`);
       // #1059: the advice a shell cannot run is PRINTED, just not in the field something executes.
-      if ((!c.ok || c.advisory) && c.note) console.log(`        note: ${c.note}`);
+      if ((!c.ok || c.advisory) && c.note) out(`        note: ${c.note}`);
     }
-    console.log(`\n${ready ? "READY" : "NOT READY — see the fixes above"}`);
+    out(`\n${ready ? "READY" : "NOT READY — see the fixes above"}`);
     const next = nextCommand();
     // NO COMMAND IS SAID AS SUCH. "next: null" would read as a bug; "no single command" is the answer.
-    console.log(next === null ? "next: no single command — read the fixes and notes above" : `next: ${next}`);
+    out(next === null ? "next: no single command — read the fixes and notes above" : `next: ${next}`);
   }
-  process.exit(ready ? 0 : 1);
+  return ready ? 0 : 1;
+}
+
+async function main() {
+  process.exit(await doctorRun());
 }
 
 // REALPATH'D: `import.meta.url` is resolved through symlinks by Node's ESM loader and `process.argv[1]`
