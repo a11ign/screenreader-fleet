@@ -69,7 +69,8 @@ const PROBE_TIMEOUT_MS = 8000;
 
 /** @type {any[]} */
 /** @type {{ name: string, ok: boolean, detail: string, fix: string|null }[]} */
-/** @type {{name: string, id: string, ok: boolean, detail: string, fix: string|null, advisory?: boolean}[]} */
+/** @type {{name: string, id: string, ok: boolean, detail: string, fix: string|null, note?: string|null,
+ *    advisory?: boolean}[]} */
 const checks = [];
 /**
  * One check's verdict, and its FIX. Every parameter is typed here rather than inferred, because `fix`
@@ -82,7 +83,27 @@ const checks = [];
  *
  * @param {string} name @param {boolean} ok @param {string} detail @param {string|null} [fix]
  */
-const add = (name, ok, detail, fix = null) => checks.push({ name, id: name, ok, detail, fix });
+/**
+ * #1059: `fix` IS A COMMAND OR IT IS `null`, and human advice goes in `note`.
+ *
+ * CLAUDE.md tells an agent to read `next_command` and do that, and `next_command` is `fix`. A sentence
+ * there ("unlock the Mac if it is locked, then re-run …") is not something anything can run, so an
+ * automated reader loops. The advice is not lost -- it moves to the field nothing executes.
+ * ONE `remedy` ARGUMENT, not two: a bare string stays a command (which is what every existing call site
+ * passes), and the object form carries the advice beside it. Four parameters is the house limit and
+ * bundling cohesive arguments is the house answer to it.
+ * @param {string} name
+ * @param {boolean} ok
+ * @param {string} detail
+ * @param {string|null|{fix: string|null, note?: string|null}} [remedy] a runnable command, `null` when
+ *   none can be constructed, or `{ fix, note }` when there is advice a shell cannot run
+ */
+const add = (name, ok, detail, remedy = null) => {
+  const { fix, note } = typeof remedy === "string" || remedy === null
+    ? { fix: remedy, note: null }
+    : { note: null, ...remedy };
+  checks.push({ name, id: name, ok, detail, fix, note });
+};
 
 /**
  * A finding that is REAL and does not stop a run — reported every time, never blocking.
@@ -105,13 +126,34 @@ function commandError(/** @type {any} */ error) {
   return observed.replace(/\s+/g, " ").slice(0, 400);
 }
 
-function workerControlFix(/** @type {any} */ observed) {
+/**
+ * The remedy for a failed local-pool query, as a runnable command plus the advice that is not one.
+ *
+ * #1059: THE DEPRECATION REFUSAL GETS THE FLEET, NOT THE SCRIPT THAT JUST REFUSED. `worker-ctl.sh` refuses
+ * on a machine the deprecation is aimed at and says so -- *"Capture on the bare-metal fleet instead:
+ * npm run fleet:status"* -- and the `fix:` line beside it said to re-run the script. **Following it
+ * exactly reproduces the refusal**, which is the one thing a refusal must never do, and it contradicted
+ * the message printed directly above it.
+ * @param {string} observed
+ * @returns {{ fix: string|null, note: string|null }}
+ */
+export function workerControlFix(observed) {
+  // The deprecation names itself; matching the REFUSAL rather than the script's name, because the same
+  // script succeeds under `A11Y_LOCAL_VM=1` and that is a different situation with a different remedy.
+  if (/DEPRECATED|refusing: set A11Y_LOCAL_VM/i.test(observed)) {
+    return {
+      fix: "npm run fleet:status",
+      note: "the local UTM VM path is deprecated and refused to run; capture on the bare-metal fleet. "
+        + `To use the deprecated local VM anyway: A11Y_LOCAL_VM=1 ${CTL} pool`,
+    };
+  }
   if (/no VM named|no worker VM registered/i.test(observed)) {
-    return "UTM has no registered worker VM; re-register the existing a11y-worker*.utm bundles in UTM, then re-run " + `${CTL} pool`;
+    return { fix: `${CTL} pool`,
+      note: "UTM has no registered worker VM; re-register the existing a11y-worker*.utm bundles in UTM first" };
   }
   return existsSync("/Applications/UTM.app")
-    ? "unlock the Mac if it is locked, then re-run " + `${CTL} pool`
-    : `${CTL} pool   # launches UTM if it is installed`;
+    ? { fix: `${CTL} pool`, note: "unlock the Mac first if it is locked" }
+    : { fix: `${CTL} pool`, note: "this launches UTM if it is installed" };
 }
 
 async function shell(/** @type {any} */ cmd, /** @type {any} */ args, timeout = 30000) {
@@ -459,7 +501,8 @@ async function checkWorker() {
   const busy = pool.filter((/** @type {any} */ vm) => vm.busy);
   if (busy.length) {
     add("contention", false, `${busy.map((/** @type {any} */ v) => v.name).join(", ")} busy with a capture — another shell or agent is using the pool`,
-      "wait for it, or you will both see the other's restarts as breakage");
+      // #1059: no `fix`, because waiting is not a command. The advice is a note and `next_command` is null.
+      { fix: null, note: "wait for it, or you will both see the other's restarts as breakage" });
   }
 }
 
@@ -531,7 +574,8 @@ async function checkConfiguredFleet(/** @type {any} */ workers) {
   // is a run in progress, not a conflict -- flagging it would make doctor fail during normal use.
   if (reachable.length && reachable.every((p) => p.health.busy)) {
     add("contention", false, `all ${reachable.length} reachable worker(s) busy — another run or agent has the fleet`,
-      "wait for it, or you will both see the other's restarts as breakage");
+      // #1059: no `fix`, because waiting is not a command. The advice is a note and `next_command` is null.
+      { fix: null, note: "wait for it, or you will both see the other's restarts as breakage" });
   }
 }
 
@@ -654,11 +698,42 @@ function checkRunState() {
 
 // The single most useful line for anything automated: what to run next. A list of green ticks
 // still leaves a caller deciding, and deciding is where they go wrong.
-function nextCommand() {
-  const broken = checks.find((c) => !c.ok);
-  if (!broken) return "npm run training:capture        # starts any stopped worker and releases it after";
-  if (broken.name === "contention") return "wait — the pool is busy with another run";
-  return broken.fix ?? "see the failing check above";
+/**
+ * #1059: A COMMAND, OR `null`. Never a sentence.
+ *
+ * `--json`'s `next_command` is the field CLAUDE.md tells an agent to read and obey, so anything in it that
+ * is not runnable makes an automated reader loop -- which is exactly what happened when a failing `worker`
+ * check put *"unlock the Mac if it is locked, then re-run …"* here.
+ *
+ * **`null` and an unrunnable string are different reports**, and a JSON consumer can act on the first: it
+ * means read the checks. `contention` has no command because waiting is not one, and it says so with
+ * `null` and a `note` rather than with an imperative nobody can execute.
+ * THE PARAMETER TYPE IS WHAT THIS FUNCTION READS, not the whole check shape: `ok` and `fix`, and nothing
+ * else. A test injecting a two-field object is stating exactly the inputs the verdict depends on, and a
+ * wider type would have made it carry an `id` and a `detail` the answer cannot possibly turn on.
+ * @param {{ok: boolean, fix: string|null}[]} [checkList]
+ * @returns {string|null}
+ */
+export function nextCommand(checkList = checks) {
+  const broken = checkList.find((c) => !c.ok);
+  if (!broken) return "npm run training:capture";
+  return broken.fix ?? null;
+}
+
+/**
+ * Is `line` something a shell can run? The shape `next_command` must have, and prose must not.
+ *
+ * #1059: the field carried *"unlock the Mac if it is locked, then re-run …"*, and CLAUDE.md tells an agent
+ * to read it and do that. A shape check is the only thing that can tell a command from an imperative
+ * sentence without running it: **a command begins with an executable token** — an npm/node/git invocation,
+ * a path, or a `VAR=value` prefix — **and an English sentence begins with a verb or an article.**
+ * @param {string|null} line
+ * @returns {boolean}
+ */
+export function isRunnableCommand(line) {
+  if (line === null) return false;                 // absent is not unrunnable; the caller distinguishes them
+  const first = line.trim().split(/\s+/)[0] ?? "";
+  return /^(?:[A-Z][A-Z0-9_]*=\S*|npm|npx|node|git|\.?\.?\/\S+|[a-z0-9_-]+\.(?:sh|mjs|js|ts|py))$/.test(first);
 }
 
 /**
@@ -690,9 +765,13 @@ async function main() {
     for (const c of checks) {
       console.log(`${c.advisory ? "DEBT" : c.ok ? "OK  " : "FAIL"}  ${c.name.padEnd(11)} ${c.detail}`);
       if ((!c.ok || c.advisory) && c.fix) console.log(`        fix: ${c.fix}`);
+      // #1059: the advice a shell cannot run is PRINTED, just not in the field something executes.
+      if ((!c.ok || c.advisory) && c.note) console.log(`        note: ${c.note}`);
     }
     console.log(`\n${ready ? "READY" : "NOT READY — see the fixes above"}`);
-    console.log(`next: ${nextCommand()}`);
+    const next = nextCommand();
+    // NO COMMAND IS SAID AS SUCH. "next: null" would read as a bug; "no single command" is the answer.
+    console.log(next === null ? "next: no single command — read the fixes and notes above" : `next: ${next}`);
   }
   process.exit(ready ? 0 : 1);
 }
