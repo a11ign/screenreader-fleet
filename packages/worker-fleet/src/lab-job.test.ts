@@ -1140,3 +1140,32 @@ test("#1041: the population is real -- this cannot pass having examined nothing"
     + "not the catalogue empty. 29 of 49 entries invoke `npm run` rather than a script path, and a walk "
     + "that stops following them examines 20 entries while reporting on 49");
 });
+
+test("#1041: each of the THREE declaration forms is read, asserted one job per form", () => {
+  // worker-judge, reviewing #1051: two of `declaresWorker`'s three branches were correct and unable to
+  // fail. Measured — removing the argv branch: 0 red; removing the params branch: 0 red. The reason is
+  // this row's own direction of error compounding: `readsWorkerFromEnv` errs toward silence, so the set
+  // the catalogue assertion examines contains only setenv-declaring jobs, every one of which also has
+  // `setenv` if it has `params`. Both branches are exercised by jobs the rule never asks about.
+  //
+  // That matters more than an ordinarily-unheld branch, because this predicate took two wrong versions to
+  // reach: THE NEXT PERSON TO SIMPLIFY IT HAS NO FAILING CASE TO STOP THEM, and the branch they would
+  // delete is the one that makes `evidence-check` and `capture-check` read correctly rather than broken.
+  const jobs = catalogueJobs();
+  const form: [string, string][] = [
+    ["stability", "setenv: [\"A11Y_WORKER={{ lab_named_worker }}\"]"],
+    ["capture-check", "params: {worker: required}, interpolated into argv"],
+    ["evidence-check", "lab_fleet_workers straight into argv, with no setenv at all"],
+  ];
+  for (const [name, how] of form) {
+    assert.ok(jobs[name], `${name} is gone from the catalogue; this form is no longer exercised`);
+    assert.equal(declaresWorker(jobs[name]), true,
+      `${name} declares a worker as ${how} — if this fails, the branch reading that form has been removed `
+      + "and the catalogue assertion now calls a correct entry broken");
+  }
+  // And the control: a job that declares none must read as none, or all three assertions above are
+  // satisfied by a predicate that says yes to everything.
+  assert.equal(declaresWorker(jobs.train), false,
+    "a job that declares no worker must read as undeclared — without this, `declaresWorker: () => true` "
+    + "passes every assertion above");
+});
