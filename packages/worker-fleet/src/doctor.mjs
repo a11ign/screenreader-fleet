@@ -67,23 +67,18 @@ const SCORER_MODEL_DIR = fileURLToPath(new URL("../../scorer/models/screenreader
 const DATASET = resolve(fileURLToPath(new URL("../../../", import.meta.url)), "runs/screenreader-dataset");
 const PROBE_TIMEOUT_MS = 8000;
 
-/** @type {any[]} */
-/** @type {{ name: string, ok: boolean, detail: string, fix: string|null }[]} */
 /** @type {{name: string, id: string, ok: boolean, detail: string, fix: string|null, note?: string|null,
  *    advisory?: boolean}[]} */
 const checks = [];
 /**
- * One check's verdict, and its FIX. Every parameter is typed here rather than inferred, because `fix`
- * defaulting to `null` infers as exactly `null` -- so the argument that matters most, the sentence
- * telling a reader what to do about a failed check, was the one the compiler refused.
+ * One check's verdict, and its REMEDY. Every parameter is typed here rather than inferred, because
+ * `remedy` defaulting to `null` infers as exactly `null` -- so the argument that matters most, what a
+ * reader is to do about a failed check, was the one the compiler refused.
  *
  * `id` is always `name` -- #256 is the first check queried individually by `--json`
  * (`.checks[] | select(.id=="dist-freshness")`), and every check already has a unique `name`, so a
  * separate parameter here would be a second spelling of the same fact rather than a new one.
  *
- * @param {string} name @param {boolean} ok @param {string} detail @param {string|null} [fix]
- */
-/**
  * #1059: `fix` IS A COMMAND OR IT IS `null`, and human advice goes in `note`.
  *
  * CLAUDE.md tells an agent to read `next_command` and do that, and `next_command` is `fix`. A sentence
