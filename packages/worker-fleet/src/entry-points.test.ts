@@ -20,6 +20,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { stripComments } from "@a11ign/evidence/source-text";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname, basename } from "node:path";
@@ -240,13 +241,22 @@ function trackedSources(): string[] {
 }
 
 /**
- * A file's source with `//` comments removed — because a MENTION is not a USE, and this repo has paid for
+ * A file's source with its comments removed — because a MENTION is not a USE, and this repo has paid for
  * that three times in one night. `install-git-hooks.mjs`'s own header QUOTES the banned form to explain
  * why it does not use it; scanning unstripped reports it as an offender.
+ *
+ * `stripComments` RATHER THAN A HAND-ROLLED LINE FILTER — worker-judge reviewing #1099. The filter here
+ * dropped lines beginning `//` and nothing else, so a JSDoc block quoting a guard form survived it. Today
+ * no tracked non-test file does that, which made it latent rather than live — **and the trigger is this
+ * row's own consequence**: the next person who sweeps a file writes a block comment explaining the new
+ * form, which is precisely what `install-git-hooks.mjs` did for the old one, the file this function's own
+ * header cites as the reason it exists.
+ *
+ * It was also unheld in either spelling: removing the stripping entirely was **0 red**, measured, while
+ * genuinely changing what `cli-flags.mjs` and `guest-run.mjs` read. A live guard with no test.
  */
-function executableSource(path: string): string {
-  return readFileSync(`${REPO}${path}`, "utf8").split("\n")
-    .filter((line) => !line.trimStart().startsWith("//")).join("\n");
+function executableSource(path: string, read: (p: string) => string = (p) => readFileSync(p, "utf8")): string {
+  return stripComments(read(`${REPO}${path}`));
 }
 
 function declaresAnEntryGuard(): string[] {
@@ -302,6 +312,11 @@ function guardIsPlain(source: string): boolean {
  * it may SHRINK and may not GROW, and an entry that no longer carries the form is STALE and fails. That
  * makes each later sweep a small pull request that cannot regress, and it makes "the defect is gone"
  * something you have to prove by emptying the list rather than by a count going quiet.
+ *
+ * AN UNTRACKED NEW OFFENDER ESCAPES, and that is inherited rather than introduced: `trackedSources()`
+ * walks `git ls-files`, so a file carrying the plain form reads green until it is committed (`git add -N`
+ * is enough). Measured on this branch: 6/0 untracked, 5/1 after `git add -N`. Said here because a probe
+ * run before the first commit is green BY CONSTRUCTION and has misled a reviewer of this very file.
  */
 const KNOWN_PLAIN_ENTRY_GUARDS: readonly string[] = Object.freeze([
   "packages/cli/src/action/post-comment.ts",
@@ -403,6 +418,38 @@ test("#1086: the form this file RECOMMENDS is the form its own predicate accepts
     "the superseded form must read as PLAIN, or the predicate has stopped distinguishing them and the "
     + "assertion above passes for the wrong reason");
   assert.ok(!guardIsRealpathd(SUPERSEDED_FORM), "and it must not read as realpath'd");
+});
+
+test("#1086: a guard form QUOTED IN A COMMENT is not a use — and the stripping is what makes that true", () => {
+  // THE MENTION-IS-NOT-A-USE RULE, HELD. Removing the comment stripping altogether was 0 RED before this
+  // test existed, which is a live guard with no test -- the shape worker-judge and I have each caught in
+  // the other's work today. The old hand-rolled filter dropped `//` lines and nothing else, so a JSDoc
+  // block quoting a form survived it; `stripComments` is the tested stripper this repository already owns.
+  //
+  // Latent rather than live today, and the trigger is this row's OWN CONSEQUENCE: the next person who
+  // sweeps a file writes a block comment explaining the new form, exactly as `install-git-hooks.mjs` did
+  // for the old one.
+  const quotedInJsDoc = [
+    "/**", ` * Do NOT use ${SUPERSEDED_FORM} here --`, " * it reads false through a symlink.", " */",
+    "export function noGuardAtAll() { return 1; }",
+  ].join("\n");
+
+  // DRIVEN THROUGH `executableSource` OVER AN INJECTED READ, not through `stripComments` directly. My
+  // first version of this test called the stripper itself and asserted on that -- so removing the
+  // stripping from `executableSource` stayed 0 RED. **A guard whose only input is a fixture proves the
+  // fixture**, committed inside the fix for that exact defect. The reader is injected because no tracked
+  // file quotes a guard form in a block comment today, which is what makes this latent.
+  assert.ok(guardIsPlain(quotedInJsDoc),
+    "the control: UNSTRIPPED, this source reads as declaring the plain form -- if it does not, the rest "
+    + "of this test passes because the fixture stopped resembling the thing");
+  assert.ok(!guardIsPlain(executableSource("/fake.mjs", () => quotedInJsDoc)),
+    "and through `executableSource` it declares nothing, because a form quoted in a block comment is a "
+    + "mention. A file explaining why it does not use a form must not be reported as using it");
+
+  const inCode = `if (${SUPERSEDED_FORM}) main();`;
+  assert.ok(guardIsPlain(executableSource("/fake.mjs", () => inCode)),
+    "and the same form in CODE still reads as a use -- otherwise the stripping has eaten the subject and "
+    + "every file reads clean");
 });
 
 test("#1086 RATCHET: the plain-form population may shrink and may not grow", () => {
