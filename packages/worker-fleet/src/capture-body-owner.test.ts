@@ -116,6 +116,9 @@ test("capture clients are still found -- the vacuity guard for the discovery its
 test("every capture client that builds a request body is classified", () => {
   const classified = new Set([...Object.keys(CASE_DRIVEN), ...Object.keys(FIXED_POLICY)]);
   const unclassified = CLIENTS.filter((path) => !classified.has(path));
+  assert.ok(CLIENTS.length > 0,
+    "#1160: if `CLIENTS` is empty this assertion passes having compared nothing -- "
+    + "the control belongs on the population, not on `unclassified`");
   assert.deepEqual(unclassified, [],
     "a capture client dispatches work and nobody has said whether it builds its body from a per-case "
     + "object (and therefore must forward probe* by PREFIX, never by name) or from a fixed policy (and "

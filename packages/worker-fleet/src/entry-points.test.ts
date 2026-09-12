@@ -457,6 +457,9 @@ test("#1086 RATCHET: the plain-form population may shrink and may not grow", () 
   const known = new Set(KNOWN_PLAIN_ENTRY_GUARDS);
 
   const added = plain.filter((p) => !known.has(p));
+  assert.ok(plain.length > 0,
+    "#1160: if `plain` is empty this assertion passes having compared nothing -- "
+    + "the control belongs on the population, not on `added`");
   assert.deepEqual(added, [],
     `these declare an entry guard in the symlink-blind form and are not in the baseline:\n  ${added.join("\n  ")}\n`
     + `Use ${RECOMMENDED_FORM} — reaching a file through a symlink (npm's .bin, npx's tmpdir staging, or `
@@ -476,6 +479,9 @@ test("#1086: the two populations are counted SEPARATELY and must not overlap or 
   const realpathd = realpathdEntryGuards();
 
   const both = plain.filter((p) => realpathd.includes(p));
+  assert.ok(plain.length > 0,
+    "#1160: if `plain` is empty this assertion passes having compared nothing -- "
+    + "the control belongs on the population, not on `both`");
   assert.deepEqual(both, [],
     "a file cannot be counted in both populations -- one carrying BOTH forms is FIXED, once, because the "
     + `realpath'd guard is the one that decides: ${both.join(", ")}`);
@@ -589,6 +595,9 @@ test("every declared bin's entry-point guard survives being reached through a sy
       && !/realpathSync\(\s*process\.argv\[1\]/.test(executable);
   });
 
+  assert.ok(jsSources.length > 0,
+    "#1160: if `jsSources` is empty this assertion passes having compared nothing -- "
+    + "the control belongs on the population, not on `vulnerable`");
   assert.deepEqual(vulnerable, [],
     "these bins compare import.meta.url against a non-realpath'd process.argv[1], so reaching them through "
     + "the .bin symlink npm always creates (or npx's tmpdir staging) silently skips main() and exits 0: "

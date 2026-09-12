@@ -98,6 +98,9 @@ test("a MEASUREMENT tool refuses a busy box, rather than sampling it", () => {
   const MEASURERS = ["packages/worker-fleet/src/compare-workers.mjs"];
   const unguarded = MEASURERS.filter((file) =>
     !/\brefuseIfBusy\s*\(/.test(strip(readFileSync(resolve(root, file), "utf8"))));
+  assert.ok(MEASURERS.length > 0,
+    "#1160: if `MEASURERS` is empty this assertion passes having compared nothing -- "
+    + "the control belongs on the population, not on `unguarded`");
   assert.deepEqual(unguarded, [],
     "a tool that reports per-worker timings must refuse a worker that is not `ready`, or its numbers "
     + "describe whatever else that box was doing");
