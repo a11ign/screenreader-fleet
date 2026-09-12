@@ -71,6 +71,39 @@ const PROBE_TIMEOUT_MS = 8000;
  *    advisory?: boolean}[]} */
 const checks = [];
 /**
+ * DOES THIS CHECK DECIDE `ready`? -- #1073, product-manager's ruling: **the dataset check must REPORT and
+ * not gate.**
+ *
+ * `const ready = checks.every((c) => c.ok)` made every check a gate, so a freshly cloned checkout with a
+ * worker configured read **NOT READY** — because the stranger had not generated a TRAINING CORPUS they
+ * have no reason to want. `doctor` is the first command the README names and CLAUDE.md tells an agent to
+ * obey its `next_command`; a verdict of NOT READY on a machine that is ready for the documented purpose
+ * **teaches the reader that the verdict is not about them**, which is #1059's defect one level up.
+ *
+ * DECLARED HERE AND ENFORCED BY `add`, WHICH THROWS ON AN UNDECLARED NAME. A list that merely sat beside
+ * the checks would drift from them silently; a list a new check cannot bypass cannot. **The author of the
+ * next check has to say which kind it is**, which is the property the row asked for — not the location.
+ *
+ * THE GATE NARROWS, IT DOES NOT VANISH. Everything a capture run actually needs still decides: a
+ * readiness command that is always ready is worse than one that is never ready, because it is believed.
+ * `dataset` is the single entry that reports without deciding, and its absence is real information on the
+ * lab path -- which is why it is still PRINTED with its fix.
+ * @type {Readonly<Record<string, boolean>>}
+ */
+const GATES = Object.freeze({
+  worker: true,          // no worker, no capture
+  fleet: true,           // the fleet is the worker, on a configured machine
+  judge: true,           // a run that cannot score is not a run
+  pages: true,           // the dataset page server a capture fetches from
+  run: true,             // a run left mid-flight is a real obstruction
+  contention: true,      // another session holds the pool
+  isolation: true,       // the control-plane boundary
+  "dist-freshness": true,
+  "dist-resolution": true,
+  dataset: false,        // #1073: lab work. Reported, never a reason a capture cannot happen.
+});
+
+/**
  * One check's verdict, and its REMEDY. Every parameter is typed here rather than inferred, because
  * `remedy` defaulting to `null` infers as exactly `null` -- so the argument that matters most, what a
  * reader is to do about a failed check, was the one the compiler refused.
@@ -93,12 +126,21 @@ const checks = [];
  * @param {string|null|{fix: string|null, note?: string|null}} [remedy] a runnable command, `null` when
  *   none can be constructed, or `{ fix, note }` when there is advice a shell cannot run
  */
-const add = (name, ok, detail, remedy = null) => {
+export const addCheck = (name, ok, detail, remedy = null) => {
+  // #1073: an undeclared check cannot inherit a default. The throw is the forcing function.
+  if (!Object.hasOwn(GATES, name)) {
+    throw new Error(`doctor: check "${name}" declares no entry in GATES -- say whether it decides `
+      + "`ready` (a capture cannot happen without it) or only reports (true/false in GATES).");
+  }
   const { fix, note } = typeof remedy === "string" || remedy === null
     ? { fix: remedy, note: null }
     : { note: null, ...remedy };
   checks.push({ name, id: name, ok, detail, fix, note });
 };
+
+/** The name every call site uses; `addCheck` is the same function, exported so a test can drive the
+ * GATES refusal through the real thing rather than through a copy of its rule. */
+const add = addCheck;
 
 /**
  * A finding that is REAL and does not stop a run — reported every time, never blocking.
@@ -743,6 +785,19 @@ export function isRunnableCommand(line) {
  * call deeper inside `checkJudge`/`checkWorker`/`checkDatasetPages`. Indirection is that check's blind
  * spot, which is why these guards were placed by reading each file rather than by running a tool over them.
  */
+/**
+ * `ready` over the checks that GATE. Exported so the case nobody runs -- a clean clone whose only failing
+ * check is `dataset` -- is drivable without a clean clone.
+ * @param {{name: string, ok: boolean}[]} checkList
+ * @returns {boolean}
+ */
+export function readyFrom(checkList) {
+  return checkList.every((c) => c.ok || GATES[c.name] === false);
+}
+
+/** Which checks decide `ready`, for a test that must not retype the list. */
+export const gatingChecks = () => Object.entries(GATES).filter(([, gates]) => gates).map(([name]) => name);
+
 async function main() {
   checkPrimaryCheckoutMark();
   checkControlPlaneIsolation();
@@ -752,7 +807,7 @@ async function main() {
   await checkDatasetPages();
   checkRunState();
 
-  const ready = checks.every((c) => c.ok);
+  const ready = readyFrom(checks);
 
   if (JSON_OUT) {
     console.log(JSON.stringify({ ready, next_command: nextCommand(), checks }, null, 2));
