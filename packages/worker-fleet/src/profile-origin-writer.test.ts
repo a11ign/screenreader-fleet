@@ -24,6 +24,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+// BY RELATIVE PATH to the source, never the package import -- `browsers.mjs` is not in the package's
+// `exports` map, and importing the PUBLISHED package would resolve to a `dist` that can be stale
+// against this worktree. The same technique, for the same reason, as `fault-remediation.test.ts`.
+import { BROWSERS, browserProfileDir } from "../../nvda-worker/src/browsers.mjs";
 
 const BESPOKE = fileURLToPath(
   new URL("../../control/ansible/roles/worker/tasks/bespoke.yml", import.meta.url));
@@ -92,4 +96,57 @@ test("row 1201 clause 3: the directory task still registers the result the write
   const copy = writerTask();
   assert.match(String(copy["loop"]), /profile_dirs\.results/,
     "the writer must consume the register the directory task produces");
+});
+
+/**
+ * row 1201: THE WRITER'S DESTINATION AND THE READER'S PATH ARE ONE FACT, PINNED HERE.
+ *
+ * `worker-judge` found them written twice with nothing comparing them — the shape this repository files
+ * more than any other, inside the fix for a row about a single witness. **If they disagree, nothing
+ * fails.** Every guest takes the no-record path, `USED_MARKER` stays the sole witness, and the behaviour
+ * is byte-identical to not having shipped this at all: the fix's failure mode is indistinguishable from
+ * its absence, which is the defect row 1201 exists to remove, reproduced in its own remedy.
+ *
+ * DERIVED FROM `browserProfileDir` ITSELF, not retyped. Driving the real function is what makes this a
+ * comparison rather than a second copy: a rename of `profileName`, or a change to how the directory is
+ * composed, fails here rather than on a guest three weeks later.
+ */
+test("row 1201 clause 4: the writer's dest IS the path the reader reads", () => {
+  const copy = writerTask()["ansible.windows.win_copy"] ?? {};
+  const before = process.env.LOCALAPPDATA;
+  try {
+    // A sentinel rather than a realistic value: if the substitution below silently failed, a realistic
+    // root could still match by accident. This one cannot appear for any other reason.
+    process.env.LOCALAPPDATA = "%LOCALAPPDATA%";
+    for (const browser of [BROWSERS.edge, BROWSERS.chrome]) {
+      const expected = `${browserProfileDir(browser)}\\${ORIGIN_FILE}`;
+      const actual = String(copy.dest).replace("{{ item.item }}", browser.profileName);
+      assert.equal(actual, expected,
+        `the writer puts the record at ${actual} and the worker reads it from ${expected}. Two spellings `
+        + "of one path: if they diverge nothing fails, every profile falls back to the marker, and the "
+        + "behaviour is identical to not having shipped this row");
+    }
+  } finally {
+    process.env.LOCALAPPDATA = before;
+  }
+});
+
+test("row 1201 clause 5: the writer targets the directory the task above creates", () => {
+  // The two Ansible tasks are also two copies. Pinning them removes the in-file drift independently of
+  // the reader comparison above -- if the directory task's path changes, this fails whether or not
+  // `browsers.mjs` moved with it.
+  const all = tasks();
+  const dirTask = all.find((t) => t["register"] === "profile_dirs");
+  const dirPath = String((dirTask as { "ansible.windows.win_file"?: { path?: string } })
+    ?.["ansible.windows.win_file"]?.path);
+  const copy = writerTask()["ansible.windows.win_copy"] ?? {};
+  // NORMALISED, because the same value is spelled differently in the two contexts and that difference is
+  // correct: the directory task loops the bare list, so its variable is `item`; the writer loops the
+  // REGISTERED RESULTS, where the original list entry is `item.item`. Comparing the raw strings asserts
+  // a sameness that was never true -- my first version of this clause did, and failed on the difference
+  // it should have been normalising. Everything OUTSIDE that expression must still match exactly.
+  const normalise = (p: string) => p.replace("{{ item.item }}", "{{ item }}");
+  assert.equal(normalise(String(copy.dest)), `${normalise(dirPath)}\\${ORIGIN_FILE}`,
+    "the record must land inside the directory the task above created, spelled the same way -- these are "
+    + "two lines in one file and drift between them is a one-character edit nothing else catches");
 });
