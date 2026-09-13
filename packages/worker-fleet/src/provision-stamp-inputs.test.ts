@@ -127,8 +127,17 @@ const EXEMPT: Record<string, string> = {
     + "all (\"NVDA is not supported\") or capture nothing (an elevated worker cannot read the browser) — a "
     + "loud, total capture failure, not the silent per-guest evidence drift the stamp exists to catch.",
   "packages/control/ansible/roles/worker/tasks/bespoke.yml":
-    "Power timeouts, NIC wake, Defender and browser-profile directories — reliability and disk, not what "
-    + "a capture hears. Also writes provision-revision.txt itself, which cannot sensibly hash its own input.",
+    "Power timeouts, NIC wake, Defender and browser-profile directories — reliability and disk. Also "
+    + "writes provision-revision.txt itself, which cannot sensibly hash its own input.\n\n"
+    + "row 1201 AMENDED THIS REASON RATHER THAN INHERITING IT. The old wording said \"not what a capture "
+    + "hears\", and this file now writes `.a11y-profile-origin`, which `browser-profile.mjs` reads to "
+    + "decide a profile's identity — and that identity IS an `environmentKey` input. So the premise the "
+    + "old sentence rested on moved under it. The exemption still holds, for a different and narrower "
+    + "reason: the stamp exists to stop two guests' EVIDENCE BLENDING, and this record can only make the "
+    + "key MORE discriminating. A guest whose profile was created fresh and one whose profile was adopted "
+    + "now report different identities and therefore cannot share a cache entry — which is the direction "
+    + "the stamp wants. Hashing this file instead would bump provisionRevision fleet-wide and invalidate "
+    + "every cached pair to record a fact that already separates the guests it needs to separate.",
   "packages/control/ansible/roles/worker/tasks/packages.yml":
     "Node and Git versions, and the repo clone. Neither Node nor Git touches NVDA/Edge announcement "
     + "content; the repo's checked-out COMMIT is deliberately a separate, non-cache-key precondition "
