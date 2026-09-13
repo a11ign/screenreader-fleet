@@ -45,6 +45,8 @@ function tasks(): BespokeTask[] {
  * field nobody fetched in this repository before, and these assertions are exactly field reads. */
 type WinCopy = { dest?: string; content?: string; force?: boolean };
 type BespokeTask = {
+  name?: string;
+  become?: boolean;
   "ansible.windows.win_copy"?: WinCopy;
   register?: string;
   loop?: string;
@@ -149,4 +151,15 @@ test("row 1201 clause 5: the writer targets the directory the task above creates
   assert.equal(normalise(String(copy.dest)), `${normalise(dirPath)}\\${ORIGIN_FILE}`,
     "the record must land inside the directory the task above created, spelled the same way -- these are "
     + "two lines in one file and drift between them is a one-character edit nothing else catches");
+
+  // AND NEITHER TASK MAY BE BECOMED. `%LOCALAPPDATA%` is per-user and the worker runs as `witness`, so
+  // `become: true` would resolve both paths to a DIFFERENT user's profile. Unlike the expansion question
+  // -- where `win_copy` not creating a missing parent should fail the run loudly -- this one is silent:
+  // the record lands somewhere real, the module succeeds, and the worker finds nothing. The driver task
+  // in the same file IS becomed, so copying it here is a natural edit and nothing else would catch it.
+  for (const task of [dirTask, writerTask()] as { name?: string; become?: boolean }[]) {
+    assert.notEqual(task?.become, true,
+      `${task?.name ?? "(unnamed)"} is becomed, so %LOCALAPPDATA% resolves to another user's profile: `
+      + "the record is written somewhere real and the worker, running as `witness`, reads nothing");
+  }
 });
