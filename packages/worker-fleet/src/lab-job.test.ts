@@ -822,13 +822,14 @@ test("every job whose resolved script adopts gateVerdict/fleetVerdict declares e
     + `copy:\n${undeclared.map((n) => `  ${n}`).join("\n")}`);
 });
 
-test("rules-real-pages's exit-1 meaning does not claim an assertion the gate did not make -- #364", () => {
-  // Exit 1 fires on ANY new finding against the conformant baseline, asserted or referred -- the same
-  // gateVerdict contract every job above shares. `check-real-page-findings.ts` prints its own
-  // `OF THOSE N: ... ASSERTED, ... REFERRED` line and, on a referral-only run, says outright
-  // "NOTHING WAS ASSERTED. ... this is referral noise ... and not a publish blocker." A hand-written "1"
-  // meaning that names only the worse of the two possibilities contradicts that line on the exact runs
-  // where it matters most -- measured 2026-09-07, same run, same exit code, opposite verdicts.
+test("rules-real-pages's exit-1 meaning does not claim an assertion the gate did not make -- #364, #1504", () => {
+  // #364 measured it on 2026-09-07: same run, same exit code, opposite verdicts. Exit 1 then fired on ANY
+  // new finding, asserted or referred, while `check-real-page-findings.ts` said of a referral-only run
+  // "NOTHING WAS ASSERTED ... referral noise", so a "1" meaning naming only the worse case contradicted the
+  // script. #1504 moved the CONTRACT instead: exit 1 is now a NEW ASSERTED finding (or one with no recorded
+  // outcome), and a REFERRED-only reading prints a WARNING and exits 0. Both halves stay pinned: no meaning
+  // may claim an assertion happened, and rules-real-pages' meaning must now say ASSERTED and must not
+  // say the code fires on a referral.
   for (const name of ["rules-real-pages", "rules-real-pages-update"]) {
     const meaning = (PLAY_VARS.lab_jobs[name] as { exitMeanings?: Record<string, string> })
       .exitMeanings?.["1"] ?? "";
@@ -839,6 +840,14 @@ test("rules-real-pages's exit-1 meaning does not claim an assertion the gate did
       `${name}'s exit-1 meaning must not claim a genuine false positive -- that is only true when the `
       + "gate's own ASSERTED/REFERRED line says ASSERTED");
   }
+  const realPages = (PLAY_VARS.lab_jobs["rules-real-pages"] as { exitMeanings?: Record<string, string> })
+    .exitMeanings?.["1"] ?? "";
+  assert.match(realPages, /\bNEW ASSERTED finding\b/,
+    "rules-real-pages's exit 1 fires on a NEW ASSERTED finding since #1504, and its meaning must say so");
+  assert.doesNotMatch(realPages, /fires on either/i,
+    "a REFERRED-only reading exits 0 since #1504, so rules-real-pages's exit 1 no longer fires on either");
+  assert.match(realPages, /REFERRED-only reading does not fire this code[\s\S]*exits 0/,
+    "rules-real-pages's exit-1 meaning must say what a REFERRED-only reading does instead (#1504)");
 });
 
 test("only a job that reports progress has a progress root, and it is declared", () => {
