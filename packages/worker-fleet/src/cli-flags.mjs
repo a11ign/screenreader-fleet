@@ -156,11 +156,17 @@ export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2),
   }
   // REALPATH'D, and without it this guard silently does not fire through a symlink — #237.
   //
-  // The entry guards at every call site read
+  // An entry guard in the realpath'd form reads
   // `import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href`, and
-  // this comparison had no `realpathSync`. So when `argv[1]` reaches a script through a symlink — npm's
-  // own `.bin` links are symlinks, which is why the call sites resolve — the OUTER condition is true and
+  // this comparison had no `realpathSync`. So when `argv[1]` reaches such a script through a symlink — npm's
+  // own `.bin` links are symlinks, which is why those call sites resolve — the OUTER condition is true and
   // this one is FALSE. `main()` runs; the flag guard returns early and inspects nothing.
+  //
+  // NOT EVERY CALL SITE HAS THAT FORM (#1248). Some still compare the plain, symlink-blind
+  // `pathToFileURL(process.argv[1] ?? "")`, which fails the other way through a symlink: the OUTER condition is
+  // false, `main()` never runs, and the tool exits 0. Which files still do is `KNOWN_PLAIN_ENTRY_GUARDS` in
+  // `entry-points.test.ts` (#1086), a ratchet that may shrink and may not grow. It is the list of record, so no
+  // count is repeated here.
   //
   // Measured on `piped-exit-status-guard.mjs`, same file, same flag:
   //

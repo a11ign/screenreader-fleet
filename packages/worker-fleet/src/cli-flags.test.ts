@@ -285,7 +285,8 @@ test("positionals are still not this guard's business", () => {
 });
 
 test("the guard fires through a SYMLINK, because npm's own .bin entries are symlinks", () => {
-  // #237. The entry guards at every call site realpath `argv[1]`; `refuseUnknownFlags`'s OWN comparison
+  // #237. An entry guard in the realpath'd form resolves `argv[1]` (not every call site does: see
+  // `KNOWN_PLAIN_ENTRY_GUARDS` in `entry-points.test.ts`, #1248); `refuseUnknownFlags`'s OWN comparison
   // did not. So through a symlink the outer condition was TRUE and this one FALSE: `main()` ran and the
   // flag guard returned early having inspected nothing.
   //
