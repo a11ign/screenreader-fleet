@@ -171,7 +171,7 @@ export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2),
   // Measured on `piped-exit-status-guard.mjs`, same file, same flag:
   //
   //   node scripts/tmp-symlink-probe.mjs --bogus 'echo hi'   -> ran, exit 0, flag IGNORED
-  //   node scripts/piped-exit-status-guard.mjs --bogus '...'  -> refused, exit 2
+  //   node packages/guards/src/piped-exit-status-guard.mjs --bogus '...'  -> refused, exit 2
   //
   // Through the symlink the mistyped flag is ignored and the command reports success — which is the
   // sentence this refusal itself prints as the reason it exists.

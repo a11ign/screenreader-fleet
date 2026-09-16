@@ -1,8 +1,8 @@
-// A DELIBERATE, DISCLOSED DUPLICATE of `scripts/git-env.mjs` at the repo root.
+// A DELIBERATE, DISCLOSED DUPLICATE of `packages/guards/src/git-env.mjs` at the repo root.
 //
 // git EXPORTS `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` into every hook environment, and a process that
 // spawns `git` with an inherited `env` operates on whatever `GIT_DIR` names, not on `cwd` -- see
-// `scripts/git-env.mjs`'s header for the incident that proved it (a pre-push-hook test forged 15 commits
+// `packages/guards/src/git-env.mjs`'s header for the incident that proved it (a pre-push-hook test forged 15 commits
 // across all refs of the real repo).
 //
 // This package publishes `check-worker-code.mjs` and `deploy-worker.mjs` as `bin` entries
@@ -12,7 +12,7 @@
 // monorepo and break for every real consumer. That is the entire reason this file exists rather than a
 // relative import to the root: not stylistic preference, a publish-boundary constraint (see ADR 0004).
 //
-// Kept textually identical to `scripts/git-env.mjs` and pinned equal to it by
+// Kept textually identical to `packages/guards/src/git-env.mjs` and pinned equal to it by
 // `git-safe-env.test.ts`, which is this repo's own remedy #3 ("pin them equal with a test") for a fact
 // that CANNOT be stated once because the two copies cross a package-publishing boundary neither can
 // import through.

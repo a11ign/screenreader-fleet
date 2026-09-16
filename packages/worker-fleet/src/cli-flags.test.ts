@@ -99,7 +99,7 @@ const UNGUARDED: Record<string, string> = {
   // precedent above rather than accepting the same bind twice. Its unknown-flag check is now a bare
   // `process.argv.slice(3).length > 0` and fails CLOSED (exit 2) on anything unexpected -- the same
   // affordability argument as its sibling entry.
-  "scripts/piped-exit-status-guard.mjs":
+  "packages/guards/src/piped-exit-status-guard.mjs":
     "runs in every fresh worktree via `scripts/git-hooks/pre-commit`, including one with no `node_modules` "
     + "yet -- a workspace import of `cli-flags.mjs` there threw ERR_MODULE_NOT_FOUND and was misread as a "
     + "hazard finding on every staged line (#535). Its extra-argument check is now a bare argv length "

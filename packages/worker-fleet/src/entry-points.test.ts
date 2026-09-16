@@ -24,7 +24,7 @@ import { stripComments } from "@a11ign/evidence/source-text";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname, basename } from "node:path";
-import { declareTreeWideGuard, walkTree } from "../../../scripts/tree-wide-guard.mjs";
+import { declareTreeWideGuard, walkTree } from "../../guards/src/tree-wide-guard.mjs";
 
 // #716/#704: this file's own population is the whole tracked tree, not one file -- declared here
 // rather than inferred from its source, per ceo's ruling (2026-09-09) that the tree-wide-guard
@@ -384,11 +384,9 @@ const KNOWN_PLAIN_ENTRY_GUARDS: readonly string[] = Object.freeze([
   "packages/worker-fleet/src/guest-run.mjs",
   "packages/worker-fleet/src/normalise-fleet.mjs",
   "scripts/carry-branch.mjs",
-  "scripts/changeset-precise.mjs",
   "scripts/check-retired-heads.mjs",
   "scripts/check-schema-migration.mjs",
   "scripts/ci-changed.mjs",
-  "scripts/close-merged-rows.mjs",
   "scripts/control-plane-hygiene.mjs",
   "scripts/known-gaps-index.mjs",
   "scripts/mark-primary-checkout.mjs",

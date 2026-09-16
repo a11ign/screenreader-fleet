@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
-// The canonical scrubber for this package -- `scripts/git-env.mjs` re-exports the same function for the
+// The canonical scrubber for this package -- `packages/guards/src/git-env.mjs` re-exports the same function for the
 // repo-root scripts. One helper, two entry points, so a git spawn cannot inherit GIT_DIR by either door.
 import { sandboxGitEnv } from "./git-safe-env.mjs";
 import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
