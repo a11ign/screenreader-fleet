@@ -772,6 +772,13 @@ test("a job that answers in exit codes says what they mean", () => {
  * appearing undeclared, not slip past a list nobody remembered to extend. The regex is deliberately the
  * SAME one `exit-code-contract.test.ts` uses -- copied, not imported, so the two tests independently
  * agreeing is a fact about the source, not an accident of one importing the other's opinion.
+ *
+ * `rules-real-pages-update` is an adopter by this text-only heuristic (its script imports `exitCodeFor`
+ * for the non-`--update` path) but is not bound to declare "1": `--update` takes an early `if (UPDATE)`
+ * branch straight to `updateBaseline()`, which returns only 0 or 2 and never reaches `exitCodeFor` at all
+ * (#1511). A job whose own argv carries `--update` is exempted from the "1" half of this check for that
+ * reason -- `updateBranchReturnCodes()` below is the derived check that actually verifies what its
+ * `--update` branch can return.
  */
 const PACKAGE_SCRIPTS = JSON.parse(readFileSync(
   fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8")).scripts as Record<string, string>;
@@ -814,12 +821,82 @@ test("every job whose resolved script adopts gateVerdict/fleetVerdict declares e
     + "either most were removed from the catalogue, or resolvedScriptFile()'s resolution broke; six are "
     + "confirmed by direct reading, so six is the floor to investigate before relaxing this number");
 
-  const undeclared = adopters.filter((name) =>
-    !jobs[name].exitMeanings?.["1"] || !jobs[name].exitMeanings?.["2"]);
+  const undeclared = adopters.filter((name) => {
+    const argvTokens = (Array.isArray(jobs[name].argv) ? jobs[name].argv : []).map(String);
+    // #1511: `--update` bypasses the shared contract entirely (see the doc comment above), so it owes
+    // this check only "2" -- its "1" (or its absence) is `updateBranchReturnCodes()`'s to verify.
+    if (argvTokens.includes("--update")) return !jobs[name].exitMeanings?.["2"];
+    return !jobs[name].exitMeanings?.["1"] || !jobs[name].exitMeanings?.["2"];
+  });
   assert.deepEqual(undeclared, [],
     "these jobs dispatch a script that answers in the shared gateVerdict/fleetVerdict 0/1/2 contract and "
     + "do not declare what 1 and 2 mean here -- see rules-gate's entry in lab-job.yml for the shape to "
     + `copy:\n${undeclared.map((n) => `  ${n}`).join("\n")}`);
+});
+
+/**
+ * The body of a top-level `function <name>(...) { ... }` declaration, matched by counting braces rather
+ * than by line count -- the same idiom `wire-types-describe-the-wire.test.ts` uses for a balanced object
+ * literal, because a function body can itself contain `{`/`}` (an `if`, a template literal) that a
+ * line-bounded slice would cut through.
+ */
+function functionBody(source: string, name: string): string {
+  const signature = source.indexOf(`function ${name}(`);
+  if (signature < 0) throw new Error(`function ${name}() not found in the resolved script`);
+  let depth = 0;
+  for (let i = source.indexOf("{", signature); i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}" && --depth === 0) return source.slice(source.indexOf("{", signature) + 1, i);
+  }
+  throw new Error(`function ${name}() has no matching closing brace`);
+}
+
+/**
+ * #1511: a job whose argv carries `--update` takes the script's `if (UPDATE)` branch, which calls ONE
+ * function and returns whatever THAT function returns -- never the shared `gateVerdict`/`exitCodeFor`
+ * contract the rest of the file uses. `lab-job.yml` once declared `rules-real-pages-update`'s exit 1
+ * anyway, because its comment assumed "same script" meant "same contract" without checking which function
+ * `--update` actually reaches. The callee's NAME is read out of the `if (UPDATE)` branch rather than
+ * hard-coded, so a rename of `updateBaseline` follows without editing this file.
+ */
+function updateBranchReturnCodes(source: string): Set<number> {
+  const ifUpdate = source.indexOf("if (UPDATE)");
+  if (ifUpdate < 0) throw new Error("no `if (UPDATE)` branch found -- this script no longer guards --update");
+  let depth = 0; let branch = "";
+  for (let i = source.indexOf("{", ifUpdate); i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}" && --depth === 0) { branch = source.slice(source.indexOf("{", ifUpdate) + 1, i); break; }
+  }
+  const callee = branch.match(/process\.exitCode\s*=\s*(\w+)\(/);
+  if (!callee) throw new Error("`if (UPDATE)` branch does not assign process.exitCode from a function call");
+  const body = functionBody(source, callee[1]);
+  return new Set([...body.matchAll(/\breturn (\d+);/g)].map((m) => Number(m[1])));
+}
+
+test("a job that runs with --update declares only exit codes its --update branch can return -- #1511", () => {
+  const jobs = PLAY_VARS.lab_jobs as Record<string, JobEntry & { exitMeanings?: Record<string, string> }>;
+  const updateJobs = Object.entries(jobs).filter(([, job]) =>
+    (Array.isArray(job.argv) ? job.argv.map(String) : []).includes("--update"));
+  // Vacuity guard: #1511's own case disappearing from the catalogue would make this test pass having
+  // checked nothing, which is exactly the silent-pass shape the row exists to prevent.
+  assert.ok(updateJobs.length > 0, "no job in the catalogue passes --update -- #1511's own case is gone; "
+    + "if that is intentional, this test has nothing left to check and should be removed with it");
+
+  for (const [name, job] of updateJobs) {
+    const meanings = job.exitMeanings ?? {};
+    const declared = Object.keys(meanings).map(Number);
+    // The control `bogus` (below) needs: a job that dropped every exitMeanings entry would make its
+    // `bogus` empty by having nothing to compare, not by comparing cleanly (#1123, local/uncontrolled-emptiness).
+    assert.ok(declared.length > 0, `${name} passes --update but declares no exitMeanings at all`);
+    const scriptFile = resolvedScriptFile(job.argv);
+    if (!scriptFile) throw new Error(`${name} passes --update but its script could not be resolved`);
+    const source = readFileSync(fileURLToPath(new URL(`../../../${scriptFile}`, import.meta.url)), "utf8");
+    const reachable = updateBranchReturnCodes(source);
+    const bogus = declared.filter((code) => !reachable.has(code));
+    assert.deepEqual(bogus, [],
+      `${name} declares exit code(s) ${bogus.join(", ")} in exitMeanings, but its --update branch `
+      + `(${scriptFile}) can only return ${[...reachable].sort().join(" or ")} -- #1511`);
+  }
 });
 
 test("rules-real-pages's exit-1 meaning does not claim an assertion the gate did not make -- #364, #1504", () => {
@@ -833,6 +910,10 @@ test("rules-real-pages's exit-1 meaning does not claim an assertion the gate did
   for (const name of ["rules-real-pages", "rules-real-pages-update"]) {
     const meaning = (PLAY_VARS.lab_jobs[name] as { exitMeanings?: Record<string, string> })
       .exitMeanings?.["1"] ?? "";
+    // #1511: rules-real-pages-update's --update branch calls updateBaseline(), which returns only 0 or 2
+    // -- it has no exit-1 meaning to check here. `updateBranchReturnCodes()` above is what actually
+    // verifies that; the wording guards below still apply if a "1" ever comes back non-empty.
+    if (name === "rules-real-pages-update" && meaning === "") continue;
     assert.ok(meaning.length > 0, `${name} must still declare a non-empty exit-1 meaning`);
     assert.doesNotMatch(meaning, /asserted wrongly/i,
       `${name}'s exit-1 meaning must not claim an assertion happened -- most new findings are referrals`);
