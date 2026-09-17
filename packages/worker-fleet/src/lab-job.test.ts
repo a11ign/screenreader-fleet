@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import { sandboxGitEnv } from "./git-safe-env.mjs";
 
 /** The lab's scripts directory, resolved the same way `read` resolves the playbooks. */
@@ -929,6 +930,49 @@ test("rules-real-pages's exit-1 meaning does not claim an assertion the gate did
     "a REFERRED-only reading exits 0 since #1504, so rules-real-pages's exit 1 no longer fires on either");
   assert.match(realPages, /REFERRED-only reading does not fire this code[\s\S]*exits 0/,
     "rules-real-pages's exit-1 meaning must say what a REFERRED-only reading does instead (#1504)");
+});
+
+/**
+ * #1626: `install-axe-browser` writes a Chromium to `PLAYWRIGHT_BROWSERS_PATH`, and `axe-calibration`
+ * looks for it there with no separate marker file -- so the two `setenv` entries agreeing is the whole
+ * refusal contract. Derived from the parsed catalogue, not grepped, so a rename of one entry that forgets
+ * the other fails here rather than at 2am on the lab.
+ */
+test("#1626: install-axe-browser and axe-calibration pin the SAME PLAYWRIGHT_BROWSERS_PATH", () => {
+  const jobs = PLAY_VARS.lab_jobs as Record<string, JobEntry>;
+  const pathFrom = (name: string) => {
+    const setenv = jobs[name]?.setenv ?? [];
+    const entry = setenv.find((line) => line.startsWith("PLAYWRIGHT_BROWSERS_PATH="));
+    if (!entry) throw new Error(`${name} does not declare PLAYWRIGHT_BROWSERS_PATH in setenv`);
+    return entry.slice("PLAYWRIGHT_BROWSERS_PATH=".length);
+  };
+  assert.equal(pathFrom("install-axe-browser"), pathFrom("axe-calibration"),
+    "axe-calibration must look for the browser exactly where install-axe-browser put it");
+});
+
+test("#1626: install-axe-browser never invokes npx, and names a file this checkout actually ships", () => {
+  const argv = (PLAY_VARS.lab_jobs["install-axe-browser"] as JobEntry).argv;
+  const tokens = Array.isArray(argv) ? argv.map(String) : [];
+  assert.ok(!tokens.some((t) => t.includes("npx")),
+    "npx would let this job turn into an arbitrary package install on the box holding the corpus");
+  const scriptArg = tokens.find((t) => t.endsWith(".js"));
+  assert.ok(scriptArg, "install-axe-browser's argv must name a script file, not rely on a global playwright");
+  assert.ok(existsSync(fileURLToPath(new URL(`../../../${scriptArg}`, import.meta.url))),
+    `install-axe-browser's argv names ${scriptArg}, which is not on disk`);
+});
+
+test("#1626: axe-calibration's declared exit codes are ones its own script can actually produce", () => {
+  // The #1511 lesson applied to a job with no shared gateVerdict/exitCodeFor to borrow: axe-calibration.mjs
+  // is its own contract, so what it can return is read from ITS source, never typed by hand here.
+  const source = readFileSync(resolve(LAB_SCRIPTS, "axe-calibration.mjs"), "utf8");
+  const meanings = (PLAY_VARS.lab_jobs["axe-calibration"] as JobEntry & { exitMeanings?: Record<string, string> })
+    .exitMeanings ?? {};
+  const declared = Object.keys(meanings);
+  assert.ok(declared.length > 0, "axe-calibration must declare what its non-zero exits mean");
+  for (const code of declared) {
+    assert.match(source, new RegExp(String.raw`process\.exitCode\s*=\s*${code}\b`),
+      `axe-calibration declares exit ${code}, but its script has no \`process.exitCode = ${code}\``);
+  }
 });
 
 test("only a job that reports progress has a progress root, and it is declared", () => {
