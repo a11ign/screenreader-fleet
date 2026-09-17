@@ -221,7 +221,7 @@ test("every npm entry point refuses to run when imported", () => {
  * paths (#174), then workflows (#185), then git hooks (#202) — each time by adding the source that had
  * just bitten. The fifth instance bit anyway: `reconstitution-blank.mjs`… `reconstitution-drill.mjs` is
  * invoked by **none** of those (`package.json` 0, workflows 0, hooks 0). It is run by a human, because
- * `docs/roles/migrate.md` tells them to.
+ * `packages/agent-org/docs/roles/migrate.md` tells them to.
  *
  * **A doc telling a person to run something cannot be enumerated.** So the enumeration is inherently
  * incomplete, and the form check does not need it: **a file that is an entry point says so, in the guard
