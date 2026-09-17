@@ -44,10 +44,19 @@
  * invalidates the corpus, which is a decision for whoever owns the live recapture, not something a test
  * should decide unilaterally by asserting a bigger list into existence.
  */
+import { declareWalkScope } from "../../guards/src/walk-scope.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+// #929: THIS GUARD READS ONLY `packages/control`, `packages/worker-fleet`, so a diff that cannot reach it need not run this file.
+// Undeclared means unbounded, which is why the selector runs 173 always-run guards on every pull
+// request. The declaration is ENFORCED rather than trusted: `declareWalkScope` observes what this
+// file actually reads and fails it here if anything lands outside the scope -- so a scope that is
+// too narrow is loud, never a guard that silently stopped running.
+export const WALK_SCOPE = ["packages/control","packages/worker-fleet"];
+await declareWalkScope(import.meta.url);
 
 const ROLE = fileURLToPath(new URL("../../control/ansible/roles/worker/", import.meta.url));
 const MODULES = fileURLToPath(

@@ -13,6 +13,7 @@
  * The related rule — that nothing spawns a sibling by a cwd-relative path — is checked repo-wide in
  * `packages/lab/src/packaging/spawned-paths.test.ts`, because the split found three instances of it.
  */
+import { declareWalkScope } from "../../guards/src/walk-scope.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -20,6 +21,14 @@ import { fileURLToPath } from "node:url";
 import { isAbsolute, join } from "node:path";
 
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
+
+// #929: THIS GUARD READS ONLY `packages/lab`, `packages/worker-fleet`, so a diff that cannot reach it need not run this file.
+// Undeclared means unbounded, which is why the selector runs 173 always-run guards on every pull
+// request. The declaration is ENFORCED rather than trusted: `declareWalkScope` observes what this
+// file actually reads and fails it here if anything lands outside the scope -- so a scope that is
+// too narrow is loud, never a guard that silently stopped running.
+export const WALK_SCOPE = ["packages/lab","packages/worker-fleet"];
+await declareWalkScope(import.meta.url);
 
 const here = fileURLToPath(new URL("./", import.meta.url));
 
