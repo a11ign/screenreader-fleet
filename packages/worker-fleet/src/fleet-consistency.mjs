@@ -132,7 +132,7 @@ export function describeMismatches(mismatches) {
 /**
  * A short, UNAMBIGUOUS name per worker.
  *
- * `.4` is the right label for `http://REDACTED-INTERNAL-ADDRESS:8765` in a table, and it is the wrong one the moment
+ * `.4` is the right label for a guest's full `http://<address>:8765` in a table, and it is the wrong one the moment
  * two workers share a last octet — two boxes on one host with different ports, or two subnets that
  * happen to meet. The report then says which FIELD drifted and gives two identically-named values, which
  * is drift detected and not located: `browserVersion: .1=151.0.1 .1=150.0.9`.
@@ -157,7 +157,7 @@ function labelWorkers(workers) {
   }));
 }
 
-/** `http://REDACTED-INTERNAL-ADDRESS:8765` is noise in a table; `.4` is not. @param {string} worker */
+/** a guest's full `http://<address>:8765` is noise in a table; `.4` is not. @param {string} worker */
 function shortWorker(worker) {
   const host = /\/\/([^:/]+)/.exec(worker)?.[1] ?? worker;
   return host.includes(".") ? `.${host.split(".").pop()}` : host;

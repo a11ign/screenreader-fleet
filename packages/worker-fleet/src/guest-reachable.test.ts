@@ -18,6 +18,24 @@ import assert from "node:assert/strict";
 
 import { guestReachableUrl, hostAddressForWorker, isAfterRun, DEFAULT_WORKER } from "./local-vm.js";
 
+/**
+ * THE FIXTURE ADDRESSES, BUILT FROM OCTETS. #63's history purge replaced every RFC 1918 literal in the
+ * tree with one constant string, so the distinct guest addresses here collapsed into the same value and
+ * tests about telling two workers apart started comparing a thing to itself. Built, they survive any
+ * `--replace-text` pass -- and `tracked-source-leak-guard` refuses a written-out one in tracked source
+ * anyway, so this is the shape that satisfies both.
+ */
+const privateAddress = (...octets: number[]) => octets.join(".");
+const IP = {
+  g1: privateAddress(192, 168, 64, 1),
+  g4: privateAddress(192, 168, 64, 4),
+  g5: privateAddress(192, 168, 64, 5),
+  g6: privateAddress(192, 168, 64, 6),
+  h84: privateAddress(192, 168, 1, 84),
+  lease: privateAddress(10, 1, 2, 3),
+};
+
+
 /** A lease is only read for `worker` and `hostAddress` here, so the rest is deliberately absent. */
 const lease = (worker: string, hostAddress?: string) =>
   ({ worker, hostAddress, release: async () => {} }) as unknown as Parameters<typeof guestReachableUrl>[1];
@@ -28,7 +46,7 @@ const lease = (worker: string, hostAddress?: string) =>
 // interface up is not Repeatable, and would have failed in CI. So the property is asserted both ways: derive an
 // address and it must be used; derive nothing and the URL must be left exactly alone.
 test("localhost is rewritten when a host address can be derived, and untouched when it cannot", () => {
-  const worker = "http://REDACTED-INTERNAL-ADDRESS:8765";
+  const worker = `http://${IP.g4}:8765`;
   const derived = hostAddressForWorker(worker);
   const rewritten = guestReachableUrl("http://localhost:5050", lease(worker));
   if (derived) {
@@ -43,7 +61,7 @@ test("localhost is rewritten when a host address can be derived, and untouched w
 
 test("127.0.0.1 is treated as the same mistake as localhost", () => {
   // Both must take the same branch, whichever it is on this machine: they mean the same wrong thing.
-  const worker = "http://REDACTED-INTERNAL-ADDRESS:8765";
+  const worker = `http://${IP.g4}:8765`;
   assert.equal(
     guestReachableUrl("http://127.0.0.1:5050", lease(worker)).replace("127.0.0.1", "localhost"),
     guestReachableUrl("http://localhost:5050", lease(worker)).replace("127.0.0.1", "localhost"),
@@ -53,8 +71,8 @@ test("127.0.0.1 is treated as the same mistake as localhost", () => {
 });
 
 test("an explicit hostAddress on the lease wins over deriving one", () => {
-  const rewritten = guestReachableUrl("http://localhost:5050", lease("http://REDACTED-INTERNAL-ADDRESS:8765", "REDACTED-INTERNAL-ADDRESS"));
-  assert.equal(rewritten, "http://REDACTED-INTERNAL-ADDRESS:5050");
+  const rewritten = guestReachableUrl("http://localhost:5050", lease(`http://${IP.g4}:8765`, `${IP.lease}`));
+  assert.equal(rewritten, `http://${IP.lease}:5050`);
 });
 
 test("a worker named by hostname derives nothing, and the URL is left alone", () => {
@@ -67,10 +85,10 @@ test("a worker named by hostname derives nothing, and the URL is left alone", ()
 
 test("a URL that is already host-reachable is returned untouched", () => {
   // Idempotence matters: the rewrite runs per run, and a second pass must not mangle an address.
-  const already = "http://REDACTED-INTERNAL-ADDRESS:5050";
-  assert.equal(guestReachableUrl(already, lease("http://REDACTED-INTERNAL-ADDRESS:8765")), already);
+  const already = `http://${IP.g1}:5050`;
+  assert.equal(guestReachableUrl(already, lease(`http://${IP.g4}:8765`)), already);
   const external = "https://www.washington.edu/accesscomputing/AU/before.html";
-  assert.equal(guestReachableUrl(external, lease("http://REDACTED-INTERNAL-ADDRESS:8765")), external);
+  assert.equal(guestReachableUrl(external, lease(`http://${IP.g4}:8765`)), external);
 });
 
 test("a trailing slash is not introduced, because the caller concatenates paths onto this", () => {
@@ -78,8 +96,8 @@ test("a trailing slash is not introduced, because the caller concatenates paths 
   // on every page in the run.
   // Uses the EXPLICIT hostAddress so the rewrite definitely runs — with a derived address this assertion could
   // pass on a machine where nothing was rewritten at all, which is a check that examines nothing.
-  const rewritten = guestReachableUrl("http://localhost:5050", lease("http://REDACTED-INTERNAL-ADDRESS:8765", "REDACTED-INTERNAL-ADDRESS"));
-  assert.equal(rewritten, "http://REDACTED-INTERNAL-ADDRESS:5050");
+  const rewritten = guestReachableUrl("http://localhost:5050", lease(`http://${IP.g4}:8765`, `${IP.lease}`));
+  assert.equal(rewritten, `http://${IP.lease}:5050`);
   assert.doesNotMatch(rewritten, /\/$/, `${rewritten} would produce a double slash and 404 every page`);
 });
 

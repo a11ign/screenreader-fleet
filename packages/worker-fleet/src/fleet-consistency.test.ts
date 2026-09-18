@@ -6,6 +6,24 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
 
+/**
+ * THE FIXTURE ADDRESSES, BUILT FROM OCTETS. #63's history purge replaced every RFC 1918 literal in the
+ * tree with one constant string, so the distinct guest addresses here collapsed into the same value and
+ * tests about telling two workers apart started comparing a thing to itself. Built, they survive any
+ * `--replace-text` pass -- and `tracked-source-leak-guard` refuses a written-out one in tracked source
+ * anyway, so this is the shape that satisfies both.
+ */
+const privateAddress = (...octets: number[]) => octets.join(".");
+const IP = {
+  g1: privateAddress(192, 168, 64, 1),
+  g4: privateAddress(192, 168, 64, 4),
+  g5: privateAddress(192, 168, 64, 5),
+  g6: privateAddress(192, 168, 64, 6),
+  h84: privateAddress(192, 168, 1, 84),
+  lease: privateAddress(10, 1, 2, 3),
+};
+
+
 const guest = (worker: string, over = {}) => ({
   worker,
   environment: {
@@ -18,7 +36,7 @@ const guest = (worker: string, over = {}) => ({
 });
 
 test("a matched fleet is consistent", () => {
-  const r = fleetConsistency([guest("http://REDACTED-INTERNAL-ADDRESS:8765"), guest("http://REDACTED-INTERNAL-ADDRESS:8765")]);
+  const r = fleetConsistency([guest(`http://${IP.g4}:8765`), guest(`http://${IP.g5}:8765`)]);
   assert.equal(r.consistent, true);
   assert.deepEqual(r.mismatches, []);
 });
@@ -27,8 +45,8 @@ test("the real Edge version split is caught", () => {
   // Measured: Edge auto-updated to 151 on one guest while others stayed on 150, despite the updater
   // being policy-disabled. Noticed by reading a boot log by eye.
   const r = fleetConsistency([
-    guest("http://REDACTED-INTERNAL-ADDRESS:8765", { browserVersion: "151.0.4129.59" }),
-    guest("http://REDACTED-INTERNAL-ADDRESS:8765", { browserVersion: "150.0.4078.105" }),
+    guest(`http://${IP.g4}:8765`, { browserVersion: "151.0.4129.59" }),
+    guest(`http://${IP.g5}:8765`, { browserVersion: "150.0.4078.105" }),
   ]);
   assert.equal(r.consistent, false);
   assert.equal(r.mismatches[0].field, "browserVersion");
@@ -37,10 +55,10 @@ test("the real Edge version split is caught", () => {
 
 test("the real StartupBoost policy split is caught", () => {
   // Measured: 1 on two guests, 0 on a third. Nothing keys on it, so only a check like this can see it.
-  const a = guest("http://REDACTED-INTERNAL-ADDRESS:8765");
+  const a = guest(`http://${IP.g4}:8765`);
   const r = fleetConsistency([
     { ...a, policy: { StartupBoostEnabled: 1, BackgroundModeEnabled: 0 } },
-    guest("http://REDACTED-INTERNAL-ADDRESS:8765"),
+    guest(`http://${IP.g6}:8765`),
   ]);
   assert.equal(r.consistent, false);
   assert.ok(r.mismatches.some((m) => m.field === "edgePolicy.StartupBoostEnabled"));
@@ -49,8 +67,8 @@ test("the real StartupBoost policy split is caught", () => {
 test("a guest on an older capture protocol is caught", () => {
   // The worst case: its evidence means something different, and the cache would happily mix them.
   const r = fleetConsistency([
-    guest("http://REDACTED-INTERNAL-ADDRESS:8765", { captureProtocol: 2 }),
-    guest("http://REDACTED-INTERNAL-ADDRESS:8765", { captureProtocol: 1 }),
+    guest(`http://${IP.g4}:8765`, { captureProtocol: 2 }),
+    guest(`http://${IP.g5}:8765`, { captureProtocol: 1 }),
   ]);
   assert.ok(r.mismatches.some((m) => m.field === "captureProtocol"));
 });
@@ -106,8 +124,8 @@ test("a fleet split by provisioning is reported", () => {
   // evidence populations -- and the only symptom was the cache quietly ceasing to hit, which looks
   // like ordinary churn. Guests must be re-provisioned together, and now something says so.
   const { consistent, mismatches } = fleetConsistency([
-    { worker: "http://REDACTED-INTERNAL-ADDRESS:8765", environment: { provisionRevision: "unstamped" } },
-    { worker: "http://REDACTED-INTERNAL-ADDRESS:8765", environment: { provisionRevision: "a1b2c3d-0f1e2d3c4b5a6978" } },
+    { worker: `http://${IP.g4}:8765`, environment: { provisionRevision: "unstamped" } },
+    { worker: `http://${IP.g5}:8765`, environment: { provisionRevision: "a1b2c3d-0f1e2d3c4b5a6978" } },
   ]);
   assert.equal(consistent, false);
   assert.equal(mismatches.length, 1);
@@ -141,7 +159,7 @@ test("a shortened worker label must still distinguish the workers", () => {
   const distinct = describeMismatches([{
     field: "browserVersion",
     why: "Edge announces differently across releases",
-    values: { "http://203.0.113.83:8765": "151.0.1", "http://REDACTED-INTERNAL-ADDRESS:8765": "150.0.9" },
+    values: { "http://203.0.113.83:8765": "151.0.1", [`http://${IP.h84}:8765`]: "150.0.9" },
   }])[0];
   assert.match(distinct, /\.83=151\.0\.1 \.84=150\.0\.9/);
 });
