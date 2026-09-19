@@ -3,6 +3,15 @@
 PXE-boot a mini PC and it joins the fleet: Windows installs, `witness` logs in, sshd comes up with your
 key already installed, and the worker serves `/health`. **No console visit.**
 
+**This path is for this project's own fleet, not for an outside contributor.** It PXE-boots against
+infrastructure only this project runs — Proxmox CT 110 `iventoy-pxe`, the fleet-control container
+serving the bootstrap payload below, and `inventory.yml`/`ansible.cfg` wiring that live outside this
+checkout. A stranger with a spare Windows box and none of that cannot follow this start to finish; they
+would need to first stand up equivalent PXE/control-plane infrastructure of their own, which nothing
+here asks them to do because it isn't written for that reader. If that's you, see
+[`../README.md`](../README.md) for the routes that are: your own Windows machine
+(`bootstrap-windows-worker.ps1`) or the GitHub Action (no machine at all).
+
 ## Detach the network until first boot has pinned Edge
 
 **Learned on a11y-worker-7, 2026-09-04, and it cost a reimage.** Nothing in first boot mentioned Edge
