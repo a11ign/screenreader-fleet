@@ -122,6 +122,11 @@ const EXEMPT: Record<string, string> = {
     + "worker_quiet_policy, worker_content_delivery_values) is declared in defaults/main.yml, which is "
     + "already hashed. A refactor here (batching writes, changing the read-back shape) cannot move the "
     + "environment without also touching the file that is hashed.",
+  "packages/control/ansible/roles/worker/tasks/display.yml":
+    "Sets worker_display_mode (from the already-hashed defaults/main.yml), the same reasoning as "
+    + "policy.yml above: the VALUE this task applies is declared in a file the stamp already hashes, so "
+    + "a refactor here (the P/Invoke mechanism, the read-back shape) cannot move the environment without "
+    + "also touching the file that is hashed. The GPU driver half of #1567 is not in this file yet.",
   "packages/control/ansible/roles/worker/tasks/edge-version.yml":
     "Installs and pins worker_edge_version (from the already-hashed defaults/main.yml), but the effect — "
     + "which Edge build actually runs — is independently re-measured every capture via browserVersion, a "
