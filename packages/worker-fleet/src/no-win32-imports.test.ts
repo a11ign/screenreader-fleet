@@ -49,6 +49,9 @@ const POISON = "@guidepup/guidepup";
 /** Importing this by NAME reaches POISON, because the package index re-exports `capture-core.mjs`. */
 const WORKER_PACKAGE = "@a11ign/nvda-worker";
 const WORKER_INDEX = "packages/nvda-worker/src/index.mjs";
+/** The only file left that reaches guidepup statically ON PURPOSE -- named once, used by the allowlist
+ *  below and by the anti-vacuity test that proves the walker still works (#1772). */
+const VOICEOVER_SPIKE = "packages/lab/src/harnesses/run-spike.ts";
 
 /**
  * Source trees that must run on macOS AND Linux.
@@ -73,10 +76,7 @@ const PORTABLE_TREES = [
  * not a shape. A new file reaching the driver fails until somebody makes that decision.
  */
 const WIN32_ONLY: Record<string, string> = {
-  "packages/lab/src/harnesses/capture-check.mjs":
-    "its in-process mode drives NVDA directly; capture-regression.yml runs it on a Windows runner",
-  "packages/lab/src/harnesses/run-spike.ts":
-    "a VoiceOver spike — it imports guidepup on purpose and runs on a Mac only",
+  [VOICEOVER_SPIKE]: "a VoiceOver spike — it imports guidepup on purpose and runs on a Mac only",
 };
 
 const isSource = (path: string) => /\.(mjs|ts)$/.test(path) && !/\.test\.ts$/.test(path)
@@ -172,13 +172,27 @@ test("the trees being examined are real, so this guard cannot pass having read n
   }
 });
 
-test("the poison really is reachable from the worker package, or this guard proves nothing", () => {
-  // Assert the mechanism the test exists to detect actually exists. Without this, a guidepup upgrade that
-  // stopped re-exporting the driver would leave every assertion below vacuously true.
+test("the poison really is reachable from a real file, or this guard proves nothing", () => {
+  // Assert the mechanism the test exists to detect actually exists. Without this, a broken resolver or a
+  // regex that stopped matching would leave every assertion below vacuously true. This used to walk from
+  // `WORKER_INDEX`, but #1772 made that unreachable on purpose (see the test below) -- `run-spike.ts`'s own
+  // direct, deliberate static import is the remaining proof the walker still works.
+  const chain = pathToDriver(VOICEOVER_SPIKE);
+  assert.ok(chain, `${VOICEOVER_SPIKE} no longer reaches ${POISON}; the import walker may be broken.`);
+});
+
+test("the worker package's own index no longer reaches the driver statically -- guidepup is a lazy import now (#1772)", () => {
+  // `capture-setup.mjs` and `capture-probes.mjs` used to `import … from "@guidepup/guidepup"` at the top of
+  // the file, so merely importing `@a11ign/nvda-worker` BY NAME crashed on any host without a screen
+  // reader -- even over the `--worker` HTTP path, which never drives NVDA locally and never needed that
+  // throw at all. Both now reach the driver through a dynamic `await import()` inside the function that
+  // actually drives NVDA (`ensureGuidepup`), so this static walker can no longer see an edge from the
+  // worker's own index to the driver. That absence IS the fix; if this ever finds a chain again, guidepup
+  // has gone back to loading at import time.
   const chain = pathToDriver(WORKER_INDEX);
-  assert.ok(chain, `${WORKER_PACKAGE}'s index no longer reaches ${POISON}. If that is deliberate, this `
-    + "whole guard can be simplified; if it is accidental, the import graph has changed under it.");
-  assert.ok(chain!.includes("packages/nvda-worker/src/capture-core.mjs"));
+  assert.equal(chain, null, `${WORKER_INDEX} reaches ${POISON} statically again via `
+    + `${chain?.join(" -> ")}; the guidepup import in capture-setup.mjs/capture-probes.mjs must stay a `
+    + "dynamic import() inside the function that needs it.");
 });
 
 test("no portable module statically reaches the capture driver", () => {
