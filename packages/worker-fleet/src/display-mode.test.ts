@@ -6,11 +6,11 @@
  * `policy.yml`. A width or height typed directly into the task instead would move the environment with
  * nothing hashing it, and `provisionRevision` would stay equal across a fleet that had actually diverged.
  */
+import { declareWalkScope } from "../../guards/src/walk-scope.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { declareWalkScope } from "../../guards/src/walk-scope.mjs";
 
 // This reads `packages/control/ansible/roles/worker/` directly, so `packages/control` joins the scope
 // the same way `provision-stamp-inputs.test.ts` already declares it.
