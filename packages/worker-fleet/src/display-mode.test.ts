@@ -82,3 +82,16 @@ test("display.yml treats installer exit codes 17/18 (shutdown required) as failu
     "display.yml's install task no longer refuses exit codes 17/18 -- a shutdown-required outcome would "
     + "read as success");
 });
+
+test("display.yml's final debug never reads display_driver_proof.output unconditionally", () => {
+  // `display_driver_proof` is only REGISTERED by the task above it, guarded `when: not display_driver_ok`.
+  // On workers 2-6 (already a problem-free Intel driver) that task is skipped and the registered result
+  // has no `.output` -- reading it unconditionally fails Ansible's strict templating there, which is
+  // exactly the requirement this role must not violate: workers 2-6 are never touched. Reviewer's
+  // blocker on #1819 (2026-09-20T21:39:58Z) caught this by reading the play, not by running it.
+  const block = /- name: Say what the display adapter is on[\s\S]*?msg:[\s\S]*?(?=\n- name:|\n*$)/.exec(DISPLAY_TASK)?.[0];
+  assert.ok(block, "the final 'Say what the display adapter is on' debug task is gone from display.yml");
+  assert.match(block!, /display_driver_proof\.output \| first if not display_driver_ok/,
+    "the debug's msg must guard display_driver_proof.output behind 'if not display_driver_ok' -- an "
+    + "unconditional read broke workers 2-6, which never register that variable");
+});
