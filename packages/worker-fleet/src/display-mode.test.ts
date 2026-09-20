@@ -48,3 +48,37 @@ test("display.yml reads the mode from defaults; it does not carry its own width 
   assert.match(DISPLAY_TASK, /worker_display_mode\.height/,
     "same as Width, for Height -- see the message above");
 });
+
+/** `worker_display_driver_*`'s own url/sha256, read from defaults -- never restated as a copy. */
+function displayDriverPin(): { url: string; sha256: string } {
+  const url = /^worker_display_driver_url:\s*"([^"]+)"/m.exec(DEFAULTS)?.[1];
+  const sha256 = /^worker_display_driver_sha256:\s*"([^"]+)"/m.exec(DEFAULTS)?.[1];
+  assert.ok(url && sha256, "worker_display_driver_url/_sha256 are gone from defaults/main.yml");
+  return { url: url!, sha256: sha256! };
+}
+
+test("worker_display_driver_sha256 is the value #1782 sourced through Intel's real Download Center", () => {
+  // #1567's own refusal: no third-party-mirror hash, and none invented here. This pins the exact value
+  // the chairman sourced and this checkout independently re-verified -- see #1782 and display.yml's own
+  // header comment. A future re-pin (a newer Intel package) is expected to change this test, not to leave
+  // it matching stale prose.
+  const { sha256 } = displayDriverPin();
+  assert.equal(sha256, "a88862682e00bc203cf4be9ff6057e400e94a1dcca48e1f07a67718f5b99c423",
+    "worker_display_driver_sha256 no longer matches the value #1782 sourced and this checkout verified");
+});
+
+test("display.yml fetches the driver with win_get_url's own checksum, never installs an unverified download", () => {
+  assert.match(DISPLAY_TASK, /win_get_url:[\s\S]{0,200}checksum:\s*"\{\{\s*worker_display_driver_sha256\s*\}\}"/,
+    "display.yml must pass worker_display_driver_sha256 to win_get_url's checksum -- fetching the pinned "
+    + "URL without it would install whatever bytes are actually served, not the value #1782 verified");
+});
+
+test("display.yml treats installer exit codes 17/18 (shutdown required) as failures, never as success", () => {
+  // The package's own installation_readme.txt: 2/14 mean a software-controlled restart, safe for
+  // win_reboot; 17/18 mean the box is shutting down and, per the same readme, may need a human to press
+  // its power button. This fleet is bare-metal with nobody guaranteed on site -- a green result here must
+  // not be the thing that leaves a worker dark.
+  assert.match(DISPLAY_TASK, /failed_when:\s*display_driver_install\.rc not in \[0,\s*2,\s*14\]/,
+    "display.yml's install task no longer refuses exit codes 17/18 -- a shutdown-required outcome would "
+    + "read as success");
+});
