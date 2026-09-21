@@ -274,11 +274,21 @@ test("two DIFFERENT rows, one job name: the second is refused before it runs, an
     // never reached running". Redirected into this test's own writable scratch dir, which every sandbox
     // that can run this test at all can already write to -- the same reasoning `sandboxGitEnv({ HOME: tmp
     // })` above already applies to the git calls.
+    //
+    // `remote_tmp` is a SEPARATE setting from `local_tmp` -- ansible's shell plugin doc fragment
+    // (`ansible/plugins/doc_fragments/shell_common.py`) gives it its own default (`~/.ansible/tmp`) and its
+    // own env vars (`ANSIBLE_REMOTE_TEMP`/`ANSIBLE_REMOTE_TMP`), and `HOME`/`ANSIBLE_HOME` do not reach it:
+    // confirmed with `-vvvv` against this exact host's ansible-core -- even with `HOME` redirected, a
+    // `connection: local` task's remote-side `mkdir -p` still targeted the REAL ambient `$HOME/.ansible/tmp`
+    // until `ANSIBLE_REMOTE_TEMP` was set explicitly. `connection: local` still goes through the shell
+    // plugin's remote_tmp staging even though the "remote" is the same host as the controller.
     const ansibleHome = join(tmp, "ansible-home");
+    const remoteTmp = join(tmp, "ansible-remote-tmp");
     mkdirSync(ansibleHome);
+    mkdirSync(remoteTmp);
     const runEnv = {
       ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_SYSTEMD_STATE: state,
-      HOME: tmp, ANSIBLE_HOME: ansibleHome,
+      HOME: tmp, ANSIBLE_HOME: ansibleHome, ANSIBLE_REMOTE_TEMP: remoteTmp, ANSIBLE_REMOTE_TMP: remoteTmp,
     };
     // Two DIFFERENT rows: distinct --dataset/--shard, the SAME job name ("capture") both times.
     const varsA = writeRowVars(tmp,
