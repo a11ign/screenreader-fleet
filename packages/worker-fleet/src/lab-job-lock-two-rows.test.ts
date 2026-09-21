@@ -267,7 +267,19 @@ test("two DIFFERENT rows, one job name: the second is refused before it runs, an
     writeFileSync(jobScript, JOB_SCRIPT, { mode: 0o755 });
 
     const progressFile = join(tmp, "progress.log");
-    const runEnv = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_SYSTEMD_STATE: state };
+    // ANSIBLE_HOME (default `$HOME/.ansible`) is where `local_tmp`, the galaxy cache and everything else
+    // ansible-core writes outside the working directory live -- #1829's PR review: a sandbox whose `$HOME`
+    // is read-only outside its own cwd/`/tmp` (Codex, sandbox_mode=workspace-write) leaves ansible unable
+    // to create its own local temp dir there, which this test's fixed poll budget below reads as "row A
+    // never reached running". Redirected into this test's own writable scratch dir, which every sandbox
+    // that can run this test at all can already write to -- the same reasoning `sandboxGitEnv({ HOME: tmp
+    // })` above already applies to the git calls.
+    const ansibleHome = join(tmp, "ansible-home");
+    mkdirSync(ansibleHome);
+    const runEnv = {
+      ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_SYSTEMD_STATE: state,
+      HOME: tmp, ANSIBLE_HOME: ansibleHome,
+    };
     // Two DIFFERENT rows: distinct --dataset/--shard, the SAME job name ("capture") both times.
     const varsA = writeRowVars(tmp,
       { progressFile, label: "row-1829-a", dataset: "alpha", shard: "0/4", sleepSecs: 2, jobScript });
@@ -280,7 +292,9 @@ test("two DIFFERENT rows, one job name: the second is refused before it runs, an
     const unitDir = join(state, "a11y-job-capture");
     await waitUntilRunning(unitDir);
     assert.equal(existsSync(join(unitDir, "substate")) && readFileSync(join(unitDir, "substate"), "utf8").trim(),
-      "running", "row A never reached 'running' -- the harness itself is broken, not the lock");
+      "running",
+      `row A never reached 'running' within ${RUNNING_TIMEOUT_MS}ms -- its own ansible-playbook output so `
+      + `far, which is the harness (or its environment), not the lock:\n${rowA.output()}`);
 
     // Row B: a DIFFERENT row, same job name, dispatched while row A is still running.
     const rowB = spawnSync("ansible-playbook", ["wrapper.yml", "-e", `@${varsB}`],
