@@ -125,9 +125,12 @@ const EXEMPT: Record<string, string> = {
   "packages/control/ansible/roles/worker/tasks/display.yml":
     "Sets worker_display_mode and installs worker_display_driver_url/_sha256/_version (all from the "
     + "already-hashed defaults/main.yml), the same reasoning as policy.yml above: the VALUE this task "
-    + "applies is declared in a file the stamp already hashes, so a refactor here (the P/Invoke mechanism, "
-    + "the read-back shape, the install/reboot handling) cannot move the environment without also touching "
-    + "the file that is hashed.",
+    + "applies is declared in a file the stamp already hashes, so a refactor here (which mechanism sets "
+    + "the mode -- the interactive scheduled task in run-interactive.yml, since #1567 2026-09-21 -- the "
+    + "read-back shape, the install/reboot handling) cannot move the environment without also touching "
+    + "the file that is hashed. set-display-mode.ps1 itself is outside this test's discovery (it lives "
+    + "under packages/worker-fleet/src/provisioning/, not roles/worker/) and carries no environment value "
+    + "of its own -- it only applies what worker_display_mode already hashes, same as this task did inline.",
   "packages/control/ansible/roles/worker/tasks/edge-version.yml":
     "Installs and pins worker_edge_version (from the already-hashed defaults/main.yml), but the effect — "
     + "which Edge build actually runs — is independently re-measured every capture via browserVersion, a "

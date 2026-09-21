@@ -95,3 +95,38 @@ test("display.yml's final debug never reads display_driver_proof.output uncondit
     "the debug's msg must guard display_driver_proof.output behind 'if not display_driver_ok' -- an "
     + "unconditional read broke workers 2-6, which never register that variable");
 });
+
+const SET_DISPLAY_MODE_SCRIPT = readFileSync(
+  fileURLToPath(new URL("./provisioning/set-display-mode.ps1", import.meta.url)), "utf8");
+
+test("the display mode is set through run-interactive.yml, never a direct win_powershell call over SSH", () => {
+  // #1567, 2026-09-21: a direct `win_powershell` task calling EnumDisplaySettings failed on all 10 real
+  // workers -- SSH does not attach to the interactive window station GDI calls need, the same fact
+  // `tasks/run-interactive.yml`'s own header names for SystemParametersInfo. A regression back to a direct
+  // call would reintroduce that live failure with nothing here to catch it before the next real run.
+  const block = /- name: The display mode the fleet pins[\s\S]*?(?=\n- name:|\n*$)/.exec(DISPLAY_TASK)?.[0];
+  assert.ok(block, "'The display mode the fleet pins' task is gone from display.yml");
+  assert.match(block!, /include_tasks:\s*"\{\{\s*playbook_dir\s*\}\}\/tasks\/run-interactive\.yml"/,
+    "the display-mode task must run through tasks/run-interactive.yml's interactive scheduled task, not "
+    + "a direct win_powershell call -- see this task's own header comment for why");
+  assert.doesNotMatch(block!, /ansible\.windows\.win_powershell/,
+    "the display-mode task must not call win_powershell directly -- that is the mechanism that failed "
+    + "live against the real fleet");
+});
+
+test("set-display-mode.ps1 reads its width/height from the environment, never a hardcoded value", () => {
+  assert.match(SET_DISPLAY_MODE_SCRIPT, /\$env:A11Y_DISPLAY_WIDTH/,
+    "set-display-mode.ps1 must read A11Y_DISPLAY_WIDTH -- display.yml sets it from worker_display_mode.width");
+  assert.match(SET_DISPLAY_MODE_SCRIPT, /\$env:A11Y_DISPLAY_HEIGHT/,
+    "set-display-mode.ps1 must read A11Y_DISPLAY_HEIGHT -- display.yml sets it from worker_display_mode.height");
+});
+
+test("display.yml passes both env vars into set-display-mode.ps1 from worker_display_mode", () => {
+  const block = /- name: The display mode the fleet pins[\s\S]*?(?=\n- name:|\n*$)/.exec(DISPLAY_TASK)?.[0];
+  assert.ok(block, "'The display mode the fleet pins' task is gone from display.yml");
+  assert.match(block!, /A11Y_DISPLAY_WIDTH = '\{\{\s*worker_display_mode\.width\s*\}\}'/,
+    "display.yml must set A11Y_DISPLAY_WIDTH from worker_display_mode.width before invoking the script");
+  assert.match(block!, /A11Y_DISPLAY_HEIGHT = '\{\{\s*worker_display_mode\.height\s*\}\}'/,
+    "display.yml must set A11Y_DISPLAY_HEIGHT from worker_display_mode.height before invoking the script");
+  assert.match(block!, /set-display-mode\.ps1/, "display.yml must invoke set-display-mode.ps1");
+});
