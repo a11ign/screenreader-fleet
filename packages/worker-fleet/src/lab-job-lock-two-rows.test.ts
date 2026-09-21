@@ -43,9 +43,11 @@ const RUN_JOB_PATH = fileURLToPath(new URL("../../control/ansible/tasks/run-job.
 const RUN_JOB_TEXT = readFileSync(RUN_JOB_PATH, "utf8");
 
 const HAS_ANSIBLE = spawnSync("ansible-playbook", ["--version"]).status === 0;
-const SKIP_REASON = "ansible-playbook is not on PATH -- this proof needs it. An honest skip, not a pass, "
-  + "matching `npm run test:python`'s own pattern for a missing pytest. CI's ts/trunk jobs never install "
-  + "ansible-core; run this locally or in a session that has it to exercise the real claim.";
+const SKIP_REASON = [
+  "ansible-playbook is not on PATH -- this proof needs it. An honest skip, not a pass, ",
+  "matching `npm run test:python`'s own pattern for a missing pytest. CI's ts/trunk jobs never install ",
+  "ansible-core; run this locally or in a session that has it to exercise the real claim.",
+].join("");
 
 const FAKE_SYSTEMCTL = `#!/usr/bin/env bash
 set -euo pipefail
