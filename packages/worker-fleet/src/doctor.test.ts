@@ -20,7 +20,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -217,4 +217,28 @@ test("#1997: the subset denominator survives -- agreement among the reachable is
   assert.match(fleetAgreementLine({ agreeing: 3, configured: 5, fields }),
     /3 of 5 guests agree .* — the rest could not be asked/);
   assert.ok(!fleetAgreementLine({ agreeing: 5, configured: 5, fields }).includes("could not be asked"));
+});
+
+test("#1997: the CALL SITE uses the derived line -- an extracted helper leaves its only caller unpinned", () => {
+  // `fleetAgreementLine` is pure and tested above, and that holds the FUNCTION. The three cases above all
+  // pass on a `checkFleetConsistency` that ignores it and retypes the four names inline, because nothing
+  // drives that function: it needs probed workers and it only ever calls `add()`. So the call is asserted
+  // on the source, the same narrow exception `fleet-consistency.test.ts` states for `server.mjs`.
+  const source = readFileSync(new URL("./doctor.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("function checkFleetConsistency(");
+  const end = source.indexOf("export function fleetAgreementLine(");
+  assert.ok(start !== -1 && end > start, "doctor.mjs no longer has a checkFleetConsistency block to read");
+  // COMMENTS STRIPPED, because a guard that reads source cannot tell a claim from a note ABOUT the claim:
+  // the first version of this failed on the comment in `checkFleetConsistency` that QUOTES the phrase it
+  // removed. Explaining a defect must not be indistinguishable from committing it.
+  const isComment = (line: string) => /^\s*(\/\/|\/?\*)/.test(line);
+  const block = source.slice(start, end).split("\n").filter((l) => !isComment(l)).join("\n");
+
+  assert.match(block, /fleetAgreementLine\(\{/, "the agreement line must be DERIVED, never retyped here");
+  assert.doesNotMatch(block, /screen reader, OS/,
+    "the hand-typed four-field claim is what #1997 removed -- a fifth field made it false and no test could see it");
+
+  // The positive control for both: this matcher reads a REAL block, so it must find what is there.
+  assert.match(block, /fleetConsistency\(guests\)/,
+    "the slice above matched nothing recognisable, so neither assertion proves anything");
 });
