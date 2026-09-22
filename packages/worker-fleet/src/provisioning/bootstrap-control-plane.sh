@@ -216,6 +216,20 @@ else
   ok "gh installed ($(gh --version | head -1))"
 fi
 
+# #1875: gh on its own is not enough -- it refuses to run unauthenticated, so the fleet-hold check still
+# fails closed. `ceo`'s ruling on that row: a fine-grained PAT minted by `a11ign-ai-workers`, public
+# repositories read-only, NO permissions, 90-day expiry, in this file as root:root 0600 and never in git.
+# `fleet-playbook.mjs` reads it into GH_TOKEN. Minting it needs a human logged in to that account on the
+# web, so this step REPORTS rather than creates: a missing or loose file is a warning, never a guess.
+GH_TOKEN_FILE="$HOME/.config/a11y-witness/gh-token"
+if [ ! -s "$GH_TOKEN_FILE" ]; then
+  warn "no GitHub token at $GH_TOKEN_FILE -- fleet:deploy/fleet:provision will refuse until one is written (#1875)"
+elif [ "$(stat -c '%a' "$GH_TOKEN_FILE")" != "600" ]; then
+  warn "$GH_TOKEN_FILE is mode $(stat -c '%a' "$GH_TOKEN_FILE"), not 600 -- chmod 600 it"
+else
+  ok "GitHub token present at $GH_TOKEN_FILE (mode 600)"
+fi
+
 # The fleet's SSH key lives HERE, not on somebody's laptop. That is the whole point of moving the
 # control plane: a key on a Mac makes that Mac load-bearing again by a different route.
 #
