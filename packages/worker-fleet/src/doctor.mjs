@@ -695,19 +695,83 @@ function checkFleetConsistency(/** @type {any} */ probed, /** @type {number} */ 
  * #1997's fix has to reach both. Never a FAIL either way: a mismatched pool is worse than a matched one
  * and far better than no pool, and a diagnostic must not be the thing that takes the fleet offline.
  *
+ * AND THE LIST IS WHAT EVERY COMPARED GUEST REPORTED, NOT WHAT ANY ONE OF THEM DID — #2034, carrying
+ * #2019's ruling into the second of the two commands #1997 named. `fields.compared` is TRUE-IF-ANYBODY,
+ * so a field ONE guest of three reported was named inside a list introduced by the words "guests agree
+ * on", and the reporter count contradicting it sat in the same return value. Measured 2026-09-22 at
+ * #2033's head: `coverage: {"field":"displayMode","reported":1,"asked":3}` beside `3 of 3 guests agree
+ * on 10 compared field(s) (..., displayMode)`. One guest's display was read. Naming it is worse than
+ * counting it, because the naming is what #1997 added to make the sentence actionable.
+ *
+ * THREE FACTS, THREE SENTENCES, and that split is #2019's ruling rather than a style choice: `N of N`
+ * is agreement, `k of N` is *some boxes did not report it* and sends a reader to the BOXES, `0 of N` is
+ * *nobody could be asked* and sends them to the FIELD. Collapsing the middle one into either of the
+ * outer two is the defect this fixes in one direction and #1997's in the other.
+ *
+ * DERIVED FROM `coverage`, AND NOT FROM `compared`/`unchecked` — the same call `fleet:status` makes
+ * (`fieldCoverageGap`, #2019). The two lists are that same measurement thresholded at "anybody", so
+ * reading the whole case off one and the partial case off the other gives one fact two sources that can
+ * disagree. The lists stay in the return value, where a caller greps them for the remedy.
+ *
  * @param {{ agreeing: number, configured: number,
- *           fields: { compared: string[], unchecked: string[] } }} input
+ *           fields: { compared: string[], unchecked: string[],
+ *                     coverage?: { field: string, reported: number, asked: number }[] } }} input
  * @returns {string}
  */
 export function fleetAgreementLine({ agreeing, configured, fields }) {
   const rest = agreeing < configured ? " — the rest could not be asked" : "";
-  const unchecked = fields.unchecked.length === 0 ? ""
-    // NAMED, not counted: "one field was not compared" sends a reader back to doctor, and
-    // "displayMode was not compared" sends them to the deploy that would report it.
-    : `; NOT compared on any guest, so agreement says nothing about ${fields.unchecked.length === 1
-      ? "it" : "them"}: ${fields.unchecked.join(", ")}`;
-  return `${agreeing} of ${configured} guests agree on ${fields.compared.length} compared field(s) `
-    + `(${fields.compared.join(", ")})${rest}${unchecked}`;
+  const coverage = fields.coverage;
+  // NO COUNTS SUPPLIED IS A CANNOT-ASK, NOT A PASS — `fleet:status` takes the same line on the same
+  // shape. A caller carrying the pre-#2019 `fields` has answered "did anybody report each field" and
+  // not "how many", so it cannot rule out the 1-of-3 case; falling back to `compared` here would
+  // restore the sentence this function exists to stop making, and nothing would say so.
+  if (coverage === undefined) {
+    return `${agreeing} of ${configured} guests agree, and no field coverage was supplied, so WHICH `
+      + `fields were compared, and by HOW MANY guests, was never asked${rest}`;
+  }
+  const whole = coverage.filter(({ reported, asked }) => reported === asked).map(({ field }) => field);
+  const named = whole.length === 0 ? "" : ` (${whole.join(", ")})`;
+  const gaps = [partialClause(coverage), uncheckedClause(coverage)].filter((clause) => clause !== "");
+  return `${agreeing} of ${configured} guests agree on ${whole.length} of ${coverage.length} `
+    + `field(s)${named}${rest}${gaps.join("")}`;
+}
+
+/** "it"/"them" for a clause that names a list, so one gap does not read as a plural. */
+const itOrThem = (/** @type {number} */ count) => (count === 1 ? "it" : "them");
+
+/**
+ * #2034's clause: the fields SOME compared guests reported and others did not, each with its `k of N`.
+ *
+ * NAMED WITH ITS COUNT, never counted — the same choice `fleet:status`' `partialClause` makes, and for
+ * the same reason #1997 gave for naming the zero case. "1 field was partly reported" sends a reader back
+ * to `doctor`; "displayMode (1 of 3 reported it)" tells them two boxes owe an answer, which is the
+ * finding — either the converge did not reach them, or their probe for the field failed (#1953).
+ *
+ * @param {{ field: string, reported: number, asked: number }[]} coverage
+ * @returns {string} empty when no field is partly reported
+ */
+function partialClause(coverage) {
+  const partial = coverage.filter(({ reported, asked }) => reported > 0 && reported < asked);
+  if (partial.length === 0) return "";
+  const named = partial.map(({ field, reported, asked }) => `${field} (${reported} of ${asked} reported it)`);
+  return `; reported by only SOME of the compared guests, so agreement says nothing about `
+    + `${itOrThem(partial.length)}: ${named.join(", ")}`;
+}
+
+/**
+ * #1997's clause: the fields asked of everybody and answered by nobody.
+ *
+ * NAMED, not counted: "one field was not compared" sends a reader back to doctor, and "displayMode was
+ * not compared" sends them to the deploy that would report it.
+ *
+ * @param {{ field: string, reported: number, asked: number }[]} coverage
+ * @returns {string} empty when every asked field drew at least one value
+ */
+function uncheckedClause(coverage) {
+  const unchecked = coverage.filter(({ reported }) => reported === 0).map(({ field }) => field);
+  if (unchecked.length === 0) return "";
+  return `; NOT compared on any guest, so agreement says nothing about ${itOrThem(unchecked.length)}: `
+    + unchecked.join(", ");
 }
 
 // Can this host actually hold the pool it has registered?
