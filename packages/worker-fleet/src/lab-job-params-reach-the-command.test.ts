@@ -53,12 +53,14 @@ const RAW = readFileSync(`${ANSIBLE}lab-job.yml`, "utf8");
  * `[0]` was the spelling everywhere until 2026-09-06, when a `hosts: localhost` refusal play was added at
  * the top of every `lab-*.yml` and five readers broke at once. See `ansible/vars/lab-catalogue.yml`.
  */
-const DOC = parseYaml(RAW) as { vars?: Record<string, unknown> }[];
-const PLAY = DOC
-  .find((play) => play?.vars && "lab_jobs" in play.vars)?.vars as {
+const DOC = parseYaml(RAW) as { vars?: Record<string, unknown>; tasks?: unknown }[];
+const CATALOGUE_PLAY = DOC.find((play) => play?.vars && "lab_jobs" in play.vars) as
+  { vars: Record<string, unknown>; tasks?: unknown };
+const PLAY = CATALOGUE_PLAY?.vars as {
     lab_jobs: Record<string, unknown>;
     lab_caller_params: string[];
     lab_param_aliases: Record<string, string>;
+    lab_case_id_shape: string;
   };
 
 /**
@@ -199,4 +201,119 @@ test("every caller parameter an alias expression reads is itself a published par
         + `built from a value no caller can ever set, and it will always take its fallback`);
     }
   }
+});
+
+/**
+ * ## The third hole: a flag the COMMAND forwards that the DECLARATION never mentions
+ *
+ * The two guards above answer "can this name arrive" and "is this fact built". Neither looks at the other
+ * direction — whether a job's own argv forwards a `--flag=` that `params:` does not publish, so
+ * `-e describe=1` never names it and the generic refusal above turns a correct usage into an error. That
+ * is not hypothetical: `evidence-check.mjs` has read `--only=` since it was written, and for months the
+ * catalogue entry forwarded no such flag, so the only dispatchable form of the check sampled 24 cases at
+ * random across the whole corpus. Measured 2026-09-22 on #1908, whose acceptance is ten reads of ONE
+ * family (`media-autoplay-audio`): the family it asks about need not have been in the sample at all, and
+ * the gap was one release blocker deep (#1918's condition 1).
+ *
+ * Derived from each entry's own argv, never a hand-written list of which jobs take what — the same rule
+ * the rest of this catalogue's guards follow, and for the same reason: a list beside the command drifts
+ * from the command.
+ */
+type Entry = { params?: Record<string, "required" | "optional"> };
+const PARAMS = (entry: unknown) => ((entry as Entry).params ?? {});
+
+/** Every `--flag=` a job's own entry forwards, read out of the entry rather than declared beside it. */
+function flagsForwarded(entry: unknown): Set<string> {
+  return new Set([...JSON.stringify(entry).matchAll(/--([a-z][a-z0-9-]*)=/g)].map(([, flag]) => flag));
+}
+
+test("a job forwarding --only= publishes `only`, and a job publishing it forwards it", () => {
+  const forwards = Object.entries(PLAY.lab_jobs)
+    .filter(([, entry]) => flagsForwarded(entry).has("only")).map(([job]) => job).sort();
+  const publishes = Object.entries(PLAY.lab_jobs)
+    .filter(([, entry]) => "only" in PARAMS(entry)).map(([job]) => job).sort();
+  // The positive control this file's own header demands: an extraction that matched nothing would make
+  // both lists empty and the comparison below pass having examined no job at all.
+  assert.deepEqual(forwards, ["capture-only", "evidence-check"],
+    "these are the two jobs whose argv forwards --only=; if this list has changed, the check below is "
+    + "still the real assertion — update this control to what the catalogue now says");
+  assert.deepEqual(publishes, forwards,
+    "a job whose command forwards --only= must declare `only` in its own `params:`, and one that "
+    + "declares it must forward it. Declaring too little makes `-e only=` a refusal on a job that would "
+    + "have honoured it (the generic `Refuse a parameter this job does not read` fires); declaring too "
+    + "much accepts a value Ansible then discards without a word.");
+});
+
+/** The assert tasks guarded on one job — `when: job == 'x'` or `when: job in [... 'x' ...]`. */
+function assertClausesFor(job: string): string[] {
+  const clauses: string[] = [];
+  const walk = (tasks: Record<string, unknown>[]) => {
+    for (const task of tasks ?? []) {
+      if (!task || typeof task !== "object") continue;
+      const body = task["ansible.builtin.assert"] as { that?: string[] | string } | undefined;
+      const when = typeof task.when === "string" ? task.when : "";
+      if (body && new RegExp(`job == '${job}'|job in \\[[^\\]]*'${job}'`).test(when)) {
+        const that = body.that ?? [];
+        clauses.push(...(Array.isArray(that) ? that : [that]).map(String));
+      }
+      for (const key of ["block", "rescue", "always"]) {
+        if (Array.isArray(task[key])) walk(task[key] as Record<string, unknown>[]);
+      }
+    }
+  };
+  walk(CATALOGUE_PLAY.tasks as Record<string, unknown>[]);
+  return clauses;
+}
+
+test("every job that takes -e only= validates its shape, from the one shared expression", () => {
+  // `--only=` reaches an argv list and never a shell, but the value comes from the wire, and this
+  // playbook's rule is containment by SHAPE: a path or a flag must be INEXPRESSIBLE rather than rejected.
+  // Stated once as `lab_case_id_shape` because two jobs now assert it — a fact stated twice drifts.
+  const shape = PLAY.lab_case_id_shape;
+  const accepts = new RegExp(shape);
+  assert.ok(accepts.test("media-autoplay-audio"), "#1908's family must be expressible");
+  assert.ok(accepts.test("route-title-stale+"), "a trailing + is how this corpus spells a whole family");
+  assert.ok(accepts.test("a.b-1,c.d-2"), "comma-separated ids are what check-signals prints");
+  // `.hidden` and `/opt` are here because they SURVIVED: widening only the shape's first character class
+  // to `[a-z0-9/.]` left every multi-segment path still refused (a second `/` fails the body), so the
+  // longer examples above could not tell the two shapes apart. The leading character is a distinct rule
+  // and needs its own control.
+  for (const refused of ["../../etc/passwd", "/opt/a11y/runs", "/opt", ".hidden", "-only",
+                         "--sample=200", "a b", "A", ""]) {
+    assert.ok(!accepts.test(refused), `the shape must make '${refused}' inexpressible, not merely wrong`);
+  }
+
+  const takers = Object.entries(PLAY.lab_jobs).filter(([, entry]) => "only" in PARAMS(entry));
+  assert.ok(takers.length >= 2, `only ${takers.length} job(s) take -e only=; this scan has broken`);
+  for (const [job, entry] of takers) {
+    const validates = assertClausesFor(job)
+      .filter((clause) => /\bonly\b/.test(clause) && clause.includes("lab_case_id_shape"));
+    assert.equal(validates.length, 1,
+      `job '${job}' takes -e only= and ${validates.length} of its asserts check it against `
+      + "`lab_case_id_shape`. A job that reads a wire value without asserting its shape is the hole "
+      + "`--worker=http://:8765` went through, which cost 29 minutes of an idle fleet.");
+    // An OPTIONAL `only` must TOLERATE absence — `capture-only` refuses an empty one because an
+    // unnarrowed capture is the four-hour corpus run it exists to avoid, while an unnarrowed
+    // evidence-check is the corpus-wide read every existing caller already gets.
+    assert.equal(/only is not defined or/.test(validates[0]), PARAMS(entry).only === "optional",
+      `job '${job}' declares only: ${PARAMS(entry).only}, and its shape assert disagrees about whether `
+      + "an absent value is allowed: an optional one must be guarded by `only is not defined or`, a "
+      + "required one must not be, or the assert refuses the very usage `params:` publishes.");
+  }
+});
+
+test("a parameter a job does not publish is still refused, whoever else takes it", () => {
+  // `only` is now OPTIONAL on a second job, and the fear that raises is that it stops being refused on
+  // the thirty-odd that ignore it. It does not, and this pins why: the refusal loops the PUBLISHED
+  // INTERFACE and tests membership of the job's OWN params, so widening one job's declaration narrows
+  // nothing anywhere else. Ansible discards an extra var no play reads without a word.
+  const refusal = (CATALOGUE_PLAY.tasks as Record<string, unknown>[])
+    .find((task) => task?.name === "Refuse a parameter this job does not read");
+  assert.ok(refusal, "the generic refusal task has been renamed or removed");
+  assert.equal(refusal.loop, "{{ lab_caller_params }}",
+    "it must loop every published parameter, not a per-job list");
+  assert.deepEqual((refusal["ansible.builtin.assert"] as { that?: unknown }).that, "item in job_params",
+    "and decide by membership of the job's own declaration, so one job gaining a parameter cannot "
+    + "silently admit it everywhere else");
+  assert.equal(refusal.when, "vars[item] is defined", "checked exactly when the caller supplied one");
 });
