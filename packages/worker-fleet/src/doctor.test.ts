@@ -25,8 +25,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  resolvesToThisCheckout, checkoutRootFor, tscProjectUpToDate,
+  resolvesToThisCheckout, checkoutRootFor, tscProjectUpToDate, fleetAgreementLine,
 } from "./doctor.mjs";
+import { MUST_MATCH } from "./fleet-consistency.mjs";
 
 // --- resolvesToThisCheckout: pure ---
 
@@ -162,4 +163,58 @@ test("THE #256 SHAPE: a foreign checkout's dist is detected as foreign, and its 
     assert.equal(tscProjectUpToDate(tsconfigPath, { run }), false,
       "the half a resolution check ALONE misses -- the foreign dist is also not up to date");
   });
+});
+
+// --- #1997: the agreement sentence names the fields it compared, DERIVED from MUST_MATCH ---
+
+test("#1997: every MUST_MATCH field reaches doctor's agreement line, so a new one cannot leave it stale", () => {
+  // The line used to read "agree on browser, screen reader, OS and protocol": FOUR names, typed by hand,
+  // beside a `MUST_MATCH` that has ten. `guidepupVersion`, `architecture`, `browserProfile`,
+  // `screenReaderSettings`, `provisionRevision` and `displayMode` were all compared and none was
+  // mentioned -- so the sentence made a POSITIVE, false claim about its own scope from the fifth field on,
+  // and no test noticed because nothing tied the words to the list.
+  //
+  // DERIVED FROM `MUST_MATCH` IN THE ASSERTION TOO. A test that listed the ten names here would be the
+  // same defect in a second place: adding a field would need this line edited, and an editor who forgot
+  // would get green. This loop grows with the list.
+  const fields = { compared: MUST_MATCH.map(({ path }) => path), unchecked: [] };
+  const line = fleetAgreementLine({ agreeing: 10, configured: 10, fields });
+  for (const { path } of MUST_MATCH) {
+    assert.ok(line.includes(path), `doctor's agreement line does not name ${path}, which it compared: ${line}`);
+  }
+  assert.match(line, /10 of 10 guests agree on 10 compared field\(s\)/,
+    "with both denominators -- the guests (#920) and the fields (#1997)");
+
+  // The positive control for the loop: it passes on any line that happens to contain the names, so a case
+  // where a field is NOT named must fail it. This is that case, one field short.
+  const short = fleetAgreementLine({ agreeing: 10, configured: 10,
+    fields: { compared: MUST_MATCH.slice(1).map(({ path }) => path), unchecked: [] } });
+  assert.ok(!short.includes(MUST_MATCH[0].path),
+    "the loop above cannot fail if every line names every field whatever it was given");
+});
+
+test("#1997: a field NO guest reported is named as not compared, never folded into the agreement", () => {
+  // Measured 2026-09-22T20:09Z: `displayMode` at 0 of 10 guests while the fleet read CONSISTENT and
+  // interchangeable. `doctor` did not merely fail to say so -- its sentence enumerated four other fields
+  // and so asserted a scope it did not have.
+  const line = fleetAgreementLine({ agreeing: 10, configured: 10,
+    fields: { compared: MUST_MATCH.slice(1).map(({ path }) => path), unchecked: ["displayMode"] } });
+  assert.match(line, /NOT compared on any guest[^:]*: displayMode/,
+    "named, so a reader knows which deploy would close it");
+  assert.match(line, /agree on 9 compared field\(s\)/, "and the agreement is stated over NINE, not ten");
+
+  // The other direction: a fully-reporting fleet must not carry the caveat at all, or the line cries wolf
+  // on every healthy reading and gets skipped.
+  const clean = fleetAgreementLine({ agreeing: 10, configured: 10,
+    fields: { compared: MUST_MATCH.map(({ path }) => path), unchecked: [] } });
+  assert.ok(!clean.includes("NOT compared"), clean);
+});
+
+test("#1997: the subset denominator survives -- agreement among the reachable is not agreement", () => {
+  // #920's rule, which this line already carried and must keep: unreachable guests are skipped by the
+  // caller, so without "of N configured" three agreeing guests read as a whole fleet of five.
+  const fields = { compared: MUST_MATCH.map(({ path }) => path), unchecked: [] };
+  assert.match(fleetAgreementLine({ agreeing: 3, configured: 5, fields }),
+    /3 of 5 guests agree .* — the rest could not be asked/);
+  assert.ok(!fleetAgreementLine({ agreeing: 5, configured: 5, fields }).includes("could not be asked"));
 });

@@ -661,19 +661,53 @@ async function checkDegradedWorkers(/** @type {any} */ probed) {
 function checkFleetConsistency(/** @type {any} */ probed, /** @type {number} */ configured) {
   const guests = probed.filter((/** @type {any} */ w) => w.health)
     .map((/** @type {any} */ w) => ({ worker: w.url, environment: w.health.environment, policy: undefined }));
-  const { consistent, mismatches } = fleetConsistency(guests);
+  const { consistent, mismatches, fields } = fleetConsistency(guests);
   if (guests.length < 2) return;
   if (consistent) {
-    // "OF N CONFIGURED", because agreement among a SUBSET is not agreement. Unreachable guests are
-    // skipped here — correctly, this check is not their business — so without the denominator "3 guests
-    // agree" reads as a whole fleet on a fleet of five, which is the examined-nothing shape one step in
-    // from zero.
-    add("fleet", true, `${guests.length} of ${configured} guests agree on browser, screen reader, OS `
-      + `and protocol${guests.length < configured ? " — the rest could not be asked" : ""}`);
+    add("fleet", true, fleetAgreementLine({ agreeing: guests.length, configured, fields }));
     return;
   }
+  // The remedy NAMES THE FIELDS THAT DIFFER, derived from the mismatches, and that is the same fix as
+  // the agreement line below: it used to retype "browser, screen reader, OS and protocol" too, so a
+  // fleet split on `displayMode` was told to go and align four fields that already matched.
   add("fleet", true, `INCONSISTENT — ${describeMismatches(mismatches).join("; ")}`,
-    "re-provision the odd one out so every worker reports the same browser, screen reader, OS and protocol");
+    "re-provision the odd one out so every worker reports the same "
+    + `${mismatches.map((/** @type {any} */ m) => m.field).join(", ")}`);
+}
+
+/**
+ * The agreement sentence, with WHICH FIELDS AGREED DERIVED rather than retyped — #1997.
+ *
+ * "OF N CONFIGURED", because agreement among a SUBSET is not agreement. Unreachable guests are skipped
+ * by the caller — correctly, that check is not their business — so without the denominator "3 guests
+ * agree" reads as a whole fleet on a fleet of five, which is the examined-nothing shape one step in from
+ * zero.
+ *
+ * AND THE FIELD NAMES ARE NOT TYPED HERE. This line used to read "agree on browser, screen reader, OS
+ * and protocol": four names, by hand, beside a `MUST_MATCH` that has ten. `guidepupVersion`,
+ * `architecture`, `browserProfile`, `screenReaderSettings`, `provisionRevision` and `displayMode` were
+ * all compared and none of them was mentioned, and the remediation string repeated the same four — so
+ * the sentence had been making a POSITIVE, false claim about its own scope since the fifth field was
+ * added, and no test could notice because nothing tied the words to the list. A sentence enumerating
+ * what a machine compared is a second copy of that machine's predicate; derived, it cannot go stale.
+ *
+ * `fleet:status` says nothing about field coverage and this said something untrue about it, which is why
+ * #1997's fix has to reach both. Never a FAIL either way: a mismatched pool is worse than a matched one
+ * and far better than no pool, and a diagnostic must not be the thing that takes the fleet offline.
+ *
+ * @param {{ agreeing: number, configured: number,
+ *           fields: { compared: string[], unchecked: string[] } }} input
+ * @returns {string}
+ */
+export function fleetAgreementLine({ agreeing, configured, fields }) {
+  const rest = agreeing < configured ? " — the rest could not be asked" : "";
+  const unchecked = fields.unchecked.length === 0 ? ""
+    // NAMED, not counted: "one field was not compared" sends a reader back to doctor, and
+    // "displayMode was not compared" sends them to the deploy that would report it.
+    : `; NOT compared on any guest, so agreement says nothing about ${fields.unchecked.length === 1
+      ? "it" : "them"}: ${fields.unchecked.join(", ")}`;
+  return `${agreeing} of ${configured} guests agree on ${fields.compared.length} compared field(s) `
+    + `(${fields.compared.join(", ")})${rest}${unchecked}`;
 }
 
 // Can this host actually hold the pool it has registered?
