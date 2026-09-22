@@ -196,6 +196,26 @@ else
   warn 'requirements.yml not found -- is the checkout complete?'
 fi
 
+# #1870: `fleet-playbook.mjs`'s fleet-hold check (#1839/#1841) shells out to `gh` to ask whether an open
+# `fleet-gated` row carries an unexpired `Fleet-hold-until:` before `fleet:deploy`/`fleet:provision`
+# proceed -- so `gh` is now a CONTROL-role dependency, not just something an interactive session happens
+# to have. Debian ships no `gh` package at all (unlike Node, this is not a version-skew problem, it is a
+# missing package), so this follows GitHub's own published apt repository rather than guessing at a distro
+# package name that does not exist.
+if command -v gh >/dev/null; then
+  ok "gh already present ($(gh --version | head -1))"
+else
+  $SUDO mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+  $SUDO chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages/. stable main" \
+    | $SUDO tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+  $SUDO apt-get update -qq
+  $SUDO apt-get install -y -qq gh >/dev/null
+  ok "gh installed ($(gh --version | head -1))"
+fi
+
 # The fleet's SSH key lives HERE, not on somebody's laptop. That is the whole point of moving the
 # control plane: a key on a Mac makes that Mac load-bearing again by a different route.
 #
