@@ -103,7 +103,15 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  * are interchangeable for capture`. The display was still not compared. Naming the two lists is what
  * lets a reader tell "they agree" from "nobody was asked".
  *
- * @typedef {{compared: string[], unchecked: string[]}} FieldCoverage
+ * `coverage` IS THE SAME QUESTION WITHOUT THE THRESHOLD -- #2019. The two lists above are a PARTITION on
+ * "did anybody report it", which answers 0-of-10 and says nothing about 1-of-10; `fleet:status` read the
+ * second as agreement about ten guests on the strength of one. So every asked field also carries how many
+ * of the asked guests actually reported it, and the verdict draws its own line. `compared`/`unchecked`
+ * stay because they are what a caller greps for the REMEDY -- a field at 0 sends a reader to the field,
+ * a field at k sends them to the boxes -- and `coverage` is the measurement both are derived from.
+ *
+ * @typedef {{field: string, reported: number, asked: number}} FieldReporters
+ * @typedef {{compared: string[], unchecked: string[], coverage: FieldReporters[]}} FieldCoverage
  */
 
 /**
@@ -124,13 +132,13 @@ export function fleetConsistency(guests) {
     // A FRESH object rather than a shared constant: this is returned to a caller, and one shared literal
     // is one `push` away from a coverage list that grows across unrelated readings.
     return { consistent: true, mismatches: [], compared: present.length,
-      fields: { compared: [], unchecked: [] } };
+      fields: { compared: [], unchecked: [], coverage: [] } };
   }
 
   /** @type {Mismatch[]} */
   const mismatches = [];
   /** @type {FieldCoverage} */
-  const fields = { compared: [], unchecked: [] };
+  const fields = { compared: [], unchecked: [], coverage: [] };
   /**
    * @param {string} field
    * @param {string} why
@@ -142,12 +150,14 @@ export function fleetConsistency(guests) {
   const check = (field, why, source, key) => {
     /** @type {Record<string, unknown>} */
     const values = {};
-    // `asked` counts guests and `values` is keyed by worker, so this says WHETHER anybody reported the
-    // field and never HOW MANY did. That is deliberate: the keys are worker names, and a caller that
-    // supplies guests without one collapses them all onto a single `undefined` key -- which
-    // `capture-real-pages.mjs` does (#2018) -- so a reporter count read off this map would be wrong in
-    // exactly the cases that matter. Nobody-versus-somebody is the distinction this row is about.
+    // THE REPORTER COUNT IS COUNTED, NEVER READ OFF `values` -- #2019, and #2018 is why. The map is keyed
+    // by worker name, and a caller that supplies guests without one collapses every guest onto a single
+    // `undefined` key -- which `capture-real-pages.mjs` does -- so `Object.keys(values).length` reads 1
+    // for any number of reporting guests, understating coverage in exactly the cases a coverage number
+    // exists for. `asked` counts the guests that carried the BLOCK; `reported` counts the ones that
+    // carried a VALUE in it; both are incremented on the guest, so neither can be collapsed by a key.
     let asked = 0;
+    let reported = 0;
     for (const guest of present) {
       const block = source(guest);
       // A BLOCK THIS CALLER DID NOT COLLECT IS A FACT ABOUT THE PROBE, NOT THE FLEET. `/health` carries
@@ -159,13 +169,20 @@ export function fleetConsistency(guests) {
       const value = block[key];
       // Absent is not a mismatch: an older worker that does not report a field must not be flagged
       // against newer ones. Only DIFFERING known values are evidence of drift.
-      if (value !== undefined && value !== null) values[guest.worker] = value;
+      if (value !== undefined && value !== null) {
+        reported += 1;
+        values[guest.worker] = value;
+      }
     }
     // A FIELD NO GUEST REPORTED IS CANNOT ASK, NOT ALL AGREE. One value from one guest still counts as
     // compared -- that is the rolling-deploy case the skip above is for, and it is a different claim
-    // from nobody having been asked at all.
-    const reported = Object.keys(values).length > 0;
-    if (asked > 0) (reported ? fields.compared : fields.unchecked).push(field);
+    // from nobody having been asked at all. How MANY reported it is a third claim again, and it goes on
+    // `coverage` rather than into this partition: the lists answer the remedy, the count answers the
+    // verdict (#2019).
+    if (asked > 0) {
+      (reported > 0 ? fields.compared : fields.unchecked).push(field);
+      fields.coverage.push({ field, reported, asked });
+    }
     if (new Set(Object.values(values)).size > 1) mismatches.push({ field, why, values });
   };
 
