@@ -23,15 +23,23 @@
 #     GetDC(null) + GetDeviceCaps      -> HORZRES=1024 VERTRES=768 BITSPIXEL=32
 #     Screen.AllScreens                -> '\\.\DISPLAY1' 1024x768 primary
 #
-# Every call that NAMES the device answers; every call that passes NULL and asks the system to pick the
-# default device refuses, ANSI and Unicode alike. So the adapter, the monitor, the driver, the struct
-# layout (`dmSize` 156 ANSI / 188 Unicode, `cb` 424 -- all correct) and the session were never the defect,
-# and each of those was the cheaper explanation that had to be ruled out first.
+# THOSE FIVE READINGS, AND NO MORE THAN THOSE FIVE. Each call listed above that passed NULL refused, ANSI
+# and Unicode alike, and each that named `\\.\DISPLAY1` answered. That is a measurement over the calls in
+# the list, not a law about every call Windows has -- reviewer-2's blocker on #1968 was right that the
+# first wording here claimed the second. What the list does settle is the set of cheaper explanations: the
+# adapter, the monitor, the driver, the struct layout (`dmSize` 156 ANSI / 188 Unicode, `cb` 424 -- all
+# correct) and the session, each of which had to be ruled out before the argument could be blamed.
 #
 # THE FIX IS THEREFORE TO STOP ASKING FOR "the default device" AND TO NAME ONE. The primary display's
-# device name comes from `MonitorFromPoint` + `GetMonitorInfoW`, which is the path that works here, and it
-# is passed to `EnumDisplaySettingsW` and `ChangeDisplaySettingsExW`. `ChangeDisplaySettings` (no `Ex`)
-# cannot take a device name at all, which is why it is gone.
+# device name comes from `MonitorFromPoint` + `GetMonitorInfoW`, and it is passed to `EnumDisplaySettingsW`
+# and `ChangeDisplaySettingsExW`. `ChangeDisplaySettings` (no `Ex`) cannot take a device name at all, which
+# is why it is gone.
+#
+# That the lookup path runs here is a READING too, not an assumption. With this script in place on
+# a11y-worker-7 (orchestrator, 2026-09-22T19:07Z) it printed
+# `context: current mode reads 640 x 480 on '\\.\DISPLAY1'`, and the name in that line is precisely what
+# `MonitorFromPoint` + `GetMonitorInfoW` returned -- so both ran and both answered. Neither of them takes a
+# device name, so neither is evidence about NULL-versus-named; they are the way OUT of that question.
 #
 # ## Why the context block prints on every run
 #
@@ -197,43 +205,92 @@ function Get-UserObjectName {
 #
 # Returns $null on failure rather than throwing, so the caller can print the whole context block before
 # giving up -- a refusal that reports nothing is what made the previous failure unrepeatable.
+#
+# IT PRINTS NOTHING, and says why it failed through `[ref] $Reason` instead. In PowerShell everything a
+# function writes JOINS ITS RETURN VALUE, so an earlier draft's `Write-Output` on the failure path came
+# back to the caller AS the device name: `$deviceName` held the diagnostic sentence, `-not $deviceName`
+# was false, the script never took its own failure branch, and the message was never printed either. A
+# function that both reports and returns can do neither here.
 function Get-PrimaryDisplayName {
+  param([ref] $Reason)
   $origin = New-Object A11yDisplay.POINT
   $origin.x = 0
   $origin.y = 0
   $monitor = [A11yDisplay.NativeMethods]::MonitorFromPoint($origin, $MONITOR_DEFAULTTOPRIMARY)
   if ($monitor -eq [IntPtr]::Zero) {
-    Write-Output "context: MonitorFromPoint found no primary monitor, last Win32 $(Get-LastWin32Error)"
+    $Reason.Value = "MonitorFromPoint found no primary monitor, last Win32 $(Get-LastWin32Error) -- unreliable"
     return $null
   }
   $info = New-Object A11yDisplay.MONITORINFOEX
   $info.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($info)
   if (-not [A11yDisplay.NativeMethods]::GetMonitorInfo($monitor, [ref] $info)) {
-    Write-Output "context: GetMonitorInfo refused for monitor $monitor, last Win32 $(Get-LastWin32Error)"
+    $Reason.Value = "GetMonitorInfo refused for monitor $monitor, last Win32 $(Get-LastWin32Error) -- unreliable"
     return $null
   }
   return $info.szDevice
 }
 
-# Every display DEVICE this process can enumerate. Kept although nothing depends on it any more: it is the
-# measurement that named the defect, and a future run where it starts answering is a real change in the
-# fleet that this block is the only thing that would show.
-function Write-DisplayDevices {
-  $device = New-Object A11yDisplay.DISPLAY_DEVICE
+# One pass of `EnumDisplayDevices` over `$Device`, as formatted lines. `$null` enumerates the ADAPTERS on
+# this desktop; a `\\.\DISPLAYn` name enumerates the MONITORS on that adapter.
+#
+# The lines are RETURNED and not printed, for the same PowerShell reason `Get-PrimaryDisplayName` carries:
+# a function that writes cannot also be counted. `$Device` is deliberately untyped -- `[string] $Device`
+# would coerce `$null` to the empty string, and `""` is a different argument to this API than NULL, which
+# is the one distinction this whole script turns on.
+function Get-EnumeratedDevices {
+  param($Device, [string] $Label)
+  $lines = @()
+  $info = New-Object A11yDisplay.DISPLAY_DEVICE
   $index = 0
   while ($true) {
-    $device.cb = [System.Runtime.InteropServices.Marshal]::SizeOf($device)
-    if (-not [A11yDisplay.NativeMethods]::EnumDisplayDevices($null, $index, [ref] $device, 0)) {
+    $info.cb = [System.Runtime.InteropServices.Marshal]::SizeOf($info)
+    if (-not [A11yDisplay.NativeMethods]::EnumDisplayDevices($Device, $index, [ref] $info, 0)) {
       break
     }
-    $flags = '0x{0:X8}' -f $device.StateFlags
-    Write-Output "context: device[$index] name='$($device.DeviceName)' adapter='$($device.DeviceString)' stateFlags=$flags"
+    $flags = '0x{0:X8}' -f $info.StateFlags
+    $lines += "context: $Label[$index] name='$($info.DeviceName)' adapter='$($info.DeviceString)' stateFlags=$flags (cb=$($info.cb))"
     $index++
   }
-  if ($index -eq 0) {
-    Write-Output "context: EnumDisplayDevices(null, 0) enumerated NOTHING (cb=$($device.cb), last Win32 $(Get-LastWin32Error) -- unreliable)"
+  return ,$lines
+}
+
+# Every display DEVICE this process can enumerate -- and, when that comes back empty, THE SAME API ASKED
+# AGAIN WITH A NAME. Kept although nothing depends on it any more: it is the measurement that named the
+# defect, and a future run where it starts answering is a real change in the fleet that this block is the
+# only thing that would show.
+#
+# THE CONTROL IS THE POINT, and it is reviewer-2's blocker on #1968. `EnumDisplayDevices($null, 0)`
+# returning False at index 0 is TWO findings wearing one face -- "this desktop has no display adapters"
+# and "this function refuses every nameless call here, exactly as EnumDisplaySettings does" -- and an
+# empty population that cannot tell them apart is the shape this repository refuses everywhere else.
+# `Screen.AllScreens` and the named `EnumDisplaySettingsW` are a DIFFERENT API answering a different
+# question, so neither settles it. The control therefore has to be THIS function with a device name: if it
+# answers, the empty NULL population is the fleet's nameless-call refusal again; if it refuses too, the
+# reading is about the function rather than about the argument, and the script says so instead of claiming
+# the stronger of the two.
+function Write-DisplayDevices {
+  param($PrimaryDevice)
+  $adapters = @(Get-EnumeratedDevices -Device $null -Label 'device')
+  $adapters | ForEach-Object { Write-Output $_ }
+  if ($adapters.Count -gt 0) {
+    Write-Output "context: EnumDisplayDevices(null) enumerated $($adapters.Count) adapter(s)"
+    return
+  }
+  if (-not $PrimaryDevice) {
+    Write-Output ("context: EnumDisplayDevices(null, 0) enumerated NOTHING and no NAMED control could be run"
+      + " (no primary device name), so this reading cannot tell an absent display from a refused nameless call")
+    return
+  }
+  $monitors = @(Get-EnumeratedDevices -Device $PrimaryDevice -Label 'monitor')
+  $monitors | ForEach-Object { Write-Output $_ }
+  if ($monitors.Count -gt 0) {
+    Write-Output ("context: EnumDisplayDevices(null, 0) enumerated NOTHING while the same call NAMED"
+      + " '$PrimaryDevice' enumerated $($monitors.Count) monitor(s) -- the function answers here, and it is"
+      + " the NULL device that is refused")
   } else {
-    Write-Output "context: EnumDisplayDevices enumerated $index device(s) (cb=$($device.cb))"
+    Write-Output ("context: EnumDisplayDevices enumerated NOTHING for null AND for the NAMED control"
+      + " '$PrimaryDevice' -- the control refused too, so this says nothing about the NULL device in"
+      + " particular (last Win32 $(Get-LastWin32Error) -- unreliable)")
   }
 }
 
@@ -249,6 +306,7 @@ function Write-ScreenMetrics {
 }
 
 function Write-DisplayContext {
+  param($PrimaryDevice)
   $process = [System.Diagnostics.Process]::GetCurrentProcess()
   $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
   Write-Output "context: sessionId=$($process.SessionId) pid=$($process.Id) user=$($identity.Name)"
@@ -257,12 +315,19 @@ function Write-DisplayContext {
   $desktop = [A11yDisplay.NativeMethods]::GetThreadDesktop($threadId)
   Write-Output "context: windowStation='$(Get-UserObjectName $station)' desktop='$(Get-UserObjectName $desktop)'"
   Write-ScreenMetrics
-  Write-DisplayDevices
+  Write-DisplayDevices -PrimaryDevice $PrimaryDevice
 }
 
-Write-DisplayContext
+# The name is resolved BEFORE the context block rather than after it, because the block's device
+# enumeration needs it for its control. Resolution prints nothing of its own, so a failure here still
+# reports through the same block below, in the same order, on a failing run and a passing one alike.
+$nameRefusal = $null
+$deviceName = Get-PrimaryDisplayName -Reason ([ref] $nameRefusal)
+if ($nameRefusal) {
+  Write-Output "context: $nameRefusal"
+}
+Write-DisplayContext -PrimaryDevice $deviceName
 
-$deviceName = Get-PrimaryDisplayName
 if (-not $deviceName) {
   Write-Output 'no primary display device could be named, so there is nothing to set the mode on'
   exit 1
