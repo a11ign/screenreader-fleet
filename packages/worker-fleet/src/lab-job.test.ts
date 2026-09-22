@@ -94,12 +94,57 @@ test("there is no way to pass a command — only a job NAME from the catalogue",
  * contained both strings, so the file matched and the job it was written about was no longer examined.
  * This repo's rule, in its own words: a test must not derive its expectations from source TEXT.
  */
-function catalogueJobs(): Record<string, { argv?: unknown }> {
-  const doc = parseYaml(read("lab-job.yml")) as Array<{ vars?: { lab_jobs?: Record<string, { argv?: unknown }> } }>;
-  const jobs = doc.flatMap((play) => (play?.vars?.lab_jobs ? [play.vars.lab_jobs] : []))[0];
-  if (!jobs) throw new Error("lab_jobs not found in lab-job.yml — this guard is parsing the wrong shape");
-  return jobs;
+function catalogueJobs(): Record<string, JobEntry> {
+  return cataloguePlay().vars.lab_jobs;
 }
+
+/**
+ * The play HOLDING the catalogue AND the assert tasks, found by what it declares rather than by position —
+ * a second play (the zero-host inventory refusal) was added in front of it once and broke five readers.
+ */
+function cataloguePlay(): { vars: { lab_jobs: Record<string, JobEntry> }; tasks?: unknown } {
+  const doc = parseYaml(read("lab-job.yml")) as Array<{ vars?: { lab_jobs?: unknown }; tasks?: unknown }>;
+  const play = doc.find((candidate) => candidate?.vars?.lab_jobs);
+  if (!play) throw new Error("lab_jobs not found in lab-job.yml — this guard is parsing the wrong shape");
+  return play as { vars: { lab_jobs: Record<string, JobEntry> }; tasks?: unknown };
+}
+
+/**
+ * THE `that:` CLAUSES OF THE ASSERT TASKS GUARDED BY ONE CONDITION — so a test about one job reads the
+ * validation OF THAT JOB rather than the playbook's whole text.
+ *
+ * #1946: `"evidence-check takes ONE worker, by name"` asserted `/worker in groups\['a11y_workers'\]/`
+ * against the file. That string occurs EXACTLY ONCE in `lab-job.yml` and belongs to the `stability`
+ * gate — so the test passed on another job's line, would have kept passing if `evidence-check`'s own
+ * worker handling were deleted, and did keep passing through #1939's rewrite of that very entry. Same
+ * shape as `catalogueJobs()` above, one level further in: the file matched, the job was never examined.
+ *
+ * COPIED from `lab-job-params-reach-the-command.test.ts`, which grew it for #1939, rather than imported:
+ * importing a `*.test.ts` module registers its tests a second time. The duplication is real and is the
+ * cheaper of the two — if a third reader appears, this belongs in a module both can import.
+ */
+function assertClausesWhen(guard: RegExp): string[] {
+  const clauses: string[] = [];
+  const walk = (tasks: Record<string, unknown>[]) => {
+    for (const task of tasks ?? []) {
+      if (!task || typeof task !== "object") continue;
+      const body = task["ansible.builtin.assert"] as { that?: string[] | string } | undefined;
+      if (body && guard.test(typeof task.when === "string" ? task.when : "")) {
+        const that = body.that ?? [];
+        clauses.push(...(Array.isArray(that) ? that : [that]).map(String));
+      }
+      for (const key of ["block", "rescue", "always"]) {
+        if (Array.isArray(task[key])) walk(task[key] as Record<string, unknown>[]);
+      }
+    }
+  };
+  walk(cataloguePlay().tasks as Record<string, unknown>[]);
+  return clauses;
+}
+
+/** The assert clauses a job's OWN `when: job == '<name>'` guard admits. */
+const assertClausesFor = (job: string) =>
+  assertClausesWhen(new RegExp(`job == '${job}'|job in \\[[^\\]]*'${job}'`));
 
 /**
  * Scripts whose input is DERIVED by another command, and the npm script that derives it.
@@ -247,16 +292,51 @@ test("the pooled corpus job addresses the whole fleet, and the value is proved b
     "build, then prove, then use — asserting after dispatch would prove nothing");
 });
 
-test("evidence-check takes ONE worker, by name, and a bounded sample", () => {
-  // Single worker on purpose, unlike `capture`: this asks whether the evidence MOVED, so a second guest is
-  // a second variable and a CHANGED verdict could not be told from "a different box took that case".
-  assert.match(LAB_JOB, /evidence-check:/);
-  assert.match(LAB_JOB, /when: job == 'evidence-check'/, "its arguments must be validated like any other");
-  assert.match(LAB_JOB, /worker in groups\['a11y_workers'\]/);
-  assert.match(LAB_JOB, /\(sample \| default\(24\)\) \| int <= 200/,
+test("evidence-check addresses the whole fleet, with a bounded sample and an optional family", () => {
+  // RENAMED FROM "evidence-check takes ONE worker, by name, and a bounded sample" (#1946), which stated
+  // the OPPOSITE of the job's behaviour: it has taken no worker since it moved to the fleet pool, and the
+  // playbook's own fail_msg says so in words. A title asserting the inverse is half of why nobody read
+  // this: every assertion under it matched the whole playbook text, so the one about a worker was
+  // satisfied by the `stability` gate's line and this job's own entry was never examined.
+  const entry = catalogueJobs()["evidence-check"];
+  assert.ok(entry, "evidence-check has left the catalogue or been renamed");
+  const clauses = assertClausesFor("evidence-check");
+  assert.ok(clauses.length > 0,
+    "its arguments must be validated like any other, and no assert task is guarded on this job");
+
+  // NO WORKER, and stated as what it DOES take rather than as an absence: the interface is three facts
+  // and a worker is not among them. Its addresses come from `lab_fleet_workers`, which is built from the
+  // inventory and proved to be an address list before use ("the pooled corpus job addresses the whole
+  // fleet" pins that half, for the fact rather than for this job).
+  assert.deepEqual(entry.params, { sample: "optional", only: "optional" },
+    "evidence-check takes a sample size and a family, both optional — and no worker");
+  assert.deepEqual(entry.setenv ?? [], [],
+    "it needs no per-job environment: the fleet reaches it through argv, not through A11Y_WORKER. The "
+    + "positive control for this emptiness is \"the two gates are jobs, and the one needing a worker "
+    + "validates it\", which pins `stability`'s setenv to exactly [A11Y_WORKER={{ lab_named_worker }}]");
+  const argv = [entry.argv ?? ""].flat().join(" ");
+  assert.match(argv, /lab_fleet_workers/,
+    "it asks whether the evidence MOVED across the corpus, and reads it from every worker in the pool");
+  // From the tsx BINARY, never `npx`, so a job cannot turn into a package install on the box holding the
+  // corpus. The catalogue-wide half of that — no job anywhere may invoke npx — is its own test below.
+  assert.match(argv, /lab_tsx/, "it applies gates that live in TypeScript, so it runs under tsx");
+
+  // WHOLE CLAUSES, never a regex over them: `/int <= 200/` is satisfied by `int <= 20000`, and a mutation
+  // widening the bound to twenty thousand survived this test while it was written that way.
+  assert.ok(clauses.includes("(sample | default(24)) | int <= 200"),
     "an unbounded sample is an unbounded run on hardware somebody else may want");
-  // It runs under tsx because it applies gates that live in TypeScript, and from the binary rather than
-  // `npx`, so a job cannot turn into a package install on the box holding the corpus.
+  assert.ok(clauses.includes("(sample | default(24)) | int > 0"),
+    "and a zero or negative sample is a run that reads nothing while reporting a verdict");
+  assert.ok(clauses.includes("only is not defined or only is match(lab_case_id_shape)"),
+    "the family added by #1939 is OPTIONAL and contained by shape — an absent one is the corpus-wide "
+    + "read every existing caller already gets, and a supplied one must not be able to be a path");
+});
+
+test("no job may invoke npx", () => {
+  // Re-homed by #1946 out of the evidence-check test, where it was the one CATALOGUE-WIDE claim among
+  // per-job ones. It is asserted against the whole playbook on purpose: the property is that the string
+  // appears NOWHERE, in a job's argv or in any task, so `npx <anything>` cannot turn a dispatch into a
+  // package install on the box holding the corpus, the deploy key and the release weights.
   assert.ok(!/npx/.test(LAB_JOB), "no job may invoke npx");
 });
 
@@ -378,12 +458,34 @@ test("a pull never runs into a checkout somebody or something else is using", ()
 });
 
 test("the two gates are jobs, and the one needing a worker validates it", () => {
-  assert.match(LAB_JOB, /stability:/, "the gate a corpus run must not start without");
-  assert.match(LAB_JOB, /rules-gate:/);
-  assert.match(LAB_JOB, /when: job == 'stability'/, "its worker must be checked like any other");
-  assert.match(LAB_JOB, /A11Y_WORKER=\{\{ lab_named_worker \}\}/);
-  assert.match(LAB_JOB, /lab_named_worker is match\('\^http:\/\/\[0-9\.\]\+:8765\$'\)/,
+  // #1946: every assertion here used to match the whole playbook text, so "the one needing a worker
+  // validates it" was true of the FILE — any job's `when:` line, any job's worker check — while saying
+  // nothing about `stability`. Each claim below now reads the entry or the assert task it names.
+  const jobs = catalogueJobs();
+  assert.ok(jobs["stability"], "the gate a corpus run must not start without has left the catalogue");
+  assert.ok(jobs["rules-gate"], "the gate a rule change must not merge without has left the catalogue");
+
+  const validates = assertClausesFor("stability");
+  assert.ok(validates.includes("worker is defined"),
+    "stability's worker is REQUIRED, and a missing one must be refused before the 25-minute run starts");
+  assert.ok(validates.includes("worker in groups['a11y_workers']"),
+    "and it must be a name the inventory has: resolving a NAME is what makes a malformed address "
+    + "inexpressible rather than merely rejected");
+  assert.deepEqual(jobs["stability"].setenv, ["A11Y_WORKER={{ lab_named_worker }}"],
+    "the named worker reaches the job as an environment variable, through the derived fact and not "
+    + "through the caller's own string");
+
+  // The address assert is guarded on the FACT rather than on the job, because every single-guest job
+  // reaches it the same way — so this reads the task that actually runs, not the file.
+  assert.ok(assertClausesWhen(/^lab_named_worker is defined$/)
+    .includes("lab_named_worker is match('^http://[0-9.]+:8765$')"),
     "an address reaching the environment must be proved to be an address");
+
+  // The OTHER gate is the control for all of that: `rules-gate` scores an export already on the lab's
+  // disk, so it names no worker at all and must not acquire one by inheritance.
+  assert.deepEqual(jobs["rules-gate"].params ?? {}, {},
+    "rules-gate reads the corpus export on the lab's own disk and takes no parameters");
+  assert.deepEqual(jobs["rules-gate"].setenv ?? [], [], "and needs no worker in its environment");
 });
 
 test("a setenv value reaches systemd without a backreference", () => {
