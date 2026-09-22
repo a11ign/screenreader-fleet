@@ -15,7 +15,7 @@
 # `GetSystemMetrics` reporting `screen=1024x768 monitors=1`. The desktop has a display. The call still
 # failed. So the fault was never the session, and #1833 did not miss.
 #
-# The fault is THE NULL DEVICE NAME. Measured on the same box, in the same interactive task, seconds apart:
+# The fault is THE DEVICE ARGUMENT. Measured on the same box, in the same interactive task, seconds apart:
 #
 #     EnumDisplaySettingsW($null,         ENUM_CURRENT_SETTINGS) -> False,  mode 0x0
 #     EnumDisplaySettingsW('\\.\DISPLAY1', ENUM_CURRENT_SETTINGS) -> True,   mode 1024x768
@@ -23,17 +23,29 @@
 #     GetDC(null) + GetDeviceCaps      -> HORZRES=1024 VERTRES=768 BITSPIXEL=32
 #     Screen.AllScreens                -> '\\.\DISPLAY1' 1024x768 primary
 #
-# THOSE FIVE READINGS, AND NO MORE THAN THOSE FIVE. Each call listed above that passed NULL refused, ANSI
-# and Unicode alike, and each that named `\\.\DISPLAY1` answered. That is a measurement over the calls in
-# the list, not a law about every call Windows has -- reviewer-2's blocker on #1968 was right that the
-# first wording here claimed the second. What the list does settle is the set of cheaper explanations: the
-# adapter, the monitor, the driver, the struct layout (`dmSize` 156 ANSI / 188 Unicode, `cb` 424 -- all
-# correct) and the session, each of which had to be ruled out before the argument could be blamed.
+# THOSE FIVE READINGS, AND NO MORE THAN THOSE FIVE -- and READ WHAT `$null` IN THEM ACTUALLY SENT, because
+# it is not what it says. PowerShell converts `$null` to `[string]::Empty` when it binds a `string`
+# parameter; only `[NullString]::Value` sends a genuine NULL. Measured under pwsh 7.6.6 against a C#
+# `s == null` probe, not reasoned: literal `$null` and a variable holding `$null` both arrive as
+# "not-null, length 0", and `[NullString]::Value` arrives as NULL. So every line above that reads `$null`
+# passed a device NAMED `""` -- and no display device is called that, on this fleet or anywhere else.
 #
-# THE FIX IS THEREFORE TO STOP ASKING FOR "the default device" AND TO NAME ONE. The primary display's
-# device name comes from `MonitorFromPoint` + `GetMonitorInfoW`, and it is passed to `EnumDisplaySettingsW`
-# and `ChangeDisplaySettingsExW`. `ChangeDisplaySettings` (no `Ex`) cannot take a device name at all, which
-# is why it is gone.
+# WHICH MAKES THE CHEAPER EXPLANATION THE RIGHT ONE, and #1968's first telling of this file got it wrong.
+# The ten-host failure was `EnumDisplaySettings($null, ...)` in this script's previous version: a
+# PowerShell binding trap, refused by any Windows box, not a property of these workers. What the readings
+# above do establish is narrower and still enough to act on: an EMPTY-named call refuses and a call naming
+# `\\.\DISPLAY1` answers. They establish NOTHING about a real NULL device, because no call in the list
+# ever passed one.
+#
+# THE FIX IS THEREFORE TO STOP ASKING FOR "the default device" AND TO NAME ONE -- unchanged by the above,
+# and the reading that shows it working (worker-7, below) is unaffected. The primary display's device name
+# comes from `MonitorFromPoint` + `GetMonitorInfoW`, and it is passed to `EnumDisplaySettingsW` and
+# `ChangeDisplaySettingsExW`. `ChangeDisplaySettings` (no `Ex`) cannot take a device name at all, which is
+# why it is gone.
+#
+# The diagnostic's own nameless arm now passes `[NullString]::Value`, so the NEXT fleet run is the first
+# reading that has ever actually asked the NULL question. Until one comes back, this file claims the
+# empty-name finding and no more.
 #
 # That the lookup path runs here is a READING too, not an assumption. With this script in place on
 # a11y-worker-7 (orchestrator, 2026-09-22T19:07Z) it printed
@@ -230,16 +242,34 @@ function Get-PrimaryDisplayName {
   return $info.szDevice
 }
 
-# One pass of `EnumDisplayDevices` over `$Device`, as formatted lines. `$null` enumerates the ADAPTERS on
-# this desktop; a `\\.\DISPLAYn` name enumerates the MONITORS on that adapter.
+# One pass of `EnumDisplayDevices` over `$Device`. A NULL device enumerates the ADAPTERS on this desktop;
+# a `\\.\DISPLAYn` name enumerates the MONITORS on that adapter.
 #
-# The lines are RETURNED and not printed, for the same PowerShell reason `Get-PrimaryDisplayName` carries:
-# a function that writes cannot also be counted. `$Device` is deliberately untyped -- `[string] $Device`
-# would coerce `$null` to the empty string, and `""` is a different argument to this API than NULL, which
-# is the one distinction this whole script turns on.
+# The formatted lines come back through `[ref] $Lines` and THE COUNT IS THE RETURN VALUE, an int. Both
+# halves of that shape are reviewer-2's blocker on #1968 at `a58c7e44`, and the defect it replaces was
+# worse than the report: this function used to `return ,$lines` while the caller counted
+# `@(Get-EnumeratedDevices ...)`. PowerShell's unary comma deliberately emits the collection as ONE
+# pipeline object, `@()` collects that single object, and `.Count` was therefore **1 for every
+# population**. Measured under pwsh 7.6.6, not reasoned: 0 lines -> 1, 1 line -> 1, 3 lines -> 1. So the
+# caller's `if ($adapters.Count -gt 0)` was taken on every run, the named same-API control NEVER
+# executed, and an empty enumeration reported `enumerated 1 adapter(s)` -- a count of the wrapper,
+# printed as a count of devices, in exactly the case the control exists to separate.
+#
+# A COUNT MUST NOT CROSS A FUNCTION BOUNDARY AS A COLLECTION. An int cannot be unrolled, re-wrapped or
+# collected, so the shape that produced this defect cannot be spelled here again; the lines take the
+# `[ref]` route `Get-PrimaryDisplayName` already uses for the same PowerShell reason. `display-mode.test.ts`
+# runs this pair under a real PowerShell against a stubbed API and reads the count off the output, because
+# no assertion over the script's TEXT can tell "the control is written" from "the control ran".
+#
+# `$Device` is deliberately untyped, AND THAT IS NOT ENOUGH ON ITS OWN. `[string] $Device` would coerce
+# `$null` to the empty string at the PowerShell parameter -- but so does the .NET method binding one line
+# further down, whatever this parameter is declared as, which is the trap this file's header now records.
+# The caller therefore hands in `[NullString]::Value` rather than `$null`, and it survives an untyped
+# parameter unchanged (measured, same probe). `""` is a different argument to this API than NULL, and
+# telling the two apart is the one distinction this whole script turns on.
 function Get-EnumeratedDevices {
-  param($Device, [string] $Label)
-  $lines = @()
+  param($Device, [string] $Label, [ref] $Lines)
+  $found = @()
   $info = New-Object A11yDisplay.DISPLAY_DEVICE
   $index = 0
   while ($true) {
@@ -248,49 +278,56 @@ function Get-EnumeratedDevices {
       break
     }
     $flags = '0x{0:X8}' -f $info.StateFlags
-    $lines += "context: $Label[$index] name='$($info.DeviceName)' adapter='$($info.DeviceString)' stateFlags=$flags (cb=$($info.cb))"
+    $found += "context: $Label[$index] name='$($info.DeviceName)' adapter='$($info.DeviceString)' stateFlags=$flags (cb=$($info.cb))"
     $index++
   }
-  return ,$lines
+  $Lines.Value = $found
+  return $found.Count
 }
 
 # Every display DEVICE this process can enumerate -- and, when that comes back empty, THE SAME API ASKED
-# AGAIN WITH A NAME. Kept although nothing depends on it any more: it is the measurement that named the
-# defect, and a future run where it starts answering is a real change in the fleet that this block is the
-# only thing that would show.
+# AGAIN WITH A NAME. Kept although nothing depends on it any more: it is the block that measures whether
+# a nameless call works on this fleet, a question no reading has actually answered yet (every earlier one
+# asked about `""`), and a future run where it starts answering is a real change this is the only thing
+# that would show.
 #
-# THE CONTROL IS THE POINT, and it is reviewer-2's blocker on #1968. `EnumDisplayDevices($null, 0)`
+# THE CONTROL IS THE POINT, and it is reviewer-2's blocker on #1968. `EnumDisplayDevices(NULL, 0)`
 # returning False at index 0 is TWO findings wearing one face -- "this desktop has no display adapters"
 # and "this function refuses every nameless call here, exactly as EnumDisplaySettings does" -- and an
 # empty population that cannot tell them apart is the shape this repository refuses everywhere else.
 # `Screen.AllScreens` and the named `EnumDisplaySettingsW` are a DIFFERENT API answering a different
 # question, so neither settles it. The control therefore has to be THIS function with a device name: if it
-# answers, the empty NULL population is the fleet's nameless-call refusal again; if it refuses too, the
-# reading is about the function rather than about the argument, and the script says so instead of claiming
-# the stronger of the two.
+# answers, the empty NULL population is about the ARGUMENT; if it refuses too, the reading is about the
+# function instead, and the script says so rather than claiming the stronger of the two.
+#
+# The two counts below are the ints `Get-EnumeratedDevices` returns, cast with `[int]` at the assignment:
+# that cast is the thing that makes a stray extra output object fail LOUDLY here rather than turn the
+# count into a collection again, which is how the count stopped being the count in the first place.
 function Write-DisplayDevices {
   param($PrimaryDevice)
-  $adapters = @(Get-EnumeratedDevices -Device $null -Label 'device')
-  $adapters | ForEach-Object { Write-Output $_ }
-  if ($adapters.Count -gt 0) {
-    Write-Output "context: EnumDisplayDevices(null) enumerated $($adapters.Count) adapter(s)"
+  $adapterLines = @()
+  [int] $adapters = Get-EnumeratedDevices -Device ([NullString]::Value) -Label 'device' -Lines ([ref] $adapterLines)
+  $adapterLines | ForEach-Object { Write-Output $_ }
+  if ($adapters -gt 0) {
+    Write-Output "context: EnumDisplayDevices(NULL) enumerated $adapters adapter(s)"
     return
   }
   if (-not $PrimaryDevice) {
-    Write-Output ("context: EnumDisplayDevices(null, 0) enumerated NOTHING and no NAMED control could be run"
-      + " (no primary device name), so this reading cannot tell an absent display from a refused nameless call")
+    Write-Output ("context: EnumDisplayDevices(NULL, 0) enumerated NOTHING and no NAMED control could be run" +
+      " (no primary device name), so this reading cannot tell an absent display from a refused nameless call")
     return
   }
-  $monitors = @(Get-EnumeratedDevices -Device $PrimaryDevice -Label 'monitor')
-  $monitors | ForEach-Object { Write-Output $_ }
-  if ($monitors.Count -gt 0) {
-    Write-Output ("context: EnumDisplayDevices(null, 0) enumerated NOTHING while the same call NAMED"
-      + " '$PrimaryDevice' enumerated $($monitors.Count) monitor(s) -- the function answers here, and it is"
-      + " the NULL device that is refused")
+  $monitorLines = @()
+  [int] $monitors = Get-EnumeratedDevices -Device $PrimaryDevice -Label 'monitor' -Lines ([ref] $monitorLines)
+  $monitorLines | ForEach-Object { Write-Output $_ }
+  if ($monitors -gt 0) {
+    Write-Output ("context: EnumDisplayDevices(NULL, 0) enumerated NOTHING while the same call NAMED" +
+      " '$PrimaryDevice' enumerated $monitors monitor(s) -- the function answers here, and it is" +
+      " the NULL device that is refused")
   } else {
-    Write-Output ("context: EnumDisplayDevices enumerated NOTHING for null AND for the NAMED control"
-      + " '$PrimaryDevice' -- the control refused too, so this says nothing about the NULL device in"
-      + " particular (last Win32 $(Get-LastWin32Error) -- unreliable)")
+    Write-Output ("context: EnumDisplayDevices enumerated NOTHING for NULL AND for the NAMED control" +
+      " '$PrimaryDevice' -- the control refused too, so this says nothing about the NULL device in" +
+      " particular (last Win32 $(Get-LastWin32Error) -- unreliable)")
   }
 }
 

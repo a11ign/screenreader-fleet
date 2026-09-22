@@ -6,16 +6,19 @@
  * `policy.yml`. A width or height typed directly into the task instead would move the environment with
  * nothing hashing it, and `provisionRevision` would stay equal across a fleet that had actually diverged.
  */
-import { declareWalkScope } from "../../guards/src/walk-scope.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-// This reads `packages/control/ansible/roles/worker/` directly, so `packages/control` joins the scope
-// the same way `provision-stamp-inputs.test.ts` already declares it.
-export const WALK_SCOPE = ["packages/control", "packages/worker-fleet"];
-await declareWalkScope(import.meta.url);
+// THIS FILE DECLARED A WALK SCOPE UNTIL IT STARTED RUNNING POWERSHELL, and it cannot honestly declare one
+// now. The tests at the bottom spawn `pwsh`, and `walk-scope.mjs` records a child process as
+// `(the whole repository)` on purpose -- what a subprocess reads is not visible to the observer, so no
+// narrower declaration could be checked, and `readsOutsideScope` refuses that marker whatever the scope
+// says. Its own message offers exactly two ways out, widen or remove, and only the second is available.
+// Undeclared is unbounded: `narrowByDeclaredScope` keeps an undeclared guard on every diff, which is the
+// direction that fails safe -- see `declared-walk-scope.test.ts`, whose second pinned property this is.
 
 const DEFAULTS = readFileSync(
   fileURLToPath(new URL("../../control/ansible/roles/worker/defaults/main.yml", import.meta.url)), "utf8");
@@ -313,8 +316,13 @@ test("Write-DisplayDevices runs a SAME-API positive control before claiming the 
   // function given a device name. This is CLAUDE.md's own rule -- an emptiness assertion names where its
   // positive control lives -- applied to a diagnostic rather than to a test.
   const { body } = scriptParts();
-  assert.match(body, /Get-EnumeratedDevices -Device \$null\b/,
+  assert.match(body, /Get-EnumeratedDevices -Device \(\[NullString\]::Value\)/,
     "the NULL arm is gone: it is the reading the whole row turns on");
+  assert.doesNotMatch(body, /Get-EnumeratedDevices -Device \$null\b/,
+    "the NULL arm must pass [NullString]::Value, never $null -- PowerShell binds $null to a `string` "
+    + "parameter as [string]::Empty, so `$null` here asks about a device NAMED \"\" and never about the "
+    + "NULL device at all. That coercion is the whole reason the previous version of this script failed "
+    + "on 10 of 10 workers; see the file's header for the measurement");
   assert.match(body, /Get-EnumeratedDevices -Device \$PrimaryDevice\b/,
     "the NAMED arm is gone -- with no same-API control, an empty enumeration cannot distinguish a desktop "
     + "with no adapters from a function that refuses nameless calls");
@@ -363,4 +371,161 @@ test("display.yml pins the display mode AFTER the driver install, never before i
   assert.ok(modeAt > installAt,
     "display.yml must pin the display mode AFTER installing the display driver -- ordered the other way, "
     + "workers 7-11 fail the mode pin on a basic display adapter and never reach the install that fixes it");
+});
+
+/**
+ * EVERYTHING ABOVE THIS LINE READS THE SCRIPT AS TEXT, AND TEXT CANNOT ANSWER THE QUESTION BELOW.
+ *
+ * reviewer-2's blocker on #1968 at `a58c7e44`: the same-API positive control was in the file and did not
+ * run. A textual assertion cannot tell "the control is written" from "the control ran" -- it is the same
+ * distinction the first verdict named at `:204`, one level up. So these tests hand the real script to a
+ * real PowerShell, with the one Windows API it needs replaced by a stub whose population is settable, and
+ * read what it actually wrote. `display-mode-harness.ps1` carries the how and why.
+ *
+ * `pwsh` is REQUIRED, and these tests fail rather than skip when it is missing. A control that quietly
+ * does not run is the exact defect this whole section exists to answer, and writing that defect into the
+ * test for it would be the same mistake with a longer fuse. GitHub's ubuntu runners ship PowerShell 7.6.5,
+ * so CI has it; `A11Y_PWSH` names a different binary where it is not on PATH.
+ */
+const PWSH = process.env.A11Y_PWSH ?? "pwsh";
+const HARNESS = fileURLToPath(new URL("./display-mode-harness.ps1", import.meta.url));
+const SCRIPT_PATH = fileURLToPath(new URL("./provisioning/set-display-mode.ps1", import.meta.url));
+// `Get-ModuleFunctionScriptBlock`, which returns a function's literal text from the PARSED file. Imported
+// rather than retyped: a second copy of a predicate drifts from the first.
+const AST_HELPERS = fileURLToPath(new URL(
+  "../../control/ansible/collections/ansible_collections/a11y/worker/tests/unit/plugins/modules/TestHelpers.psm1",
+  import.meta.url));
+
+function pwsh(args: string[]): string {
+  const run = spawnSync(PWSH, ["-NoProfile", "-NonInteractive", ...args], { encoding: "utf8" });
+  if ((run.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+    assert.fail(`no PowerShell at \`${PWSH}\`, and these tests do not skip without one. Install it (`
+      + "`curl -sSL https://github.com/PowerShell/PowerShell/releases/latest` -> the linux-x64 tar.gz, "
+      + "extracted anywhere) and either put `pwsh` on PATH or set A11Y_PWSH to the binary. The tests "
+      + "below are the only thing here that can tell a control that RAN from one that was merely written");
+  }
+  assert.equal(run.status, 0, `${PWSH} exited ${run.status}:\n${run.stderr}`);
+  return run.stdout;
+}
+
+interface Enumeration {
+  name: string;
+  nullDevices: number;
+  namedDevices: number;
+  primary: string | null;
+  /** What `EnumDisplayDevices` was asked for at index 0, per call: `NULL` or the quoted device name. */
+  askedFor: string[];
+  lines: string[];
+}
+
+let harnessOutput: Enumeration[] | undefined;
+
+/** Every scenario, run once -- the harness is one pwsh start, and four of them is three too many. */
+function enumerations(): Enumeration[] {
+  harnessOutput ??= JSON.parse(pwsh(
+    ["-File", HARNESS, "-ScriptPath", SCRIPT_PATH, "-HelperModule", AST_HELPERS])) as Enumeration[];
+  return harnessOutput;
+}
+
+function scenario(name: string): Enumeration {
+  const found = enumerations().find((run) => run.name === name);
+  assert.ok(found, `display-mode-harness.ps1 no longer runs a '${name}' scenario -- named explicitly so a `
+    + "rename there fails loudly rather than silently testing nothing");
+  return found!;
+}
+
+/** The number the script CLAIMED it enumerated, read back off its own output line. */
+function claimed(run: Enumeration, unit: "adapter" | "monitor"): number | undefined {
+  const claim = run.lines.map((line) => new RegExp(`enumerated (\\d+) ${unit}\\(s\\)`).exec(line))
+    .find((match) => match !== null);
+  return claim ? Number(claim[1]) : undefined;
+}
+
+test("set-display-mode.ps1 PARSES -- the whole file, under a real PowerShell", () => {
+  // Found by running the thing: at `0c4f39b1d` this file had FOURTEEN parse errors and every test here
+  // was green, because every test here matched text. `Write-Output ("a"` followed by a line starting
+  // `+ "b"` is not a continuation in PowerShell -- a complete expression ends at the newline, so the
+  // operator has to END the previous line. A script that cannot be parsed does nothing at all on a
+  // worker, and the next fleet run is a poor place to learn that.
+  const errors = pwsh(["-Command",
+    "$parseErrors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("
+    + `'${SCRIPT_PATH}', [ref] $null, [ref] $parseErrors); `
+    + "$parseErrors | ForEach-Object { $_.ToString() }"]);
+  assert.equal(errors.trim(), "",
+    `set-display-mode.ps1 does not parse:\n${errors}\nNothing else in this file can catch that -- a `
+    + "syntax error leaves every textual assertion here passing over a script Windows will refuse to run");
+});
+
+test("the nameless arm passes a REAL null, never PowerShell's empty string", () => {
+  // PowerShell binds `$null` to a `string` parameter as `[string]::Empty`; only `[NullString]::Value`
+  // sends a genuine NULL. That is what the stub records, so this is measured at the boundary rather than
+  // inferred from the script's source. The previous version of this script asked every "default device"
+  // question with `""` -- a device no machine has -- which is the cheaper explanation for the ten-host
+  // failure that #1968's first telling missed entirely.
+  for (const run of enumerations()) {
+    assert.equal(run.askedFor[0], "NULL",
+      `the '${run.name}' scenario asked EnumDisplayDevices for ${run.askedFor[0]} rather than NULL: the `
+      + "nameless arm is asking about a device NAMED \"\", so the whole reading is about the wrong call");
+  }
+});
+
+test("the count Write-DisplayDevices reports IS the count of devices it enumerated", () => {
+  // reviewer-2's blocker, and the defect was worse than the report. `Get-EnumeratedDevices` returned
+  // `,$lines` while the caller counted `@(...)`: PowerShell's unary comma emits the collection as ONE
+  // pipeline object, so `.Count` was 1 for EVERY population -- measured 0 -> 1, 1 -> 1, 3 -> 1. The
+  // non-empty case is the half no fleet reading can supply, because every real worker measured so far
+  // enumerates nothing, which is exactly the population that cannot tell a broken counter from a good one.
+  const many = scenario("nonEmptyNull");
+  const deviceLines = many.lines.filter((line) => /^context: device\[/.test(line));
+  assert.equal(deviceLines.length, many.nullDevices,
+    `the stub gave ${many.nullDevices} devices and the script printed ${deviceLines.length} lines`);
+  assert.equal(claimed(many, "adapter"), deviceLines.length,
+    `the script printed ${deviceLines.length} device lines and claimed ${claimed(many, "adapter")}: a `
+    + "count that crosses a function boundary as a collection is a count of the wrapper");
+  assert.ok(!many.lines.some((line) => /enumerated NOTHING/.test(line)),
+    "a non-empty enumeration must not also claim it found nothing");
+});
+
+test("the same-API control RUNS when the nameless enumeration comes back empty", () => {
+  // The invariant blocker 2 asked for, asserted on behaviour: with the NULL arm empty, the NAMED arm has
+  // to have been CALLED, and its own outcome has to reach the message. The old code returned before ever
+  // reaching it, which is why "the control is in the file" was true and worthless.
+  const empty = scenario("emptyNullAnsweringControl");
+  assert.equal(empty.askedFor.length, 2,
+    `the control did not run: EnumDisplayDevices was asked ${JSON.stringify(empty.askedFor)}, and an `
+    + "empty population with no same-API control cannot tell an absent display from a refused call");
+  assert.match(empty.askedFor[1]!, /DISPLAY1/,
+    "the control has to be the SAME API given a device NAME -- a different API answers a different question");
+  assert.equal(claimed(empty, "monitor"), empty.namedDevices,
+    "the control's own outcome has to be the number it actually enumerated");
+  assert.equal(claimed(empty, "adapter"), undefined,
+    "an empty nameless enumeration must never report an adapter population -- that claim is the defect");
+});
+
+test("when the control refuses too, the script says so instead of claiming the stronger finding", () => {
+  // The other half of the same invariant, and the one that keeps this honest: a refusing control means
+  // the reading is about the FUNCTION, not about the argument, and over-claiming there is what the
+  // should-fix on #1968 was about.
+  const both = scenario("emptyNullRefusingControl");
+  assert.equal(both.askedFor.length, 2, "the control must still be attempted when the NULL arm is empty");
+  assert.ok(both.lines.some((line) => /the control refused too/.test(line)),
+    `both arms enumerated nothing and the script wrote: ${JSON.stringify(both.lines)}`);
+
+  const unnameable = scenario("emptyNullNoControlPossible");
+  assert.equal(unnameable.askedFor.length, 1,
+    "with no primary device name there is nothing to control WITH, so the named call must not be invented");
+  assert.ok(unnameable.lines.some((line) => /no NAMED control could be run/.test(line)),
+    `no control was possible and the script wrote: ${JSON.stringify(unnameable.lines)}`);
+});
+
+test("every empty-population claim in the harness output names the control's own outcome", () => {
+  // The runtime twin of the textual invariant above: over the real output lines rather than the source.
+  const claims = enumerations().flatMap((run) => run.lines.filter((line) => /enumerated NOTHING/.test(line)));
+  assert.ok(claims.length > 0,
+    "positive control for the loop below -- no scenario produced an empty-population claim at all, so "
+    + "this test passes over nothing");
+  for (const claim of claims) {
+    assert.match(claim, /NAMED/,
+      `this line claims an empty enumeration without naming the control's own outcome: ${claim}`);
+  }
 });
