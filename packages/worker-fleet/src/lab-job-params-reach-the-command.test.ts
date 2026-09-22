@@ -317,3 +317,47 @@ test("a parameter a job does not publish is still refused, whoever else takes it
     + "silently admit it everywhere else");
   assert.equal(refusal.when, "vars[item] is defined", "checked exactly when the caller supplied one");
 });
+
+/**
+ * ## The fourth hole: a derived fact that is only built under a CONDITION
+ *
+ * `lab_param_aliases` declares which caller parameter produced a derived fact, and the test above proves
+ * a `set_fact` exists for it. Neither asks whether that `set_fact` RUNS. `lab_named_worker` is built
+ * `when: worker is defined and worker in groups['a11y_workers']` — so a name the inventory does not have
+ * leaves the fact unset, and a job whose command reads it dies at render with `'lab_named_worker' is
+ * undefined`: a message naming the derived fact rather than the parameter that was mistyped, after the
+ * dispatch. The remedy is a per-job assert on the NAME, and this asks for one from every job that reads
+ * the fact — rather than from a list, which is what `gate-stability` was missing while `stability`, the
+ * job running the identical script, had it.
+ *
+ * NOT EVERY NAMED-WORKER JOB IS IN THIS POPULATION, and the exclusion is the point of stating it:
+ * `capture-check` builds its own address inline from `hostvars[worker]` (its entry says why — the script
+ * reads only the flag, never `A11Y_WORKER`), so it never reads this fact and this rule says nothing about
+ * it. A rule that quietly widened to cover it would be asserting about a mechanism it has not looked at.
+ */
+test("every job that resolves one named worker refuses a name the inventory does not have", () => {
+  const readsNamedWorker = Object.entries(PLAY.lab_jobs)
+    .filter(([, entry]) => JSON.stringify(entry).includes("lab_named_worker")).map(([job]) => job).sort();
+  // The control this file's header demands: an extraction that matched nothing would leave the loop
+  // below examining no job at all and the test green.
+  assert.deepEqual(readsNamedWorker, ["evidence-check", "gate-stability", "stability"],
+    "these are the jobs whose command resolves `-e worker=` through `lab_named_worker`; if this list has "
+    + "changed, the check below is still the real assertion — update this control to what the catalogue "
+    + "now says, having checked the new job asserts the name");
+  for (const job of readsNamedWorker) {
+    const validates = assertClausesFor(job)
+      .filter((clause) => /\bworker\b/.test(clause) && clause.includes("groups['a11y_workers']"));
+    assert.equal(validates.length, 1,
+      `job '${job}' renders {{ lab_named_worker }} and ${validates.length} of its asserts check that `
+      + "`-e worker=` names a box in `groups['a11y_workers']`. Without one, a typo skips the `set_fact` "
+      + "that builds the address and the job fails at render naming the FACT, not the parameter.");
+    // An OPTIONAL `worker` must tolerate absence, exactly as an optional `only` does: `evidence-check`
+    // without one is the corpus-wide read across the pool that every existing caller already gets, while
+    // a stability gate with no worker has nothing to run against at all.
+    const optional = (PARAMS(PLAY.lab_jobs[job]) as Record<string, string>).worker === "optional";
+    assert.equal(/worker is not defined or/.test(validates[0]), optional,
+      `job '${job}' declares worker: ${(PARAMS(PLAY.lab_jobs[job]) as Record<string, string>).worker}, `
+      + "and its assert disagrees about whether an absent one is allowed — an optional parameter whose "
+      + "assert refuses absence refuses the very usage `params:` publishes.");
+  }
+});

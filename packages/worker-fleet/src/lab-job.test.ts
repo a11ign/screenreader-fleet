@@ -380,7 +380,13 @@ test("a pull never runs into a checkout somebody or something else is using", ()
 test("the two gates are jobs, and the one needing a worker validates it", () => {
   assert.match(LAB_JOB, /stability:/, "the gate a corpus run must not start without");
   assert.match(LAB_JOB, /rules-gate:/);
-  assert.match(LAB_JOB, /when: job == 'stability'/, "its worker must be checked like any other");
+  // EITHER SPELLING OF THE GUARD, because the assert it pins now covers `gate-stability` too — the job
+  // running the identical script through `lab_named_worker`, which had no name check at all until #1948.
+  // What this line is about is that stability's worker IS validated, not which `when:` says so; the
+  // derived form of the same rule (every job reading `lab_named_worker` asserts the name) lives in
+  // `lab-job-params-reach-the-command.test.ts`, where it applies to jobs nobody has written yet.
+  assert.match(LAB_JOB, /when: job (== 'stability'|in \[[^\]]*'stability')/,
+    "its worker must be checked like any other");
   assert.match(LAB_JOB, /A11Y_WORKER=\{\{ lab_named_worker \}\}/);
   assert.match(LAB_JOB, /lab_named_worker is match\('\^http:\/\/\[0-9\.\]\+:8765\$'\)/,
     "an address reaching the environment must be proved to be an address");
