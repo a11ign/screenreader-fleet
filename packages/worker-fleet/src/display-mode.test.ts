@@ -201,9 +201,11 @@ test("display.yml passes both env vars into set-display-mode.ps1 from worker_dis
 test("set-display-mode.ps1 NAMES the display device, and never asks for the nameless default", () => {
   // #1955, measured on a11y-worker-2 inside the interactive one-shot task on 2026-09-22:
   // `EnumDisplaySettingsW($null, CURRENT)` -> False, `EnumDisplaySettingsW('\\.\DISPLAY1', CURRENT)` ->
-  // True, 1024x768. Every NULL-device GDI call on this fleet refuses and every named one answers, so a
-  // regression to `$null` here reintroduces a failure that took a ten-host play and three probe rounds to
-  // separate from the session, the desktop, the driver and the struct layout.
+  // True, 1024x768. That `$null` never reached Windows as NULL -- PowerShell binds it to a `string`
+  // parameter as `[string]::Empty` -- so what those readings establish is that an EMPTY-named call
+  // refuses and a named one answers. A regression to `$null` here reintroduces a failure that took a
+  // ten-host play and three probe rounds to separate from the session, the desktop, the driver and the
+  // struct layout.
   assertNativeCall({
     declaredAs: "MonitorFromPoint", calledAs: "MonitorFromPoint",
     why: "it is what resolves the primary display, and display.yml's #1955 header records what happens "
@@ -308,10 +310,11 @@ test("set-display-mode.ps1 reports the context a bare failure could not distingu
 });
 
 test("Write-DisplayDevices runs a SAME-API positive control before claiming the population is empty", () => {
-  // reviewer-2's second blocker on #1968. `EnumDisplayDevices($null, 0)` returning False at index 0 is two
-  // findings wearing one face -- "this desktop has no display adapters" and "this function refuses every
-  // nameless call here, exactly as EnumDisplaySettings does" -- and the script claimed the second while
-  // measuring only the first. `Screen.AllScreens` and the named `EnumDisplaySettingsW` are a DIFFERENT
+  // reviewer-2's second blocker on #1968. `EnumDisplayDevices(NULL, 0)` returning False at index 0 is two
+  // findings wearing one face -- "this desktop has no display adapters" and "this function refuses a
+  // nameless call here" -- and the script claimed the second while measuring only the first. (The second
+  // is still unmeasured: every EnumDisplaySettings refusal on record was EMPTY-named, not nameless, so
+  // the reading that would settle it has never been taken. See the script's header.) `Screen.AllScreens` and the named `EnumDisplaySettingsW` are a DIFFERENT
   // API answering a different question, so neither can settle it; the control has to be this same
   // function given a device name. This is CLAUDE.md's own rule -- an emptiness assertion names where its
   // positive control lives -- applied to a diagnostic rather than to a test.

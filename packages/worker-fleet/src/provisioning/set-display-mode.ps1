@@ -210,10 +210,11 @@ function Get-UserObjectName {
   return "(unreadable, Win32 $(Get-LastWin32Error))"
 }
 
-# THE FIX, and the one line in this script that had to change. `$null` means "whatever the system
-# considers the default display device", and on this fleet that question has no answer -- every NULL-device
-# GDI call refuses while every named one answers. MonitorFromPoint(0,0, DEFAULTTOPRIMARY) names the
-# primary monitor and GetMonitorInfoW reads its `\\.\DISPLAYn` back.
+# THE FIX, and the one line in this script that had to change. `$null` was MEANT to say "whatever the
+# system considers the default display device" and never did: PowerShell binds it to a `string` parameter
+# as `[string]::Empty`, so the call asked for a device NAMED `""`, which any Windows box refuses. See this
+# file's header for the measurement. MonitorFromPoint(0,0, DEFAULTTOPRIMARY) names the primary monitor and
+# GetMonitorInfoW reads its `\\.\DISPLAYn` back, which is a question that has an answer.
 #
 # Returns $null on failure rather than throwing, so the caller can print the whole context block before
 # giving up -- a refusal that reports nothing is what made the previous failure unrepeatable.
@@ -293,7 +294,8 @@ function Get-EnumeratedDevices {
 #
 # THE CONTROL IS THE POINT, and it is reviewer-2's blocker on #1968. `EnumDisplayDevices(NULL, 0)`
 # returning False at index 0 is TWO findings wearing one face -- "this desktop has no display adapters"
-# and "this function refuses every nameless call here, exactly as EnumDisplaySettings does" -- and an
+# and "this function refuses a nameless call here" (a thing no reading has shown yet -- the
+# EnumDisplaySettings refusals were all EMPTY-named, see this file's header) -- and an
 # empty population that cannot tell them apart is the shape this repository refuses everywhere else.
 # `Screen.AllScreens` and the named `EnumDisplaySettingsW` are a DIFFERENT API answering a different
 # question, so neither settles it. The control therefore has to be THIS function with a device name: if it
