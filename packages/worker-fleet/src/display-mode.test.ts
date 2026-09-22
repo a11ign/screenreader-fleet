@@ -130,3 +130,65 @@ test("display.yml passes both env vars into set-display-mode.ps1 from worker_dis
     "display.yml must set A11Y_DISPLAY_HEIGHT from worker_display_mode.height before invoking the script");
   assert.match(block!, /set-display-mode\.ps1/, "display.yml must invoke set-display-mode.ps1");
 });
+
+test("set-display-mode.ps1 NAMES the display device, and never asks for the nameless default", () => {
+  // #1955, measured on a11y-worker-2 inside the interactive one-shot task on 2026-09-22:
+  // `EnumDisplaySettingsW($null, CURRENT)` -> False, `EnumDisplaySettingsW('\\.\DISPLAY1', CURRENT)` ->
+  // True, 1024x768. Every NULL-device GDI call on this fleet refuses and every named one answers, so a
+  // regression to `$null` here reintroduces a failure that took a ten-host play and three probe rounds to
+  // separate from the session, the desktop, the driver and the struct layout.
+  assert.match(SET_DISPLAY_MODE_SCRIPT, /MonitorFromPoint/,
+    "set-display-mode.ps1 must resolve the primary display through MonitorFromPoint -- see display.yml's "
+    + "#1955 header for what happens when the device is left for the system to pick");
+  assert.match(SET_DISPLAY_MODE_SCRIPT, /GetMonitorInfoW/,
+    "MonitorFromPoint gives a monitor handle; GetMonitorInfoW is what turns it into the \\\\.\\DISPLAYn "
+    + "name the display calls need");
+  assert.doesNotMatch(SET_DISPLAY_MODE_SCRIPT, /EnumDisplaySettings\(\$null/,
+    "EnumDisplaySettings must be given the resolved device name, never $null -- $null is the exact call "
+    + "that returned False on all ten workers");
+});
+
+test("set-display-mode.ps1 changes the mode through ChangeDisplaySettingsEx, the form that takes a device name", () => {
+  // ChangeDisplaySettings (no Ex) has no device-name parameter at all, so it cannot express the fix
+  // above: it always acts on the default device, which is the thing this fleet refuses.
+  assert.match(SET_DISPLAY_MODE_SCRIPT, /ChangeDisplaySettingsExW/,
+    "set-display-mode.ps1 must call ChangeDisplaySettingsExW with the resolved device name");
+  assert.doesNotMatch(SET_DISPLAY_MODE_SCRIPT, /EntryPoint = "ChangeDisplaySettings"/,
+    "the nameless ChangeDisplaySettings cannot take a device name, so importing it would be a way back "
+    + "to the defect #1955 fixed");
+});
+
+test("set-display-mode.ps1 reports the context a bare failure could not distinguish", () => {
+  // Done-when 1 of #1955. The old failure wrote one sentence, which could not tell apart "landed in
+  // session 0", "landed in session 1 with no display" and "reached the right desktop and the call
+  // refused" -- three causes in three different files. Each fact below is one of those discriminators,
+  // and dropping any of them puts the next fleet play back to buying one sentence for a ten-host run.
+  for (const [probe, why] of [
+    ["SessionId", "the session id separates 'the interactive_token route did not take' from the rest"],
+    ["GetProcessWindowStation", "the window station name is how 'WinSta0' is shown rather than assumed"],
+    ["GetThreadDesktop", "the desktop name is the other half of that: 'Default' is the interactive one"],
+    ["GetSystemMetrics", "screen metrics say whether the desktop has a display AT ALL, which is what "
+      + "disagreed with the enumeration and pointed at the argument instead of the environment"],
+    ["EnumDisplayDevices", "the device enumeration is the measurement that named the defect"],
+    ["GetLastWin32Error", "the Win32 code, printed with its own warning that it is unreliable here"],
+  ] as const) {
+    assert.match(SET_DISPLAY_MODE_SCRIPT, new RegExp(probe),
+      `set-display-mode.ps1 no longer reports ${probe} -- ${why}`);
+  }
+});
+
+test("display.yml pins the display mode AFTER the driver install, never before it", () => {
+  // #1955, measured on a11y-worker-7 2026-09-22T19:07Z: with the device-name fix in place the mode READS
+  // (640x480, the Microsoft Basic Display Adapter's fallback) and ChangeDisplaySettingsEx returns -2,
+  // DISP_CHANGE_FAILED -- a basic adapter cannot do 1024x768. With the mode task running first, the play
+  // failed there and the Intel driver install below it never ran: the one step that would have made the
+  // mode settable. Workers 2-6, already on a problem-free Intel driver, passed the same task in the same
+  // run, which is what makes this an ordering fault and not a second defect in the script.
+  const modeAt = DISPLAY_TASK.indexOf("- name: The display mode the fleet pins");
+  const installAt = DISPLAY_TASK.indexOf("- name: Install it silently");
+  assert.ok(modeAt >= 0, "'The display mode the fleet pins' task is gone from display.yml");
+  assert.ok(installAt >= 0, "the display-driver install task is gone from display.yml");
+  assert.ok(modeAt > installAt,
+    "display.yml must pin the display mode AFTER installing the display driver -- ordered the other way, "
+    + "workers 7-11 fail the mode pin on a basic display adapter and never reach the install that fixes it");
+});
