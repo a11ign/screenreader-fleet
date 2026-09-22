@@ -4,7 +4,8 @@
 // human reading a console by eye. These tests are the replacement for that.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
+import { readFileSync } from "node:fs";
+import { fleetConsistency, describeMismatches, MUST_MATCH } from "./fleet-consistency.mjs";
 
 /**
  * THE FIXTURE ADDRESSES, BUILT FROM OCTETS. #63's history purge replaced every RFC 1918 literal in the
@@ -140,6 +141,76 @@ test("a uniformly unstamped fleet is consistent", () => {
     { worker: "b", environment: { provisionRevision: "unstamped" } },
   ]);
   assert.equal(consistent, true);
+});
+
+test("EVERY MUST_MATCH FIELD IS ONE THE WORKER ACTUALLY REPORTS", () => {
+  // The hole #1953 fell through, generalised so the next field cannot fall through it too.
+  //
+  // `check()` skips a field no guest reports ("absent is not a mismatch", and that rule is right -- an
+  // older worker must not be flagged against newer ones). The cost is that a `MUST_MATCH` entry naming
+  // something the worker never sends is INVISIBLE: it compares nothing, reports nothing, and the fleet
+  // reads CONSISTENT. `displayMode` is that failure from the other end -- a property that mattered, that
+  // nothing sent, so nothing could compare -- and a typo'd path here would produce it silently.
+  //
+  // Asserted against server.mjs's SOURCE, the same narrow exception `provision-stamp.test.ts` states:
+  // `server.mjs` imports guidepup, which constructs a ScreenReader at module scope and throws on a host
+  // with no screen reader, so this file cannot import it on any runner this repo has.
+  const server = readFileSync(new URL("../../nvda-worker/src/server.mjs", import.meta.url), "utf8");
+  const start = server.indexOf("function runtimeEnvironment() {");
+  const end = server.indexOf("function provisionRevision() {");
+  assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
+  const reported = server.slice(start, end);
+
+  const missing = MUST_MATCH.map((f) => f.path).filter((path) => !reported.includes(`${path}:`));
+  assert.deepEqual(missing, [], "MUST_MATCH compares fields the worker's /health environment never sends");
+
+  // The positive control for the line above: `deepEqual(missing, [])` passes when the matcher matches
+  // everything, and a matcher that cannot fail is the defect this whole file is about.
+  assert.ok(!reported.includes("displayModeThatIsNotReported:"),
+    "the source matcher matches names that are not there, so the assertion above proves nothing");
+});
+
+test("THE REAL DISPLAY SPLIT IS CAUGHT -- 1024x768 against 640x480", () => {
+  // THE POSITIVE CONTROL for the field below, and the pair is the one this fleet was actually running:
+  // workers 2-6 at 1024x768 on the Intel adapter, workers 7-11 at 640x480 on the Basic Display Adapter
+  // with the Intel one at error 43 (#1953, measured 2026-09-22; the 640x480 read is from worker-7's own
+  // interactive session, #1955). `fleet:status` called that fleet CONSISTENT and interchangeable.
+  //
+  // Without this assertion the field passes by being empty: `assert.deepEqual(mismatches, [])` in "a
+  // matched fleet is consistent" is true of a `MUST_MATCH` entry that no guest ever reports.
+  const { consistent, mismatches } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { displayMode: "1024x768" }),
+    guest(`http://${IP.g5}:8765`, { displayMode: "640x480" }),
+  ]);
+  assert.equal(consistent, false);
+  assert.equal(mismatches.length, 1);
+  assert.equal(mismatches[0].field, "displayMode");
+  assert.match(describeMismatches(mismatches)[0], /\.4=1024x768 \.5=640x480/);
+});
+
+test("a fleet on one display mode is consistent", () => {
+  // The other direction, and it is not the same assertion twice: a field that reported a mismatch
+  // between two guests holding the SAME mode would take `fleet:status` offline over nothing, which is
+  // how a diagnostic gets switched off. 1024x768 is what the pool is pinned to (#1561, ceo's ruling b).
+  const { consistent, mismatches } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { displayMode: "1024x768" }),
+    guest(`http://${IP.g5}:8765`, { displayMode: "1024x768" }),
+  ]);
+  assert.equal(consistent, true);
+  assert.deepEqual(mismatches, []);
+});
+
+test("a guest whose display could not be read is reported, not skipped", () => {
+  // `displayMode` answers the string "unknown" rather than nothing when the read fails, and the worker
+  // does that deliberately: `check()` skips an absent field, so an unreadable display would land back in
+  // exactly the state #1953 is about -- a property nobody compares, printed as agreement. A guest whose
+  // screen cannot be read is not KNOWN to be interchangeable, and the report must say so.
+  const { consistent, mismatches } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { displayMode: "1024x768" }),
+    guest(`http://${IP.g5}:8765`, { displayMode: "unknown" }),
+  ]);
+  assert.equal(consistent, false);
+  assert.ok(mismatches.some((m) => m.field === "displayMode"));
 });
 
 test("a shortened worker label must still distinguish the workers", () => {

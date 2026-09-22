@@ -54,6 +54,24 @@ export const MUST_MATCH = [
   // which reads as ordinary churn rather than as a split fleet. Re-provision the pool together.
   { path: "provisionRevision", why: "a re-provisioned guest has different NVDA/Edge configuration, and " +
       "it is already a cache key -- a split fleet shows up only as unexplained cache misses" },
+  // A UNIFORMITY CLAIM PRINTED OVER A PROPERTY NOTHING CHECKED, which is the worst failure this file
+  // can have -- worse than missing a field, because the operator was told the opposite.
+  //
+  // `fleet:status` printed "fleet CONSISTENT across 10 of 10 -- these workers are interchangeable for
+  // capture" at 2026-09-22T18:21Z over a fleet running 1024x768 on five guests and 640x480 on the other
+  // five (#1953; measured read-only on the live fleet, #1567/#1955). The nine fields above were all
+  // matched and all true; the sentence they produced was not.
+  //
+  // `provisionRevision` does not already cover it, and this is the point. That stamp is written by the
+  // provisioning script itself, so it records WHICH PROVISIONING RAN rather than what it achieved: a
+  // guest whose display-driver install failed still gets the new stamp. All ten guests can report an
+  // identical revision while five of them sit at 640x480 on a fallback adapter. A stamp cannot fail
+  // closed on a thing it does not read.
+  { path: "displayMode", why: "a guest capturing on a 640x480 desktop and one on 1024x768 are not " +
+      "interchangeable evidence: the window is what a real display holds (#1561), and a page's CSS can " +
+      "hide content below a width -- metoffice hides its h1 under 1280px. NOT a cache key: adding one " +
+      "invalidates every cached capture, which is a separate and far more expensive decision than making " +
+      "this sentence honest" },
 ];
 
 /**
