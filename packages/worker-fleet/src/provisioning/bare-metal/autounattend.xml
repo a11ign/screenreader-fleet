@@ -283,6 +283,44 @@
           <Description>No Microsoft account / network wall at OOBE</Description>
           <Path>reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE /v BypassNRO /t REG_DWORD /d 0x00000001 /f</Path>
         </RunSynchronousCommand>
+        <!-- THE BLANK PASSWORD MUST NOT BE ABLE TO EXPIRE, AND THIS IS THE ONLY PASS THAT CAN SAY SO.
+             #1933, measured 2026-09-22 while the chairman built the five new boxes from USB media: the
+             first one came up at "Your password has expired and must be changed" and would not log on.
+             An empty new password was accepted, so the account survived; nothing in the tree had stopped
+             it being asked.
+
+             Windows' default max password age is 42 days and it applies to the blank `witness` password
+             like any other. `account.yml` and `provision-nvda-worker.ps1` BOTH set
+             `PasswordNeverExpires`, but both run over SSH, which needs the box up, which needs
+             auto-logon, which is the thing the expiry breaks. Every existing remedy sits on the far side
+             of the door it locks.
+
+             `FirstLogonCommands` cannot fix it either, and that is the trap worth naming: an expired
+             password makes AUTO-LOGON ITSELF fail, so the box stops at an interactive prompt and the
+             first-logon commands never run at all.
+
+             So it is set here, in `specialize`, which runs during setup before any logon exists. As
+             POLICY rather than per-account, because at this point the account does not exist yet:
+             `oobeSystem` creates it below and inherits whatever policy is in force.
+
+             PXE boxes mostly dodged this because provisioning follows the install within minutes and
+             closes the window. A USB build is done by hand, over hours or days, from media that may have
+             been written weeks earlier, so the window is wide enough to land in. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>8</Order>
+          <Description>A blank password that can expire is a box that cannot auto-logon</Description>
+          <Path>net accounts /maxpwage:unlimited</Path>
+        </RunSynchronousCommand>
+        <!-- Belt and braces, and NOT a restatement of the line above. `maxpwage` stops the clock for
+             accounts created from here on; this clears the expiry WARNING path that a Windows security
+             baseline or an OEM image may already have stamped into the image being installed. The first
+             machine showed the symptom on day zero, which `maxpwage` alone does not explain, so the two
+             are kept separate rather than merged into one command that would hide which one mattered. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>9</Order>
+          <Description>No password expiry warning at logon</Description>
+          <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v PasswordExpiryWarning /t REG_DWORD /d 0x00000000 /f</Path>
+        </RunSynchronousCommand>
       </RunSynchronous>
     </component>
     <component name="Microsoft-Windows-Security-SPP-UX" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
@@ -356,7 +394,7 @@
         </SynchronousCommand>
         <!-- Fetch the payload over HTTP rather than looking for it on the install media.
              ==================== SET THE ADDRESS BELOW BEFORE USE ====================
-             `$h` below is 203.0.113.10 -- an RFC 5737 DOCUMENTATION address, not this fleet's real
+             `$h` below is 203.0.113.10 — an RFC 5737 DOCUMENTATION address, not this fleet's real
              control-plane host (#86: a real address sat here in tracked source; RFC 5737 is reserved so
              it can never resolve to anything, the same replacement #83 used elsewhere in this repo).
              It WILL fail to fetch, on purpose: a box that silently boots against a stale or wrong host
