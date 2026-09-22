@@ -225,7 +225,11 @@ test("no job can be handed a worker URL — a worker is always resolved from the
 
   // And the inverse, which is the half that went silent: a job that names no worker must not be able to
   // have one forced on it by an operator's -e. It uses the fleet, and the guard says so.
-  assert.match(LAB_JOB, /worker is not defined/,
+  //
+  // #1946 found this the THIRD per-job claim in this file rather than the second — the loop above is
+  // catalogue-wide, but this line names `capture-real-pages` in its own message while matching the whole
+  // playbook, so any other job's refusal would satisfy it. It reads that job's own assert task now.
+  assert.ok(assertClausesFor("capture-real-pages").includes("worker is not defined"),
     "capture-real-pages runs across the fleet and must REFUSE -e worker, not ignore it — an operator who "
     + "asked for one machine and got four must be told");
 });
