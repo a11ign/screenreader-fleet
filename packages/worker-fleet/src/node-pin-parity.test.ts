@@ -52,8 +52,10 @@ test("the bootstrap pins the SAME Node build the role does", () => {
     "worker_node_version is gone from the role defaults — this test examines nothing");
   assert.ok(BOOTSTRAP.includes(`'${version}'`),
     `the role pins Node ${version} and the bootstrap does not. A box built from the bootstrap would come `
-    + "up on a different runtime from the fleet, which is exactly the split #2063 measured — and because "
-    + "`nodeVersion` is REPORTED_ONLY rather than MUST_MATCH, nothing would refuse a capture over it.");
+    + "up on a different runtime from the fleet, which is exactly the split #2063 measured — and since "
+    + "#2170 made `nodeVersion` a MUST_MATCH field, such a box would now refuse every capture the fleet "
+    + "attempts rather than split the corpus in silence. Both are costs; this test is what prevents "
+    + "either.");
 });
 
 test("the bootstrap verifies the SAME bytes, for EVERY architecture the role names", () => {

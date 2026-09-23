@@ -85,6 +85,25 @@ export const MUST_MATCH = [
       "whatever the desktop gave are not interchangeable evidence -- a page's CSS can hide content below " +
       "a width, and metoffice hides its h1 under 1280px. It is in the cache key (#1561), so a split " +
       "fleet also writes two evidence populations" },
+  // THE RUNTIME THE EVIDENCE WAS PRODUCED BY -- and it is here as the THIRD STEP of `ceo`'s ruling on
+  // #2063 rather than as a field arriving fresh: report it, pin provisioning so the fleet converges, and
+  // only then may it gate (#2170). The first two are done. The pin is `worker_node_version` in the worker
+  // role's `defaults/main.yml`, and the fleet converged on v24.20.0 at 2026-09-23T18:02Z -- read off all
+  // ten guests' own `/health`, 10 of 10 reporting one value, against the 5/5 split measured at 06:55Z
+  // that morning (`orchestrator`, #2170).
+  //
+  // WHY THE PRECONDITION WAS A `/health` READING AND NOT `provisionRevision`, which is the part worth
+  // keeping: at 17:57Z, immediately after a CLEAN provision, three of the five upgraded guests still
+  // reported v24.19.0. `/health` reports the runtime of the RUNNING worker process, not the installed
+  // one, and only the deploy's restart moved them. That makes the reading stricter than "the pin
+  // landed" -- which is the property this field needs, because the value it compares is written into
+  // every corpus record BY that running process.
+  { path: "nodeVersion", why: "the guest's Node runtime is recorded into every corpus record " +
+      "(`export-screenreader-dataset.mjs`), so two guests on different runtimes write two populations " +
+      "into one corpus and a good/bad pair can straddle them -- the comparison that pair exists to make " +
+      "then carries a runtime difference nobody asked for. NOT a cache key: adding one invalidates every " +
+      "capture stamped before it, which is the same separate and far more expensive decision " +
+      "`displayMode` two entries up records" },
 ];
 
 /**
@@ -94,15 +113,17 @@ export const MUST_MATCH = [
  * false` and `capture-fleet-guard` exits 3; a field any compared guest fails to report lands in
  * `fields.coverage` and, since #2047, exits 3 as well. So a field that belongs in the REPORT but must not
  * refuse a run has nowhere to go in either — and adding it to one of them anyway is not a small
- * mis-filing: `nodeVersion` is reported by 10 of 10 guests today, so it would refuse every capture during
- * the next rolling deploy, and `displayAdapter` is reported by nobody, so it would refuse every capture
- * immediately.
+ * mis-filing: `displayAdapter` reads one value on nine guests and another on the tenth, one letter apart,
+ * so a gate on it would refuse every capture on this fleet for ever.
  *
- * `ceo` ruled the order on #2063, 2026-09-23: **report it, then pin provisioning so the fleet converges,
- * and only then may it join `MUST_MATCH`** (that last step is #2170). The reason is measured rather than
- * cautious — the corpus is ALREADY mixed on `nodeVersion` and has been since at least 2026-09-12, so
- * gating on it today would refuse every capture on a condition every published number was measured
- * across.
+ * THIS CHANNEL IS A WAITING ROOM FOR SOME FIELDS AND A PERMANENT HOME FOR OTHERS, and the two must not be
+ * confused. `nodeVersion` was the first kind: `ceo` ruled the order on #2063, 2026-09-23 — **report it,
+ * then pin provisioning so the fleet converges, and only then may it join `MUST_MATCH`** — and #2170 is
+ * that last step, taken once the fleet read one runtime on all ten guests. `displayAdapter` is the
+ * second kind: the difference it reports is HARDWARE (`Intel(R) UHD Graphics 630` against
+ * `Intel(R) HD Graphics 630` on one box), so no provisioning run converges it and it can never graduate
+ * the way `nodeVersion` did. A field arriving here needs its exit named, or "not yet a gate" decays into
+ * "never looked at again".
  *
  * So these fields are compared exactly as the gating ones are, and their drift is named on the verdict
  * line with each guest's value — but they contribute to NEITHER `mismatches` NOR `fields.coverage`, which
@@ -110,21 +131,11 @@ export const MUST_MATCH = [
  *
  * A field NOBODY reports is `unreported` here rather than silent, which is the same distinction #1997
  * drew for the gating fields: a field compared on nobody draws no values to disagree about and would
- * otherwise read exactly like a field every guest agrees on. It is the state `displayAdapter` will be in
- * until a worker carrying the field is deployed, and it must be readable as such without refusing
- * anything.
+ * otherwise read exactly like a field every guest agrees on. It is the state `displayAdapter` sat in
+ * until the worker carrying it was deployed on 2026-09-23, and the state any field added here starts in,
+ * and it must be readable as such without refusing anything.
  */
 export const REPORTED_ONLY = [
-  // Measured on the live fleet 2026-09-23T06:55Z, read from every guest's own `/health`: workers 2-6 on
-  // v24.19.0 and workers 7-11 on v24.20.0, every other reported field identical across all ten. The split
-  // is permanent by construction rather than by accident -- `packages.yml` resolved "whatever is current
-  // LTS today" fresh on every run and never upgraded an existing install -- so two boxes provisioned
-  // either side of a Node release diverge for ever. The pin in `defaults/main.yml` is what converges them.
-  { path: "nodeVersion", why: "the guest's Node runtime is recorded into every corpus record " +
-      "(`export-screenreader-dataset.mjs`) and reported by every `/health`, so a split fleet writes two " +
-      "runtimes into one corpus. NOT a gate: 2,870 records of the training corpus are already mixed on " +
-      "it -- 1,266 on v24.19.0 against 1,564 on v24.20.0 -- and every published acceptance number was " +
-      "measured across that mixture (#2063)" },
   // `ceo`'s fold-in on the same row: "nothing in this repo reports the display ADAPTER either ... whatever
   // shape this row lands for 'reported, visible, not yet a gate', the adapter belongs in it rather than in
   // a fourth row." It is the seam `displayMode` sat on -- workers 2-6 on the Intel adapter, 7-11 on
@@ -132,9 +143,11 @@ export const REPORTED_ONLY = [
   // from the driver VERSION, which `ceo` ruled on #1567 does not split the fleet.
   { path: "displayAdapter", why: "the adapter is what decides whether a pinned display mode can be held " +
       "at all -- workers 7-11 fell back to Microsoft's Basic Display Adapter and captured at 640x480 " +
-      "under a `provisionRevision` identical to their peers'. NOT a gate: no deployed worker reports it " +
-      "yet, so it reads unknown across the fleet until one does, and a gate would refuse every capture " +
-      "immediately (#2063)" },
+      "under a `provisionRevision` identical to their peers'. NOT a gate, and no longer because nobody " +
+      "reports it: 10 of 10 guests report it since 2026-09-23T18:02Z, reading `Intel(R) UHD Graphics " +
+      "630` on nine and `Intel(R) HD Graphics 630` on one. That single letter is a real hardware " +
+      "difference rather than a driver fallback, so no provisioning run can converge it and a gate " +
+      "would refuse that guest for ever (#2063, reading on #2170)" },
 ];
 
 /**
