@@ -189,6 +189,22 @@ const wholeFields = (guests: number) => ({
 const reportedBy = ({ field, guests, of }: { field: string, guests: number, of: number }) =>
   wholeCoverage(of).map((entry) => (entry.field === field ? { ...entry, reported: guests } : entry));
 
+/**
+ * THE FIELD DENOMINATORS, DERIVED -- #1561 is why this is not three literals.
+ *
+ * The `#1997` test one screen down already argues the case and applies it to its own name loop: *"a test
+ * that listed the ten names here would be the same defect in a second place: adding a field would need
+ * this line edited, and an editor who forgot would get green."* The `k of N` denominators beside it were
+ * still typed out as `9 of 10` and `10 of 10`, so the file made the argument and then broke it — and
+ * adding an eleventh `MUST_MATCH` field turned three green assertions red for a reason that has nothing
+ * to do with what any of them is about.
+ *
+ * Green-on-a-stale-list was never the risk here; the risk is the editor who makes it green again by
+ * typing `11`, which restores the same trap one field later.
+ */
+const EVERY_FIELD = new RegExp(`agree on ${MUST_MATCH.length} of ${MUST_MATCH.length} field\\(s\\)`);
+const ALL_BUT_ONE_FIELD = new RegExp(`agree on ${MUST_MATCH.length - 1} of ${MUST_MATCH.length} field\\(s\\)`);
+
 /** `fleetConsistency`'s own TRUE-IF-ANYBODY lists, so the fixtures carry what the real caller passes. */
 const namesExcept = (field: string) => MUST_MATCH.map(({ path }) => path).filter((p) => p !== field);
 
@@ -227,7 +243,7 @@ test("#1997: a field NO guest reported is named as not compared, never folded in
       coverage: reportedBy({ field: "displayMode", guests: 0, of: 10 }) } });
   assert.match(line, /NOT compared on any guest[^:]*: displayMode/,
     "named, so a reader knows which deploy would close it");
-  assert.match(line, /agree on 9 of 10 field\(s\)/, "and the agreement is stated over NINE, not ten");
+  assert.match(line, ALL_BUT_ONE_FIELD, "and the agreement is stated over one field fewer than the list");
 
   // The other direction: a fully-reporting fleet must not carry the caveat at all, or the line cries wolf
   // on every healthy reading and gets skipped.
@@ -267,7 +283,7 @@ test("#2034: a partly-reported field is OUT of the agreement list and reported w
   assert.ok(agreed !== undefined, `no agreement list to read in: ${line}`);
   assert.ok(!agreed.includes("displayMode"),
     `a field 1 of 3 guests reported is named inside the agreement list: ${line}`);
-  assert.match(line, /agree on 9 of 10 field\(s\)/, "and the agreement is stated over NINE, not ten");
+  assert.match(line, ALL_BUT_ONE_FIELD, "and the agreement is stated over one field fewer than the list");
   assert.match(line, /reported by only SOME of the compared guests[^:]*: displayMode \(1 of 3 reported it\)/,
     "REPORTED with its count, not silently dropped -- a field missing from the list reads as one that was "
     + "not compared at all, which is #1997's clause and a different fact");
@@ -294,7 +310,7 @@ test("#2034: every guest reporting it and ONE guest reporting it produce differe
   // the whole case must also be the RIGHT string -- displayMode named as agreed only when all three
   // guests reported it.
   assert.ok(whole.includes("displayMode"), whole);
-  assert.match(whole, /agree on 10 of 10 field\(s\)/,
+  assert.match(whole, EVERY_FIELD,
     "the healthy reading must not acquire a caveat, or the line cries wolf and gets skipped");
   assert.ok(!whole.includes("reported by only SOME"), whole);
 });
