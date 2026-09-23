@@ -76,14 +76,124 @@ test("display.yml fetches the driver with win_get_url's own checksum, never inst
     + "URL without it would install whatever bytes are actually served, not the value #1782 verified");
 });
 
+/**
+ * One task of `display.yml`, from its `- name:` line to the next one -- because the whole file cannot
+ * answer "WHICH task says this".
+ *
+ * The same lesson `scriptParts` records one level down, and #2065 is where it bit this half of the file:
+ * every clause below is about which of two ADJACENT tasks carries a condition, and a match against
+ * `DISPLAY_TASK` is satisfied by either. `when: not display_driver_ok` appears on six tasks here; an
+ * assertion that the proof read is not gated on the installer's exit code has to read the proof read.
+ *
+ * Comment lines are kept: this file's conditions are not in its comments, and stripping them would be
+ * work for nothing. The block ends at the next task's `- name:` at column 0, which is the only place
+ * that string appears unindented.
+ */
+function taskBlock(name: string): string {
+  const at = DISPLAY_TASK.indexOf(`- name: ${name}`);
+  assert.notEqual(at, -1, `the task '${name}' is gone from display.yml -- this test examines nothing`);
+  const next = DISPLAY_TASK.indexOf("\n- name: ", at + 1);
+  return next === -1 ? DISPLAY_TASK.slice(at) : DISPLAY_TASK.slice(at, next);
+}
+
 test("display.yml treats installer exit codes 17/18 (shutdown required) as failures, never as success", () => {
   // The package's own installation_readme.txt: 2/14 mean a software-controlled restart, safe for
   // win_reboot; 17/18 mean the box is shutting down and, per the same readme, may need a human to press
   // its power button. This fleet is bare-metal with nobody guaranteed on site -- a green result here must
   // not be the thing that leaves a worker dark.
-  assert.match(DISPLAY_TASK, /failed_when:\s*display_driver_install\.rc not in \[0,\s*2,\s*14\]/,
+  //
+  // #2065 changed the SHAPE of this line and not this claim: it used to read `rc not in [0, 2, 14]`,
+  // which caught 17/18 as a side effect of catching everything unlisted. It now names them, so what the
+  // install task fails on is what somebody decided it should fail on.
+  const install = taskBlock("Install it silently, without a reboot the installer sprung itself");
+  assert.match(install, /failed_when:\s*display_driver_install\.rc in \[17,\s*18\]/,
     "display.yml's install task no longer refuses exit codes 17/18 -- a shutdown-required outcome would "
-    + "read as success");
+    + "read as success, and this fleet has nobody on site to press a power button");
+  // AND IT STILL FAILS BEFORE ANY REBOOT HANDLING. `failed_when` on the install task is what stops the
+  // host; the reboot task below it is the first thing that would act on a 17/18 box, so the order of
+  // these two in the file is the claim, not just the presence of the line above.
+  assert.ok(DISPLAY_TASK.indexOf("- name: Install it silently") <
+    DISPLAY_TASK.indexOf("- name: Reboot if the install asked for a software-controlled restart"),
+    "the install task must come BEFORE the reboot task -- 17/18 has to end the play on that host before "
+    + "anything tries to restart a box that is already shutting itself down");
+});
+
+test("an installer exit code nobody has decoded does not, by itself, remove the host from the play", () => {
+  // #2065, and it is measured rather than argued. `failed_when` read `rc not in [0, 2, 14]` until
+  // 2026-09-23, so UNDOCUMENTED and FAILED were the same word: live on the fleet the installer returned
+  // `rc 1014` on all five of a11y-worker-7..11, all five left the play at the install, and the adapter
+  // proof below -- the ONLY task that could say what the install achieved -- never ran on any of them.
+  // `orchestrator`'s read on 2026-09-23T07:46Z: all five on `Intel Corporation 31.0.101.2141`,
+  // `CM_PROB_NONE`. The install had worked. Nothing in the play could say so.
+  const install = taskBlock("Install it silently, without a reboot the installer sprung itself");
+  const failedWhen = /failed_when:([^\n]*)/.exec(install)?.[1];
+  assert.ok(failedWhen, "the install task has no failed_when at all -- win_command would then fail on "
+    + "every non-zero rc, which is the defect this test is about with the default doing it");
+  assert.doesNotMatch(failedWhen!, /not in/,
+    "the install task's failed_when must name the codes that FAIL, never the ones that pass: a deny-list "
+    + "of successes spells 'undocumented' and 'dangerous' the same word, and `rc 1014` is what that cost");
+  // The positive control for the line above, and the reason it is not just "nothing fails here": the
+  // reboot task next door still reads the DOCUMENTED-success codes off the same register, so a mutation
+  // that emptied every exit-code condition in this file is red here rather than vacuously green.
+  assert.match(taskBlock("Reboot if the install asked for a software-controlled restart"),
+    /display_driver_install\.rc in \[2,\s*14\]/,
+    "the reboot task must still fire only on 2/14, the readme's software-controlled restart codes");
+});
+
+test("an undocumented exit code is reported by name and by number, never folded into the documented ones", () => {
+  // Not failing it is only half. A code nobody has decoded that passes SILENTLY is the same defect in the
+  // other direction -- it would read as a clean install in the play's own output. So it is said out loud,
+  // with the number in it, and the reader is sent to the adapter read that follows.
+  const report = taskBlock(
+    "An exit code nobody has decoded is UNKNOWN, and is said out loud rather than folded into success");
+  assert.match(report, /when:\s*not display_driver_ok and display_driver_install\.rc not in \[0,\s*2,\s*14,\s*17,\s*18\]/,
+    "the undocumented-code report must fire exactly on a code outside the readme's documented set, and "
+    + "only where the driver half touched this host");
+  assert.match(report, /\{\{\s*display_driver_install\.rc\s*\}\}/,
+    "the report must carry the actual number -- 'an undocumented code' without the code sends the next "
+    + "reader back to the box to find out which one, which is the eleven hours #2065 records");
+  assert.match(report, /UNDOCUMENTED/,
+    "the report must say UNDOCUMENTED in the message a reader lands on: 'unknown' and 'failed' printing "
+    + "the same word is the defect, and so is 'unknown' printing nothing");
+});
+
+test("the adapter proof read is NOT gated behind the install's own exit code", () => {
+  // THE LOAD-BEARING CLAUSE OF #2065. The proof read is the only thing in this role that measures what
+  // the install achieved; gating it behind the install's own verdict leaves that verdict unchecked on
+  // exactly the hosts where it is in doubt. It is gated on ONE thing -- whether the driver half touched
+  // this host at all -- so workers 2-6 stay untouched and every host that got an install gets measured.
+  const proof = taskBlock("Refuse to call this provisioned unless the adapter reads clean afterwards");
+  const when = /^\s*when:([^\n]*)/m.exec(proof)?.[1];
+  assert.ok(when, "the adapter proof task has no when: at all -- it would then run on workers 2-6, which "
+    + "this role must never touch");
+  assert.equal(when!.trim(), "not display_driver_ok",
+    "the adapter proof's when: must be `not display_driver_ok` and nothing else -- any mention of the "
+    + "install's result makes the measurement conditional on the claim it exists to check");
+  // The positive control: `display_driver_install` IS read elsewhere in this file, so this assertion
+  // distinguishes 'this task does not gate on it' from 'no task in the file mentions it'. Deleting the
+  // register entirely would leave the clause above green and this one red.
+  assert.match(DISPLAY_TASK, /register:\s*display_driver_install/,
+    "positive control for the clause above -- display_driver_install must still be registered somewhere, "
+    + "or the proof read is 'ungated' only because there is nothing left to gate on");
+  // And it must still be the thing that FAILS a host. Not-gated and not-deciding would move the verdict
+  // from a declaration to nowhere at all.
+  assert.match(proof, /\$Ansible\.Failed = \$true/,
+    "the adapter proof must still fail the host whose adapter does not read clean -- it is the verdict "
+    + "now, not a report");
+  assert.match(proof, /CM_PROB_NONE/,
+    "and it must still be CM_PROB_NONE on an Intel driver that it checks for");
+});
+
+test("the adapter proof read comes AFTER the install, so what it measures is the install's result", () => {
+  // Reachability is half the claim; order is the other half. A proof read moved above the install would
+  // satisfy every clause in the test above while measuring the state the install was about to change.
+  const installAt = DISPLAY_TASK.indexOf("- name: Install it silently");
+  const proofAt = DISPLAY_TASK.indexOf(
+    "- name: Refuse to call this provisioned unless the adapter reads clean afterwards");
+  assert.ok(installAt >= 0 && proofAt >= 0, "the install or the adapter proof task is gone from display.yml");
+  assert.ok(proofAt > installAt,
+    "the adapter proof must come AFTER the install -- read before it, it reports the fault the install "
+    + "was run to fix and calls that the install's outcome");
 });
 
 test("display.yml's final debug never reads display_driver_proof.output unconditionally", () => {
