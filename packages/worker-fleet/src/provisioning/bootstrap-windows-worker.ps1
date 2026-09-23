@@ -121,13 +121,35 @@ function Get-Archive($url, $outFile) {
 $tmp = Join-Path $env:TEMP 'a11y-bootstrap'
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
+# THE NODE BUILD THIS FLEET RUNS -- pinned, and PINNED EQUAL to `roles/worker/defaults/main.yml`'s
+# `worker_node_version`, which is the tested copy. `node-pin-parity.test.ts` refuses a change to one
+# without the other, for `edge-pin-parity.test.ts`'s reasons: the bootstrap runs on a box with no
+# Ansible, before the fleet can reach it, so the copy cannot be deleted or derived -- only pinned.
+#
+# IT USED TO RESOLVE THE CURRENT LTS FROM nodejs.org, exactly as `packages.yml` did, and that is how a
+# fleet ends up on two runtimes: a resolve pins within a run and never across runs, and a box keeps
+# whatever it first received. Measured 2026-09-23T06:55Z: workers 2-6 on v24.19.0, workers 7-11 on
+# v24.20.0, with every other reported field identical (#2063).
+$NodeVersion = if ($env:A11Y_NODE_VERSION) { $env:A11Y_NODE_VERSION } else { 'v24.20.0' }
+# Per ARCHITECTURE, because the zip differs per architecture and one hash could only verify one of them.
+$NodeSha = @{
+  'x64'   = '6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba'
+  'arm64' = '31c6799744de8a54601643098040c68c3697e56c94e407d61d0e5fa5f34191d7'
+}
+
 # Check the INSTALL PATH, not just the command. `Get-Command node` consults this session's PATH,
 # and a session that started before the machine PATH was updated -- or a fresh account's first
 # logon -- does not have it, so a perfectly good install looks absent and gets reinstalled.
 $nodeHome = Join-Path $env:ProgramFiles 'nodejs'
 $nodeExe  = Join-Path $nodeHome 'node.exe'
-if ((Get-Command node -ErrorAction SilentlyContinue) -or (Test-Path $nodeExe)) {
-  OK "node already present ($(& $(if (Test-Path $nodeExe) { $nodeExe } else { 'node' }) --version))"
+# THE VERSION, NOT THE PRESENCE. "is there a node" can only ever answer once, so a box that came up on
+# the wrong build keeps it for ever -- which is the drift the pin above exists to end. Same gate the role
+# now uses, same reason.
+$haveNode = if (Test-Path $nodeExe) { (& $nodeExe --version).Trim() }
+            elseif (Get-Command node -ErrorAction SilentlyContinue) { (& node --version).Trim() }
+            else { '(absent)' }
+if ($haveNode -eq $NodeVersion) {
+  OK "node already present ($haveNode, the pinned build)"
   # REPAIR the ACL even when we did not install it. An existing install may carry the permissions
   # of whichever account put it there -- see the Move-Item note below -- and a re-run that skips
   # the install would otherwise never fix a box that is already broken. Idempotent, so it costs
@@ -140,12 +162,16 @@ if ((Get-Command node -ErrorAction SilentlyContinue) -or (Test-Path $nodeExe)) {
   }
 }
 else {
-  Record 'node' 'installed'
-  $idx = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json' -UseBasicParsing
-  $rel = $idx | Where-Object { $_.lts -and $_.files -contains "win-$nodeArch-zip" } | Select-Object -First 1
-  if (-not $rel) { throw "no Node LTS with a win-$nodeArch build found" }
+  Record 'node' $(if ($haveNode -eq '(absent)') { 'installed' } else { "upgraded from $haveNode" })
+  if (-not $NodeSha.ContainsKey($nodeArch)) { throw "no pinned Node checksum for architecture $nodeArch" }
   $zip = Join-Path $tmp 'node.zip'
-  Get-Archive "https://nodejs.org/dist/$($rel.version)/node-$($rel.version)-win-$nodeArch.zip" $zip
+  Get-Archive "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-win-$nodeArch.zip" $zip
+  # VERIFIED BEFORE IT IS UNPACKED. The pin is a claim about BYTES; without this it is a claim about a
+  # hostname, which is the reason `edge-version.yml` pins its MSI by checksum too.
+  $got = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
+  if ($got -ne $NodeSha[$nodeArch]) {
+    throw "node-$NodeVersion-win-$nodeArch.zip hashed $got, expected $($NodeSha[$nodeArch]) -- refusing to install unverified bytes"
+  }
   Expand-Archive -Path $zip -DestinationPath $tmp -Force
   $src = Get-ChildItem $tmp -Directory -Filter "node-*-win-$nodeArch" | Select-Object -First 1
   # Named, because `$src.FullName` on a $null gives the same useless "null-valued expression"
@@ -191,7 +217,7 @@ else {
   icacls $dest /reset /T /C /Q | Out-Null
   OK "permissions on $dest reset to inherit (a Move-Item keeps the SOURCE acl)"
 
-  OK "node installed to $dest ($($rel.version))"
+  OK "node installed to $dest ($NodeVersion)"
 }
 
 if (Get-Command git -ErrorAction SilentlyContinue) { OK "git already present"; Record 'git' 'already present' }

@@ -5,7 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fleetConsistency, describeMismatches, MUST_MATCH, POLICY_MUST_MATCH } from "./fleet-consistency.mjs";
+import { fleetConsistency, describeMismatches, describeReportedOnly, MUST_MATCH, POLICY_MUST_MATCH,
+  REPORTED_ONLY } from "./fleet-consistency.mjs";
 
 /**
  * THE FIXTURE ADDRESSES, BUILT FROM OCTETS. #63's history purge replaced every RFC 1918 literal in the
@@ -436,4 +437,125 @@ test("#2019: coverage is a row per ASKED field, so nothing on it is absent from 
   assert.ok(fields.coverage.length > 0, "the positive control: a deepEqual of two empty lists passes");
   assert.ok(fields.coverage.every(({ reported, asked }) => reported === asked),
     "and a fully-reporting fleet has every field at N of N -- the control for the partial readings above");
+});
+
+// --- #2063: THE THIRD CHANNEL — compared, named, and gating nothing ---
+
+test("#2063: THE PAIR — a fleet split on nodeVersion is NAMED, and one agreeing on it is not", () => {
+  // THE SPLIT, measured on the live fleet 2026-09-23T06:55Z: workers 2-6 on v24.19.0, workers 7-11 on
+  // v24.20.0, every other reported field identical across all ten. `fleet:status` printed `fleet
+  // CONSISTENT across 10 of 10 -- these workers are interchangeable for capture` over it, because the
+  // field it differed on was in no list this function had.
+  //
+  // BOTH DIRECTIONS IN ONE TEST ON PURPOSE. An exclusion assertion alone -- "it is not a mismatch" --
+  // passes on a comparison that compares nothing, which is this row's own mutation 1. The agreeing fleet
+  // is what proves the naming is a reading rather than a constant.
+  const split = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.20.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
+  ]);
+  const agreed = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.19.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
+  ]);
+
+  assert.deepEqual(split.reportedOnly.map((d) => [d.field, d.state]), [["nodeVersion", "drifted"]],
+    "the split is named, and only the field that actually split");
+  assert.deepEqual(agreed.reportedOnly, [],
+    "and a fleet that agrees on it reports nothing — a channel that always names its fields would pass "
+    + "the assertion above while reading nothing off the guests");
+
+  // LOCATED, not just detected, which is `describeMismatches`'s own rule one channel over.
+  const [line] = describeReportedOnly(split.reportedOnly);
+  assert.match(line, /nodeVersion: \.4=v24\.19\.0 \.5=v24\.20\.0/);
+});
+
+test("#2063: THE RULING — a reported-only split is `consistent: true` and reaches NO gate", () => {
+  // `ceo`, 2026-09-23: "`nodeVersion` is NOT a capture gate, and this row must not make it one in its
+  // first step." The corpus is already mixed on it -- 2,870 records, 1,266 on v24.19.0 against 1,564 on
+  // v24.20.0, since at least 2026-09-12 -- so gating on it today would refuse every capture on a
+  // condition every published acceptance number was measured across.
+  //
+  // THERE ARE EXACTLY TWO GATING CHANNELS and this asserts against both, because #2047 made the second
+  // one a refusal too: `capture-fleet-guard` exits 3 on a non-empty `mismatches` AND on any row of
+  // `fields.coverage` where `reported < asked`.
+  const { consistent, mismatches, fields } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0" }),
+    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.20.0" }),
+  ]);
+  assert.equal(consistent, true, "a reported-only split must not read as an inconsistent fleet");
+  assert.deepEqual(mismatches, [], "and must not enter the channel that exits 3");
+  assert.ok(!fields.coverage.some(({ field }) => field === "nodeVersion"),
+    "nor the coverage channel, which #2047 made a refusal as well — a field there gates at ANY count");
+  assert.ok(!fields.compared.includes("nodeVersion") && !fields.unchecked.includes("nodeVersion"),
+    "and not on the lists those are derived from either");
+
+  // The positive control for those three exclusions: the same verdict DOES carry the gating fields, so
+  // the assertions above are reading a populated structure rather than an empty one.
+  assert.ok(fields.coverage.some(({ field }) => field === "browserVersion"));
+});
+
+test("#2063: a reported-only field NOBODY reports is `unreported`, not silence", () => {
+  // Clause 3 of the row, and the state `displayAdapter` is in on every guest until a worker carrying the
+  // field is deployed. `check()` skips an absent value, so silence here would put the field back in
+  // exactly the condition #1997 is about -- compared on nobody, indistinguishable from agreed on by
+  // everybody -- while a refusal would stop every capture in the project immediately.
+  const { consistent, reportedOnly } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0" }),
+    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.19.0" }),
+  ]);
+  assert.equal(consistent, true, "an unreported field refuses nothing");
+  assert.deepEqual(reportedOnly.map((d) => [d.field, d.state, d.reported, d.asked]),
+    [["displayAdapter", "unreported", 0, 2]],
+    "named with its count, so a reader can tell 0 of 2 from a field that agreed");
+  assert.match(describeReportedOnly(reportedOnly)[0], /not reported by any of 2 guests/);
+});
+
+test("#2063: a reported-only field only SOME guests report is named with its count", () => {
+  // The rolling-deploy reading, which for a GATING field is #2019's refusal and here is a sentence. It
+  // must not read as agreement on the strength of the one guest that answered -- the defect #2019 fixed
+  // on the other channel -- and it must not refuse the deploy that is mid-flight.
+  const { consistent, reportedOnly } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g5}:8765`),
+  ]);
+  assert.equal(consistent, true);
+  const adapter = reportedOnly.find((d) => d.field === "displayAdapter");
+  assert.deepEqual([adapter?.state, adapter?.reported, adapter?.asked], ["unreported", 1, 2]);
+  assert.match(describeReportedOnly([adapter!])[0], /\.4=Intel\(R\) UHD Graphics 630 \(1 of 2 guests reported it\)/);
+});
+
+test("#2063: EVERY REPORTED_ONLY FIELD IS ONE THE WORKER ACTUALLY REPORTS", () => {
+  // `EVERY MUST_MATCH FIELD…` above, for the second channel, and it matters MORE here: a typo in
+  // `MUST_MATCH` at least shows up as a permanent coverage gap that refuses a run, while a typo here is
+  // a field that reads `unreported` for ever and looks exactly like a fleet that has not been deployed.
+  const server = readFileSync(new URL("../../nvda-worker/src/server.mjs", import.meta.url), "utf8");
+  const start = server.indexOf("function runtimeEnvironment() {");
+  const end = server.indexOf("function provisionRevision() {");
+  assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
+  const reported = server.slice(start, end);
+
+  const missing = REPORTED_ONLY.map((f) => f.path).filter((path) => !reported.includes(`${path}:`));
+  assert.deepEqual(missing, [], "REPORTED_ONLY names fields the worker's /health environment never sends");
+
+  // The positive control for the line above, the same one the MUST_MATCH test carries: the matcher has
+  // to be able to MISS, or an empty list proves nothing.
+  assert.ok(!reported.includes("displayAdapterThatIsNotReported:"),
+    "the source matcher matches names that are not there, so the assertion above proves nothing");
+});
+
+test("#2063: the two channels compare the same way — a reported-only field is not a second rule", () => {
+  // One reader, two consequences. If the channels compared differently, "reported by 1 of 10" would mean
+  // one thing in a refusal and another in a report, and no reader could tell which was right. The pair
+  // below is the same fleet shape on a gating field and on a reported-only one.
+  const guests = (over: Record<string, unknown>) => [
+    guest(`http://${IP.g4}:8765`, over), { worker: `http://${IP.g5}:8765`, environment: {}, policy: undefined },
+  ];
+  const gating = fleetConsistency(guests({ displayMode: "1024x768" }));
+  const noted = fleetConsistency(guests({ nodeVersion: "v24.19.0" }));
+  assert.deepEqual(gating.fields.coverage.find((c) => c.field === "displayMode"),
+    { field: "displayMode", reported: 1, asked: 2 });
+  const same = noted.reportedOnly.find((d) => d.field === "nodeVersion");
+  assert.deepEqual([same?.reported, same?.asked], [1, 2],
+    "the same one-of-two reading, counted identically — only what is DONE with it differs");
 });

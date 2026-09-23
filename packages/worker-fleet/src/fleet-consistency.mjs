@@ -88,6 +88,56 @@ export const MUST_MATCH = [
 ];
 
 /**
+ * THE THIRD CHANNEL: fields that are COMPARED AND NAMED, and that gate nothing — #2063.
+ *
+ * `MUST_MATCH` above is a capture gate in both its channels. A disagreement there sets `consistent:
+ * false` and `capture-fleet-guard` exits 3; a field any compared guest fails to report lands in
+ * `fields.coverage` and, since #2047, exits 3 as well. So a field that belongs in the REPORT but must not
+ * refuse a run has nowhere to go in either — and adding it to one of them anyway is not a small
+ * mis-filing: `nodeVersion` is reported by 10 of 10 guests today, so it would refuse every capture during
+ * the next rolling deploy, and `displayAdapter` is reported by nobody, so it would refuse every capture
+ * immediately.
+ *
+ * `ceo` ruled the order on #2063, 2026-09-23: **report it, then pin provisioning so the fleet converges,
+ * and only then may it join `MUST_MATCH`** (that last step is #2170). The reason is measured rather than
+ * cautious — the corpus is ALREADY mixed on `nodeVersion` and has been since at least 2026-09-12, so
+ * gating on it today would refuse every capture on a condition every published number was measured
+ * across.
+ *
+ * So these fields are compared exactly as the gating ones are, and their drift is named on the verdict
+ * line with each guest's value — but they contribute to NEITHER `mismatches` NOR `fields.coverage`, which
+ * are the only two things any gate reads. A fleet differing on one of them is `consistent: true`.
+ *
+ * A field NOBODY reports is `unreported` here rather than silent, which is the same distinction #1997
+ * drew for the gating fields: a field compared on nobody draws no values to disagree about and would
+ * otherwise read exactly like a field every guest agrees on. It is the state `displayAdapter` will be in
+ * until a worker carrying the field is deployed, and it must be readable as such without refusing
+ * anything.
+ */
+export const REPORTED_ONLY = [
+  // Measured on the live fleet 2026-09-23T06:55Z, read from every guest's own `/health`: workers 2-6 on
+  // v24.19.0 and workers 7-11 on v24.20.0, every other reported field identical across all ten. The split
+  // is permanent by construction rather than by accident -- `packages.yml` resolved "whatever is current
+  // LTS today" fresh on every run and never upgraded an existing install -- so two boxes provisioned
+  // either side of a Node release diverge for ever. The pin in `defaults/main.yml` is what converges them.
+  { path: "nodeVersion", why: "the guest's Node runtime is recorded into every corpus record " +
+      "(`export-screenreader-dataset.mjs`) and reported by every `/health`, so a split fleet writes two " +
+      "runtimes into one corpus. NOT a gate: 2,870 records of the training corpus are already mixed on " +
+      "it -- 1,266 on v24.19.0 against 1,564 on v24.20.0 -- and every published acceptance number was " +
+      "measured across that mixture (#2063)" },
+  // `ceo`'s fold-in on the same row: "nothing in this repo reports the display ADAPTER either ... whatever
+  // shape this row lands for 'reported, visible, not yet a gate', the adapter belongs in it rather than in
+  // a fourth row." It is the seam `displayMode` sat on -- workers 2-6 on the Intel adapter, 7-11 on
+  // Microsoft's Basic Display Adapter after a driver install failed rc 1014 -- and it is a DIFFERENT field
+  // from the driver VERSION, which `ceo` ruled on #1567 does not split the fleet.
+  { path: "displayAdapter", why: "the adapter is what decides whether a pinned display mode can be held " +
+      "at all -- workers 7-11 fell back to Microsoft's Basic Display Adapter and captured at 640x480 " +
+      "under a `provisionRevision` identical to their peers'. NOT a gate: no deployed worker reports it " +
+      "yet, so it reads unknown across the fleet until one does, and a gate would refuse every capture " +
+      "immediately (#2063)" },
+];
+
+/**
  * One field the guests disagree about, and the guests' values for it.
  *
  * Named once because it is produced by `fleetConsistency` and consumed by `describeMismatches`, and the
@@ -128,65 +178,88 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  */
 
 /**
- * Compare guests field by field.
+ * One reported-only field that has something to say, and WHICH thing it is saying — #2063.
  *
- * @param {Array<{worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}>} guests
- * @returns {{consistent: boolean, mismatches: Mismatch[], compared: number, fields: FieldCoverage}}
- *   `compared` is how many guests the verdict is actually ABOUT -- #920. A guest with no `environment`
- *   and no `policy` is dropped below before comparing, so it is not the length of what was passed in,
- *   and a caller that reports `consistent` without it is stating agreement over a set it cannot name.
- *   `fields` is that same question one axis over: WHICH fields the verdict is about -- #1997.
+ * `drifted` is the guests giving more than one value; `unreported` is some or all of them giving none.
+ * Two states rather than a boolean because the REMEDY differs and the report has to name it: drift sends
+ * a reader to the provisioning pin, silence sends them to the worker deploy. Neither is a refusal.
+ *
+ * It carries `reported`/`asked` for the same reason `FieldReporters` does — a count is what lets a reader
+ * tell 0 of 10 from 9 of 10 — and the values map for the reason `Mismatch` does: drift detected and not
+ * located is not actionable.
+ *
+ * @typedef {{field: string, why: string, values: Record<string, unknown>, reported: number,
+ *   asked: number, state: "drifted" | "unreported"}} ReportedDrift
  */
-export function fleetConsistency(guests) {
-  const present = (guests ?? []).filter((g) => g && (g.environment || g.policy));
-  // One guest is trivially consistent with itself, and zero is not a fleet. Neither is a finding, and
-  // neither is a field nothing compared: with nobody to compare against, coverage is not a question yet.
-  if (present.length < 2) {
-    // A FRESH object rather than a shared constant: this is returned to a caller, and one shared literal
-    // is one `push` away from a coverage list that grows across unrelated readings.
-    return { consistent: true, mismatches: [], compared: present.length,
-      fields: { compared: [], unchecked: [], coverage: [] } };
-  }
 
+/**
+ * ONE FIELD READ ACROSS THE FLEET, before anybody decides what it means.
+ *
+ * Split out from `fleetConsistency` when the third channel arrived (#2063), because the READING and the
+ * CONSEQUENCE are two things and only the second differs between the channels: `MUST_MATCH` turns a
+ * reading into a mismatch and a coverage row, `REPORTED_ONLY` turns the same reading into a named drift
+ * that gates nothing. One reader means the two channels cannot drift apart in how they compare — a
+ * second copy of this loop is how a "reported-only" field would end up counted differently from a gating
+ * one and nobody would know which was right.
+ *
+ * @typedef {{worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}} Guest
+ * @typedef {{field: string, why: string, values: Record<string, unknown>, reported: number, asked: number}} Reading
+ *
+ * @param {Guest[]} present
+ * @param {{field: string, why: string, source: (guest: Guest) => Record<string, unknown> | undefined,
+ *   key: string}} ask `source` is the BLOCK this field lives in, not the value: coverage has to tell
+ *   "the guest did not report this field" from "this caller never collected that block at all", and only
+ *   the block answers the second
+ * @returns {Reading}
+ */
+function readField(present, { field, why, source, key }) {
+  /** @type {Record<string, unknown>} */
+  const values = {};
+  // THE REPORTER COUNT IS COUNTED, NEVER READ OFF `values` -- #2019, and #2018 is why. The map is keyed
+  // by worker name, and a caller that supplies guests without one collapses every guest onto a single
+  // `undefined` key -- which `capture-real-pages.mjs` does -- so `Object.keys(values).length` reads 1
+  // for any number of reporting guests, understating coverage in exactly the cases a coverage number
+  // exists for. `asked` counts the guests that carried the BLOCK; `reported` counts the ones that
+  // carried a VALUE in it; both are incremented on the guest, so neither can be collapsed by a key.
+  let asked = 0;
+  let reported = 0;
+  for (const guest of present) {
+    const block = source(guest);
+    // A BLOCK THIS CALLER DID NOT COLLECT IS A FACT ABOUT THE PROBE, NOT THE FLEET. `/health` carries
+    // no policy, so every production caller passes `policy: undefined`; calling those fields
+    // "compared on nobody" would report a permanent gap on an axis nobody asked about, and drown the
+    // one this list exists to surface.
+    if (block === undefined || block === null) continue;
+    asked += 1;
+    const value = block[key];
+    // Absent is not a mismatch: an older worker that does not report a field must not be flagged
+    // against newer ones. Only DIFFERING known values are evidence of drift.
+    if (value !== undefined && value !== null) {
+      reported += 1;
+      values[guest.worker] = value;
+    }
+  }
+  return { field, why, values, reported, asked };
+}
+
+/** How many distinct values the guests actually gave for one field. @param {Reading} reading */
+function distinctValues({ values }) {
+  return new Set(Object.values(values)).size;
+}
+
+/**
+ * THE GATING CONSEQUENCE of a set of readings: what disagrees, and what nobody was asked.
+ *
+ * @param {Reading[]} readings
+ * @returns {{mismatches: Mismatch[], fields: FieldCoverage}}
+ */
+function gateOn(readings) {
   /** @type {Mismatch[]} */
   const mismatches = [];
   /** @type {FieldCoverage} */
   const fields = { compared: [], unchecked: [], coverage: [] };
-  /**
-   * @param {string} field
-   * @param {string} why
-   * @param {(guest: {worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}) => Record<string, unknown> | undefined} source
-   *   the BLOCK this field lives in, not the value: coverage has to tell "the guest did not report this
-   *   field" from "this caller never collected that block at all", and only the block answers the second
-   * @param {string} key
-   */
-  const check = (field, why, source, key) => {
-    /** @type {Record<string, unknown>} */
-    const values = {};
-    // THE REPORTER COUNT IS COUNTED, NEVER READ OFF `values` -- #2019, and #2018 is why. The map is keyed
-    // by worker name, and a caller that supplies guests without one collapses every guest onto a single
-    // `undefined` key -- which `capture-real-pages.mjs` does -- so `Object.keys(values).length` reads 1
-    // for any number of reporting guests, understating coverage in exactly the cases a coverage number
-    // exists for. `asked` counts the guests that carried the BLOCK; `reported` counts the ones that
-    // carried a VALUE in it; both are incremented on the guest, so neither can be collapsed by a key.
-    let asked = 0;
-    let reported = 0;
-    for (const guest of present) {
-      const block = source(guest);
-      // A BLOCK THIS CALLER DID NOT COLLECT IS A FACT ABOUT THE PROBE, NOT THE FLEET. `/health` carries
-      // no policy, so every production caller passes `policy: undefined`; calling those fields
-      // "compared on nobody" would report a permanent gap on an axis nobody asked about, and drown the
-      // one this list exists to surface.
-      if (block === undefined || block === null) continue;
-      asked += 1;
-      const value = block[key];
-      // Absent is not a mismatch: an older worker that does not report a field must not be flagged
-      // against newer ones. Only DIFFERING known values are evidence of drift.
-      if (value !== undefined && value !== null) {
-        reported += 1;
-        values[guest.worker] = value;
-      }
-    }
+  for (const reading of readings) {
+    const { field, why, values, reported, asked } = reading;
     // A FIELD NO GUEST REPORTED IS CANNOT ASK, NOT ALL AGREE. One value from one guest still counts as
     // compared -- that is the rolling-deploy case the skip above is for, and it is a different claim
     // from nobody having been asked at all. How MANY reported it is a third claim again, and it goes on
@@ -196,15 +269,114 @@ export function fleetConsistency(guests) {
       (reported > 0 ? fields.compared : fields.unchecked).push(field);
       fields.coverage.push({ field, reported, asked });
     }
-    if (new Set(Object.values(values)).size > 1) mismatches.push({ field, why, values });
-  };
-
-  for (const { path, why } of MUST_MATCH) check(path, why, (g) => g.environment, path);
-  for (const name of POLICY_MUST_MATCH) {
-    check(`edgePolicy.${name}`, "guests with different browser behaviour are not interchangeable",
-      (g) => g.policy, name);
+    if (distinctValues(reading) > 1) mismatches.push({ field, why, values });
   }
-  return { consistent: mismatches.length === 0, mismatches, compared: present.length, fields };
+  return { mismatches, fields };
+}
+
+/**
+ * THE REPORTED-ONLY CONSEQUENCE: the same readings, as something to SAY rather than something to refuse.
+ *
+ * A field the guests agree on yields NOTHING, and that is the half of this that a test can most easily
+ * lose. `drifted` and `unreported` are both findings; agreement is not, and an implementation that
+ * returned every reported-only field regardless would satisfy "the drift is named" while naming a fleet
+ * that has none.
+ *
+ * `asked === 0` yields nothing either, for the reason `gateOn` skips it: a block this caller never
+ * collected is a fact about the probe.
+ *
+ * @param {Reading[]} readings
+ * @returns {ReportedDrift[]}
+ */
+function driftOf(readings) {
+  return readings.flatMap((reading) => {
+    const state = driftState(reading);
+    return state === null ? [] : [{ ...reading, state }];
+  });
+}
+
+/**
+ * @param {Reading} reading
+ * @returns {"drifted" | "unreported" | null}
+ */
+function driftState(reading) {
+  if (distinctValues(reading) > 1) return "drifted";
+  // NOT REPORTED BY EVERYBODY WHO WAS ASKED, which covers #1997's nobody and #2019's some in one line --
+  // for a GATING field those are two refusals with different remedies, and here they are one sentence
+  // with the counts in it, because nothing is being refused.
+  if (reading.asked > 0 && reading.reported < reading.asked) return "unreported";
+  return null;
+}
+
+/**
+ * Compare guests field by field.
+ *
+ * @param {Guest[]} guests
+ * @returns {{consistent: boolean, mismatches: Mismatch[], compared: number, fields: FieldCoverage,
+ *   reportedOnly: ReportedDrift[]}}
+ *   `compared` is how many guests the verdict is actually ABOUT -- #920. A guest with no `environment`
+ *   and no `policy` is dropped below before comparing, so it is not the length of what was passed in,
+ *   and a caller that reports `consistent` without it is stating agreement over a set it cannot name.
+ *   `fields` is that same question one axis over: WHICH fields the verdict is about -- #1997.
+ *   `reportedOnly` is the third channel (#2063): compared, named, and part of NEITHER of the two above,
+ *   which is what makes it something to report rather than something to refuse.
+ */
+export function fleetConsistency(guests) {
+  const present = (guests ?? []).filter((g) => g && (g.environment || g.policy));
+  // One guest is trivially consistent with itself, and zero is not a fleet. Neither is a finding, and
+  // neither is a field nothing compared: with nobody to compare against, coverage is not a question yet.
+  if (present.length < 2) {
+    // A FRESH object rather than a shared constant: this is returned to a caller, and one shared literal
+    // is one `push` away from a coverage list that grows across unrelated readings.
+    return { consistent: true, mismatches: [], compared: present.length,
+      fields: { compared: [], unchecked: [], coverage: [] }, reportedOnly: [] };
+  }
+  /** @param {Guest} guest */
+  const environmentOf = (guest) => guest.environment;
+  const gated = [
+    ...MUST_MATCH.map(({ path, why }) =>
+      readField(present, { field: path, why, source: environmentOf, key: path })),
+    ...POLICY_MUST_MATCH.map((name) => readField(present, { field: `edgePolicy.${name}`,
+      why: "guests with different browser behaviour are not interchangeable",
+      source: (guest) => guest.policy, key: name })),
+  ];
+  const { mismatches, fields } = gateOn(gated);
+  const reportedOnly = driftOf(REPORTED_ONLY.map(({ path, why }) =>
+    readField(present, { field: path, why, source: environmentOf, key: path })));
+  return { consistent: mismatches.length === 0, mismatches, compared: present.length, fields,
+    reportedOnly };
+}
+
+/**
+ * One line per reported-only field that has something to say, in `describeMismatches`'s own shape.
+ *
+ * SEPARATE FROM `describeMismatches` rather than a flag on it, because the two lines make different
+ * claims and a reader has to be able to tell them apart at a glance: that one says the fleet is not
+ * usable for a capture run, this one says the fleet is not identical and the run may proceed anyway.
+ * Folding them would put the ruling's own distinction behind a boolean argument.
+ *
+ * @param {ReportedDrift[]} drifts
+ * @returns {string[]}
+ */
+export function describeReportedOnly(drifts) {
+  return (drifts ?? []).map((drift) => `${drift.field}: ${reportedDetail(drift)} — ${drift.why}`);
+}
+
+/**
+ * NAMED WITH EACH GUEST'S VALUE where there is one, and with the count where there is not.
+ *
+ * `not reported by any of 10 guests` is a different finding from `.2=v24.19.0 .7=v24.20.0` and from
+ * `.2=v24.19.0 (1 of 10 guests reported it)`, and a reader acts differently on each: the first sends
+ * them to the worker code, the second to the boxes, the third to the deploy that has not finished.
+ *
+ * @param {ReportedDrift} drift
+ */
+function reportedDetail({ values, reported, asked, state }) {
+  const label = labelWorkers(Object.keys(values));
+  const detail = Object.entries(values).map(([worker, value]) => `${label.get(worker)}=${value}`).join(" ");
+  if (state === "drifted") return detail;
+  if (reported === 0) return `not reported by any of ${asked} guests`;
+  return `${detail} (${reported} of ${asked} guests reported it)`;
 }
 
 /**
