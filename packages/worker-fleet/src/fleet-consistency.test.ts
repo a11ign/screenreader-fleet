@@ -441,25 +441,30 @@ test("#2019: coverage is a row per ASKED field, so nothing on it is absent from 
 
 // --- #2063: THE THIRD CHANNEL — compared, named, and gating nothing ---
 
-test("#2063: THE PAIR — a fleet split on nodeVersion is NAMED, and one agreeing on it is not", () => {
-  // THE SPLIT, measured on the live fleet 2026-09-23T06:55Z: workers 2-6 on v24.19.0, workers 7-11 on
-  // v24.20.0, every other reported field identical across all ten. `fleet:status` printed `fleet
-  // CONSISTENT across 10 of 10 -- these workers are interchangeable for capture` over it, because the
-  // field it differed on was in no list this function had.
+test("#2063: THE PAIR — a fleet split on a reported-only field is NAMED, and one agreeing on it is not", () => {
+  // THE CHANNEL'S OWN READING, and its subject is `displayAdapter` because `nodeVersion` LEFT this
+  // channel at #2170 -- step 3 of `ceo`'s ruling, taken once the fleet converged on the pin. Driving
+  // this pair with `nodeVersion` now would assert that a runtime split is not a mismatch, which is the
+  // opposite of what this file asserts two tests down, and the ruling's exemption would be guarded by
+  // nothing.
+  //
+  // The adapter split is the live one, measured 2026-09-23T18:02Z: `Intel(R) UHD Graphics 630` on nine
+  // guests and `Intel(R) HD Graphics 630` on `.224`. One letter apart and real hardware, which is why it
+  // stays here rather than graduating -- no provisioning run converges it.
   //
   // BOTH DIRECTIONS IN ONE TEST ON PURPOSE. An exclusion assertion alone -- "it is not a mismatch" --
   // passes on a comparison that compares nothing, which is this row's own mutation 1. The agreeing fleet
   // is what proves the naming is a reading rather than a constant.
   const split = fleetConsistency([
-    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
-    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.20.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g4}:8765`, { displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g5}:8765`, { displayAdapter: "Intel(R) HD Graphics 630" }),
   ]);
   const agreed = fleetConsistency([
-    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
-    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.19.0", displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g4}:8765`, { displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g5}:8765`, { displayAdapter: "Intel(R) UHD Graphics 630" }),
   ]);
 
-  assert.deepEqual(split.reportedOnly.map((d) => [d.field, d.state]), [["nodeVersion", "drifted"]],
+  assert.deepEqual(split.reportedOnly.map((d) => [d.field, d.state]), [["displayAdapter", "drifted"]],
     "the split is named, and only the field that actually split");
   assert.deepEqual(agreed.reportedOnly, [],
     "and a fleet that agrees on it reports nothing — a channel that always names its fields would pass "
@@ -467,27 +472,61 @@ test("#2063: THE PAIR — a fleet split on nodeVersion is NAMED, and one agreein
 
   // LOCATED, not just detected, which is `describeMismatches`'s own rule one channel over.
   const [line] = describeReportedOnly(split.reportedOnly);
-  assert.match(line, /nodeVersion: \.4=v24\.19\.0 \.5=v24\.20\.0/);
+  assert.match(line, /displayAdapter: \.4=Intel\(R\) UHD Graphics 630 \.5=Intel\(R\) HD Graphics 630/);
+});
+
+test("#2170: THE PAIR — a fleet split on nodeVersion is a MISMATCH, and a converged one is consistent", () => {
+  // THE FIELD THAT MOVED, and the assertion this row exists to add. `ceo`'s ruling on #2063 ordered the
+  // three steps -- report it, pin provisioning so the fleet converges, only then may it gate -- and this
+  // is the third, unblocked by `orchestrator`'s reading at 2026-09-23T18:02Z: all ten guests on
+  // v24.20.0, read off their own `/health`, against the 5/5 split measured at 06:55Z the same morning.
+  //
+  // BOTH DIRECTIONS, for the reason the pair above states and this row's body restates: an exclusion
+  // test alone passes on a comparison that compares nothing. `v24.19.0` against `v24.20.0` is the split
+  // the fleet actually ran, not an invented one.
+  const split = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0" }),
+    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.20.0" }),
+  ]);
+  assert.equal(split.consistent, false, "two runtimes in one fleet write two populations into one corpus");
+  assert.deepEqual(split.mismatches.map((m) => m.field), ["nodeVersion"],
+    "and it is the gating channel it enters — the one `capture-fleet-guard` exits 3 on");
+  assert.ok(!split.reportedOnly.some((d) => d.field === "nodeVersion"),
+    "and NOT the reported-only channel as well: a field in both would be refused and exempted at once");
+  assert.match(describeMismatches(split.mismatches)[0], /nodeVersion: \.4=v24\.19\.0 \.5=v24\.20\.0/,
+    "located, not merely detected");
+
+  const converged = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.20.0" }),
+    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.20.0" }),
+  ]);
+  assert.equal(converged.consistent, true,
+    "and the fleet as it stands since 18:02Z still runs — a gate that refused the CONVERGED fleet is the "
+    + "harm the ruling's ordering exists to prevent, arriving one step late instead of early");
+  assert.deepEqual(converged.mismatches, []);
+  assert.deepEqual(converged.fields.coverage.find((c) => c.field === "nodeVersion"),
+    { field: "nodeVersion", reported: 2, asked: 2 },
+    "and it is on the COVERAGE channel now too, which is #2047's second refusal: a guest that stops "
+    + "reporting it refuses the run. `capture-fleet-guard.test.ts` pins that consequence.");
 });
 
 test("#2063: THE RULING — a reported-only split is `consistent: true` and reaches NO gate", () => {
-  // `ceo`, 2026-09-23: "`nodeVersion` is NOT a capture gate, and this row must not make it one in its
-  // first step." The corpus is already mixed on it -- 2,870 records, 1,266 on v24.19.0 against 1,564 on
-  // v24.20.0, since at least 2026-09-12 -- so gating on it today would refuse every capture on a
-  // condition every published acceptance number was measured across.
+  // The ruling's own clause, still guarded, one field over. `displayAdapter` is what carries it since
+  // #2170 moved `nodeVersion` out, and it is the member that cannot ever graduate: the values differ by
+  // HARDWARE, so a gate here would refuse `.224` for ever rather than until the next provisioning run.
   //
   // THERE ARE EXACTLY TWO GATING CHANNELS and this asserts against both, because #2047 made the second
   // one a refusal too: `capture-fleet-guard` exits 3 on a non-empty `mismatches` AND on any row of
   // `fields.coverage` where `reported < asked`.
   const { consistent, mismatches, fields } = fleetConsistency([
-    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0" }),
-    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.20.0" }),
+    guest(`http://${IP.g4}:8765`, { displayAdapter: "Intel(R) UHD Graphics 630" }),
+    guest(`http://${IP.g5}:8765`, { displayAdapter: "Intel(R) HD Graphics 630" }),
   ]);
   assert.equal(consistent, true, "a reported-only split must not read as an inconsistent fleet");
   assert.deepEqual(mismatches, [], "and must not enter the channel that exits 3");
-  assert.ok(!fields.coverage.some(({ field }) => field === "nodeVersion"),
+  assert.ok(!fields.coverage.some(({ field }) => field === "displayAdapter"),
     "nor the coverage channel, which #2047 made a refusal as well — a field there gates at ANY count");
-  assert.ok(!fields.compared.includes("nodeVersion") && !fields.unchecked.includes("nodeVersion"),
+  assert.ok(!fields.compared.includes("displayAdapter") && !fields.unchecked.includes("displayAdapter"),
     "and not on the lists those are derived from either");
 
   // The positive control for those three exclusions: the same verdict DOES carry the gating fields, so
@@ -496,13 +535,14 @@ test("#2063: THE RULING — a reported-only split is `consistent: true` and reac
 });
 
 test("#2063: a reported-only field NOBODY reports is `unreported`, not silence", () => {
-  // Clause 3 of the row, and the state `displayAdapter` is in on every guest until a worker carrying the
-  // field is deployed. `check()` skips an absent value, so silence here would put the field back in
+  // Clause 3 of #2063, and the state `displayAdapter` was in on every guest until the worker carrying it
+  // was deployed on 2026-09-23 -- the state any field entering this channel starts in, which is why the
+  // case outlives the deploy. `check()` skips an absent value, so silence here would put the field back in
   // exactly the condition #1997 is about -- compared on nobody, indistinguishable from agreed on by
   // everybody -- while a refusal would stop every capture in the project immediately.
   const { consistent, reportedOnly } = fleetConsistency([
-    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.19.0" }),
-    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.19.0" }),
+    guest(`http://${IP.g4}:8765`, { nodeVersion: "v24.20.0" }),
+    guest(`http://${IP.g5}:8765`, { nodeVersion: "v24.20.0" }),
   ]);
   assert.equal(consistent, true, "an unreported field refuses nothing");
   assert.deepEqual(reportedOnly.map((d) => [d.field, d.state, d.reported, d.asked]),
@@ -552,10 +592,10 @@ test("#2063: the two channels compare the same way — a reported-only field is 
     guest(`http://${IP.g4}:8765`, over), { worker: `http://${IP.g5}:8765`, environment: {}, policy: undefined },
   ];
   const gating = fleetConsistency(guests({ displayMode: "1024x768" }));
-  const noted = fleetConsistency(guests({ nodeVersion: "v24.19.0" }));
+  const noted = fleetConsistency(guests({ displayAdapter: "Intel(R) UHD Graphics 630" }));
   assert.deepEqual(gating.fields.coverage.find((c) => c.field === "displayMode"),
     { field: "displayMode", reported: 1, asked: 2 });
-  const same = noted.reportedOnly.find((d) => d.field === "nodeVersion");
+  const same = noted.reportedOnly.find((d) => d.field === "displayAdapter");
   assert.deepEqual([same?.reported, same?.asked], [1, 2],
     "the same one-of-two reading, counted identically — only what is DONE with it differs");
 });
