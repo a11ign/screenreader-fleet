@@ -37,9 +37,12 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, statSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// #2171: shared, because four private copies of this walk descended a directory symlink and threw ELOOP.
+import { filesUnder } from "../../guards/src/files-under.mjs";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -82,20 +85,16 @@ const WIN32_ONLY: Record<string, string> = {
 const isSource = (path: string) => /\.(mjs|ts)$/.test(path) && !/\.test\.ts$/.test(path)
   && !/\.d\.ts$/.test(path);
 
-function filesUnder(dir: string): string[] {
-  const out: string[] = [];
-  const walk = (current: string) => {
-    for (const entry of readdirSync(current)) {
-      const full = join(current, entry);
-      if (statSync(full).isDirectory()) {
-        if (entry !== "node_modules" && entry !== "dist") walk(full);
-      } else if (isSource(full)) {
-        out.push(full.slice(REPO.length));
-      }
-    }
-  };
-  if (existsSync(join(REPO, dir))) walk(join(REPO, dir));
-  return out.sort();
+/** Every source file under the repo-relative `dir`, as repo-relative paths. */
+function sourcesIn(dir: string): string[] {
+  // `existsSync` first because a tree in PORTABLE_TREES may legitimately not exist, and `filesUnder`
+  // throws on a missing root rather than walking to `[]` -- which is what this guard wants everywhere
+  // else, and what the floor below would otherwise be the only thing catching.
+  if (!existsSync(join(REPO, dir))) return [];
+  return filesUnder(join(REPO, dir), {
+    skipDirectory: (name) => name === "node_modules" || name === "dist",
+    keepFile: isSource,
+  }).map((full) => full.slice(REPO.length)).sort();
 }
 
 /**
@@ -161,14 +160,14 @@ function pathToDriver(entry: string): string[] | null {
   return null;
 }
 
-const PORTABLE = PORTABLE_TREES.flatMap(filesUnder);
+const PORTABLE = PORTABLE_TREES.flatMap((tree) => sourcesIn(tree));
 
 test("the trees being examined are real, so this guard cannot pass having read nothing", () => {
   // The first version of `verify.corpus.test.ts` read a field that does not exist and passed against a
   // corpus carrying 604 crashes. A discovery test that discovers nothing is the same defect.
   assert.ok(PORTABLE.length > 100, `only ${PORTABLE.length} portable source files found; the layout moved`);
   for (const tree of PORTABLE_TREES) {
-    assert.ok(filesUnder(tree).length > 0, `${tree} yielded no source files`);
+    assert.ok(sourcesIn(tree).length > 0, `${tree} yielded no source files`);
   }
 });
 
