@@ -200,6 +200,52 @@ test("a fleet on one display mode is consistent", () => {
   assert.deepEqual(mismatches, []);
 });
 
+test("THE ROLLING DEPLOY IS CAUGHT -- a pinned guest against a still-maximized one", () => {
+  // THE POSITIVE CONTROL for `windowSize` (#1561), and it is the split this field exists for rather than
+  // an invented one: while the pin rolls out, some guests ask Edge for `--window-size=1024,768` and the
+  // rest are still on `--start-maximized` and report no `windowSize` at all.
+  //
+  // `captureProtocol` cannot separate those two -- both guests are on 21 -- so without this field a
+  // half-deployed fleet reads CONSISTENT and writes two evidence populations into one corpus under one
+  // key. That is `provisionRevision`'s failure one deploy later, and it is the reason this field is in
+  // the cache key as well (`environmentKey`), which `displayMode` deliberately is not.
+  const { consistent, mismatches } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { windowSize: "1024x768" }),
+    guest(`http://${IP.g5}:8765`, { windowSize: "maximized" }),
+  ]);
+  assert.equal(consistent, false);
+  assert.equal(mismatches.length, 1);
+  assert.equal(mismatches[0].field, "windowSize");
+  assert.match(describeMismatches(mismatches)[0], /\.4=1024x768 \.5=maximized/);
+});
+
+test("a fleet pinned to one window size is consistent", () => {
+  // The other direction, and not the same assertion twice: a field that flagged two guests holding the
+  // SAME pin would take `fleet:status` offline over nothing, which is how a diagnostic gets switched off.
+  // It is also what the fleet reads once the deploy completes, so this is the NORMAL state rather than a
+  // hypothetical one.
+  const { consistent, mismatches } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { windowSize: "1024x768" }),
+    guest(`http://${IP.g5}:8765`, { windowSize: "1024x768" }),
+  ]);
+  assert.equal(consistent, true);
+  assert.deepEqual(mismatches, []);
+});
+
+test("#1561: the PIN and the DESKTOP are two fields, and a guest can differ on either", () => {
+  // The defect a single field would have: `displayMode` is what the screen holds and `windowSize` is what
+  // the worker asks Edge for, and they are the same number today only because provisioning made them so
+  // (#1567). A guest pinned to 1024x768 on a 1280x1024 desktop is a legitimate future state -- it is how
+  // a wider pin would be measured before it is adopted -- and collapsing the two would report it as
+  // agreement on the one axis that decides what the page looks like.
+  const { mismatches } = fleetConsistency([
+    guest(`http://${IP.g4}:8765`, { displayMode: "1024x768", windowSize: "1024x768" }),
+    guest(`http://${IP.g5}:8765`, { displayMode: "1280x1024", windowSize: "1024x768" }),
+  ]);
+  assert.deepEqual(mismatches.map((m: { field: string }) => m.field), ["displayMode"],
+    "the desktops differ and the pins agree, so exactly one of the two fields may fire");
+});
+
 test("a guest whose display could not be read is reported, not skipped", () => {
   // `displayMode` answers the string "unknown" rather than nothing when the read fails, and the worker
   // does that deliberately: `check()` skips an absent field, so an unreadable display would land back in

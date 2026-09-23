@@ -72,6 +72,19 @@ export const MUST_MATCH = [
       "hide content below a width -- metoffice hides its h1 under 1280px. NOT a cache key: adding one " +
       "invalidates every cached capture, which is a separate and far more expensive decision than making " +
       "this sentence honest" },
+  // The PIN, which is not the same field as the DESKTOP above (#1561). `displayMode` is what the screen
+  // holds; this is what the worker asks Edge for, and a guest still running the pre-pin code asks for
+  // nothing at all and gets `--start-maximized`. Both guests report the same `captureProtocol`, so the
+  // protocol cannot separate them and a rolling deploy would otherwise split the corpus in silence --
+  // which is the shape `provisionRevision` two entries up is here for, one deploy later.
+  //
+  // UNLIKE `displayMode`, this one IS a cache key (`environmentKey`), and that is a deliberate asymmetry
+  // rather than an oversight: pinning the window is what makes the width a property of the capture rather
+  // than of the box it ran on, so it is the value a stored capture can honestly be keyed by.
+  { path: "windowSize", why: "a capture taken in a pinned 1024x768 window and one taken maximized on " +
+      "whatever the desktop gave are not interchangeable evidence -- a page's CSS can hide content below " +
+      "a width, and metoffice hides its h1 under 1280px. It is in the cache key (#1561), so a split " +
+      "fleet also writes two evidence populations" },
 ];
 
 /**
