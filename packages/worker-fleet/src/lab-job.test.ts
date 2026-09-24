@@ -461,6 +461,80 @@ test("the unit DESCRIPTION carries the commit, so a journal can never be read wi
       + "than one that says nothing");
 });
 
+// #2232 -- WHERE the "a released unit reads as a success" fact lives. The readers are all right (the guard
+// above pins one of them); what nothing carried was the file that WRITES the stamp, and a session typing
+// `systemctl show` by hand. A grep for a phrase in the header would be a prose guard over prose, so this is
+// a RELATIONSHIP read off the parsed playbook: the release task, found by what it DOES (`systemctl stop`
+// after the start), and the header item that must name it by the name it actually has.
+type PlaybookTask = { name?: string; "ansible.builtin.command"?: { argv?: unknown } };
+
+/** The task after the start that stops the unit, found by its argv rather than by anything it is called. */
+const releaseTaskName = (playbook: string): string | undefined => {
+  const tasks = parseYaml(playbook) as PlaybookTask[];
+  const start = tasks.findIndex((task) => (task.name ?? "").startsWith("Start it:"));
+  const argvOf = (task: PlaybookTask) => task["ansible.builtin.command"]?.argv;
+  const release = tasks.slice(start + 1).find((task) => {
+    const argv = argvOf(task);
+    return Array.isArray(argv) && argv[0] === "systemctl" && argv[1] === "stop";
+  });
+  return release?.name?.split(":")[0];
+};
+
+/** The numbered items of the header, each unwrapped to one line, so a phrase split across a wrap still counts. */
+const headerItems = (playbook: string): string[] => {
+  const header = playbook.slice(0, playbook.search(/^- name:/m)).split("\n");
+  const items: string[] = [];
+  for (const line of header) {
+    if (/^# {3}\d+\. /.test(line)) items.push(line.replace(/^#\s*/, ""));
+    else if (/^# {6}\S/.test(line) && items.length > 0) items[items.length - 1] += ` ${line.replace(/^#\s*/, "")}`;
+  }
+  return items;
+};
+
+/**
+ * `undefined` when there is no release to warn about, so deleting it is vacuous rather than red; otherwise
+ * whether ONE header item names that release task, `Description`, and the two defaults that read as success.
+ */
+const headerCoversRelease = (playbook: string): boolean | undefined => {
+  const release = releaseTaskName(playbook);
+  if (release === undefined) return undefined;
+  return headerItems(playbook).some((item) =>
+    [release, "Description", "Result", "ExecMainStatus"].every((term) => item.includes(term)));
+};
+
+test("the header says what a released unit reads as, keyed on the release existing (#2232)", () => {
+  const real = read("tasks/run-job.yml");
+  // THE POSITIVE CONTROL for the vacuity below: the real launcher has a release, so `undefined` cannot be
+  // what the real file returns without this failing first.
+  assert.equal(releaseTaskName(real), "Release the unit", "the launcher must still release the unit it started");
+  assert.equal(headerCoversRelease(real), true,
+    "after the release `systemctl show` answers Result=success, ExecMainStatus=0 and Description=<unit NAME> "
+      + "for a job that ran and for a name that never existed alike; the header must say so in ONE item that "
+      + "names the release task, or the file that writes the commit stamp is silent on where it stops being readable");
+
+  // Direction one: the note is missing, or does not carry a term that makes it true. Each breaks this guard.
+  const lines = real.split("\n");
+  const at = lines.findIndex((line) => /^# {3}4\. /.test(line));
+  assert.ok(at > 0, "the item under test exists in the real header, or the mutant below removes nothing");
+  let end = at + 1;
+  while (/^# {6}\S/.test(lines[end] ?? "")) end++;
+  const noItem = [...lines.slice(0, at), ...lines.slice(end)].join("\n");
+  assert.equal(headerCoversRelease(noItem), false, "with the item gone the guard must fire, not pass");
+  assert.equal(headerCoversRelease(real.replaceAll("ExecMainStatus", "ExitCode")), false,
+    "an item that stops naming the defaults that read as success no longer says the dangerous half");
+  assert.equal(headerCoversRelease(real.replace("Release the unit: {{", "Free the unit: {{")), false,
+    "renaming the release task leaves a note about a task nobody can find");
+
+  // Direction two: no release, so nothing to warn about -- vacuous, not red. Deleting the stop must not
+  // demand prose about a step that no longer exists.
+  // The LAST `systemctl stop`: an earlier one reaps the previous run's handle before the start and is not the release.
+  const stop = "argv: [systemctl, stop,";
+  const last = real.lastIndexOf(stop);
+  assert.ok(last > real.indexOf(stop), "the fixture picks the release, not the pre-start reap, or this direction tests nothing");
+  const noRelease = `${real.slice(0, last)}argv: [systemctl, is-failed,${real.slice(last + stop.length)}`;
+  assert.equal(headerCoversRelease(noRelease), undefined, "no release means nothing to say, and not a failure");
+});
+
 test("a pull never runs into a checkout somebody or something else is using", () => {
   // `git pull` mid-job writes into the checkout a running job is EXECUTING FROM — a11y-bootstrap.service
   // documents that as "the one way this unit can be quietly wrong". The unit-name lock cannot see it: it
