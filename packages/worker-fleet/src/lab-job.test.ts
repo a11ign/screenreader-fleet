@@ -875,6 +875,15 @@ test("a job that answers in exit codes says what they mean", () => {
     .exitMeanings ?? {};
   assert.ok(meanings["1"]?.includes("CHANGED"), "exit 1 must say the evidence changed");
   assert.ok(meanings["2"]?.includes("INCONCLUSIVE"), "exit 2 must say it could not answer");
+  // #2197: a throw exits 3, and `1` must not claim to be the CHANGED verdict AS FACT — Node's own `1` for a
+  // crash before the script's handler runs lands there too. The message that named a ~71-minute fleet
+  // recapture as the remedy for a stale manifest is the defect; `1` may name the possibility and must send
+  // the reader to the output, and `3` must point at `job=generate` and away from a recapture.
+  assert.ok(meanings["3"]?.includes("THREW"), "exit 3 must say the check threw and did not answer");
+  assert.match(meanings["3"] ?? "", /job=generate/, "exit 3 must name the cheap remedy for a stale manifest");
+  assert.doesNotMatch(meanings["1"] ?? "", /The check ran correctly and this is its answer/,
+    "exit 1 must not assert that the check ran: a crash before the handler exits 1 too");
+  assert.match(meanings["1"] ?? "", /\bEITHER\b[\s\S]*\bOR\b/, "exit 1 must name both possibilities");
   // And the runner must actually surface them, or the declaration is a comment.
   assert.match(executable(read("tasks/run-job.yml")), /job_exit_meanings\[job_exit \| string\]/,
     "run-job.yml must print the meaning of the code it failed on");
