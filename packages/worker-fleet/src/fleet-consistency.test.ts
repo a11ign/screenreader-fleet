@@ -599,3 +599,71 @@ test("#2063: the two channels compare the same way — a reported-only field is 
   assert.deepEqual([same?.reported, same?.asked], [1, 2],
     "the same one-of-two reading, counted identically — only what is DONE with it differs");
 });
+
+// #2211: WHAT AN OPERATOR IS TOLD ABOUT `displayAdapter` IS PINNED, NOT JUST WHAT THE FIELD DOES. The
+// `#2063` tests above hold its behaviour (drift state, channel, census line) and none of its TEXT, so the
+// sentence "no deployed worker reports it yet" was corrected once (#2246) with nothing keeping it corrected,
+// and it printed on every `fleet:status` run directly beneath ten reported values.
+
+/** Sentences that assert the field is unreported. Each is a spelling the old text used or would reword to. */
+const CLAIMS_UNREPORTED = [
+  /\bno (deployed )?(worker|guest)s? (reports?|sends?) it\b/i,
+  /\breads? (as )?`?unknown`? (across|on every|on all)\b/i,
+  /\buntil (this code|the worker|it) (is|has been|was) deployed\b/i,
+  /\bwhich it will until\b/i,
+];
+const claimsUnreported = (text: string) => CLAIMS_UNREPORTED.some((claim) => claim.test(text));
+
+/** Every occurrence of `reading` must sit within `reach` characters of a calendar date, either side. */
+function readingsWithoutADate(text: string, reading: RegExp, reach = 160) {
+  const dated = (at: number) => /\d{4}-\d{2}-\d{2}/.test(text.slice(Math.max(0, at - reach), at + reach));
+  return [...text.matchAll(new RegExp(reading.source, "g"))].filter((m) => !dated(m.index)).length;
+}
+const HARDWARE_READINGS = [/640x480/, /Intel\(R\) (UHD|HD) Graphics 630/];
+
+const displayAdapterEntry = () => REPORTED_ONLY.find((f) => f.path === "displayAdapter")!.why;
+const workerDisplayAdapterComment = () => {
+  const server = readFileSync(new URL("../../nvda-worker/src/server.mjs", import.meta.url), "utf8");
+  // The comment is the SUBJECT here, so it is not stripped -- and it is located by the two CODE lines
+  // that bracket it, so what is found cannot be a phrase that lives only in prose (#1213's defect).
+  const start = server.indexOf("windowSize: CAPTURE_WINDOW_SIZE,");
+  const end = server.indexOf("displayAdapter: displayAdapter(),");
+  assert.ok(start !== -1 && end > start, "server.mjs no longer carries displayAdapter's comment to read");
+  const between = server.slice(start, end);
+  assert.ok(/WHICH ADAPTER IS DRIVING/.test(between), "the code anchors no longer bracket displayAdapter's comment");
+  return between;
+};
+
+test("#2211: displayAdapter's exemption text does not claim the field is unreported, and says it is reported", () => {
+  const why = displayAdapterEntry();
+  assert.equal(claimsUnreported(why), false,
+    "the exemption tells operators no guest reports displayAdapter, on the line that prints ten values");
+  assert.match(why, /10 of 10 guests report it/, "and states the reading that is true instead of merely omitting the false one");
+
+  // The positive control for the negative above: the sentence this row removed, verbatim, must be caught.
+  // Without it `false` proves only that the patterns matched nothing.
+  assert.equal(claimsUnreported("NOT a gate: no deployed worker reports it yet, so it reads unknown across the fleet"),
+    true, "the matcher does not recognise the very sentence it exists to keep out");
+});
+
+test("#2211: the worker's own displayAdapter comment claims no absence either", () => {
+  const comment = workerDisplayAdapterComment();
+  assert.equal(claimsUnreported(comment), false,
+    "the reporter still says the fleet reads the field as unknown `until this code is deployed`");
+  assert.equal(claimsUnreported("the fleet reading it as `unknown` on every guest -- which it will until this code is deployed"),
+    true, "the matcher does not recognise the comment this row removed");
+});
+
+test("#2211: every hardware reading in displayAdapter's text is attributable to a moment", () => {
+  for (const [where, text] of [["exemption", displayAdapterEntry()], ["worker comment", workerDisplayAdapterComment()]] as const) {
+    for (const reading of HARDWARE_READINGS) {
+      if (!reading.test(text)) continue; // a reading that is absent is not an undated one
+      assert.equal(readingsWithoutADate(text, reading), 0,
+        `${where}: ${reading} appears with no date beside it, so a reader cannot tell June from an hour ago`);
+    }
+  }
+  // Positive control: the undated clause this row dated, and the exemption's own 640x480 must be READ at all.
+  assert.equal(readingsWithoutADate("workers 7-11 fell back to the Basic Display Adapter and captured at 640x480", /640x480/), 1,
+    "the date matcher accepts an undated reading");
+  assert.ok(/640x480/.test(displayAdapterEntry()), "the exemption no longer carries the reading this test dates");
+});

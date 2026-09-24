@@ -138,16 +138,18 @@ export const MUST_MATCH = [
 export const REPORTED_ONLY = [
   // `ceo`'s fold-in on the same row: "nothing in this repo reports the display ADAPTER either ... whatever
   // shape this row lands for 'reported, visible, not yet a gate', the adapter belongs in it rather than in
-  // a fourth row." It is the seam `displayMode` sat on -- workers 2-6 on the Intel adapter, 7-11 on
-  // Microsoft's Basic Display Adapter after a driver install failed rc 1014 -- and it is a DIFFERENT field
+  // a fourth row." It is the seam `displayMode` sat on -- on 2026-09-22, workers 2-6 on the Intel adapter,
+  // 7-11 on Microsoft's Basic Display Adapter after a driver install failed rc 1014 -- and it is a DIFFERENT field
   // from the driver VERSION, which `ceo` ruled on #1567 does not split the fleet.
   { path: "displayAdapter", why: "the adapter is what decides whether a pinned display mode can be held " +
-      "at all -- workers 7-11 fell back to Microsoft's Basic Display Adapter and captured at 640x480 " +
-      "under a `provisionRevision` identical to their peers'. NOT a gate, and no longer because nobody " +
-      "reports it: 10 of 10 guests report it since 2026-09-23T18:02Z, reading `Intel(R) UHD Graphics " +
-      "630` on nine and `Intel(R) HD Graphics 630` on one. That single letter is a real hardware " +
-      "difference rather than a driver fallback, so no provisioning run can converge it and a gate " +
-      "would refuse that guest for ever (#2063, reading on #2170)" },
+      "at all -- on 2026-09-22 workers 7-11 were on Microsoft's Basic Display Adapter and captured at " +
+      "640x480 under a `provisionRevision` identical to their peers' (#1955); the pinned Intel driver " +
+      "install resolved that, and all ten read an Intel adapter at CM_PROB_NONE on 2026-09-23. NOT a " +
+      "gate, and no longer because nobody reports it: 10 of 10 guests report it since " +
+      "2026-09-23T18:02Z, reading `Intel(R) UHD Graphics 630` on nine and `Intel(R) HD Graphics 630` " +
+      "on one as of 2026-09-23. That single letter is a real hardware difference rather than a driver " +
+      "fallback, so no provisioning run can converge it and a gate would refuse that guest for ever " +
+      "(#2063, reading on #2170)" },
 ];
 
 /**
