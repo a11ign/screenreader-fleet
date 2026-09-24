@@ -23,8 +23,9 @@
  * ## Why a REFUSAL, and why on any difference at all
  *
  * `workerCode` is deliberately outside the capture cache key ("it changes when a comment changes, and
- * invalidating 1,061 pairs over a reworded comment is how a cache gets switched off") and deliberately
- * outside `fleet-consistency.mjs`'s `MUST_MATCH` for the same reason. Both of those are the right call for
+ * invalidating the WHOLE corpus over a reworded comment is how a cache becomes something people turn
+ * off") and deliberately outside
+ * `fleet-consistency.mjs`'s `MUST_MATCH` for the same reason. Both of those are the right call for
  * the questions they answer — *is this evidence still valid* and *are these guests interchangeable*.
  *
  * This is a third question with a different answer: *am I about to capture with the code I asked for*. A

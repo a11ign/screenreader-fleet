@@ -869,8 +869,8 @@ test("every capture job regenerates the pages before capturing them", () => {
 test("a job that answers in exit codes says what they mean", () => {
   // `evidence-check` exits 1 for "the evidence CHANGED" and 2 for "could not answer" — both successful
   // runs of the check. The operator saw `exit 1 (expected one of [0])` and had to already know that. The
-  // remedy is to REPORT the meaning, not to make 1 a success code: exit 1 means "invalidate 2,122 cached
-  // captures", and a job reporting OK for that is a green light on the most expensive operation here.
+  // remedy is to REPORT the meaning, not to make 1 a success code: exit 1 means "invalidate every cached
+  // capture", and a job reporting OK for that is a green light on the most expensive operation here.
   const meanings = (PLAY_VARS.lab_jobs["evidence-check"] as { exitMeanings?: Record<string, string> })
     .exitMeanings ?? {};
   assert.ok(meanings["1"]?.includes("CHANGED"), "exit 1 must say the evidence changed");

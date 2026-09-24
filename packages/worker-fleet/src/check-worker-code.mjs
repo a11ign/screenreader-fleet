@@ -49,7 +49,7 @@ const HEALTH_TIMEOUT_MS = 15000;
 /**
  * A STALE report is usually a real stale guest — but not when the working tree carries an uncommitted
  * CAPTURE_PROTOCOL_VERSION bump. Then every worker reports stale because the LOCAL hash moved, and the
- * obvious remedy (redeploy) would ship the bump and invalidate all 2,122 cached captures.
+ * obvious remedy (redeploy) would ship the bump and invalidate every cached capture.
  *
  * Saying so here costs one line and saves someone an unexplained full recapture.
  */

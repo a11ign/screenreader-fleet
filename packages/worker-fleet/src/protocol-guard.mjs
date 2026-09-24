@@ -2,8 +2,8 @@
  * REFUSE A DEPLOY THAT WOULD SILENTLY INVALIDATE THE CORPUS.
  *
  * `CAPTURE_PROTOCOL_VERSION` is a capture-cache key. Shipping a change to it invalidates every cached
- * capture — 2,122 of them, about four hours of fleet time — and that is sometimes exactly what you want.
- * What must never happen is it going out without somebody deciding.
+ * capture — `RECAPTURE_COST` below says how many a full re-run produces — and that is sometimes exactly
+ * what you want. What must never happen is it going out without somebody deciding.
  *
  * **The guard existed and reached only the DEPRECATED path.** `deploy-worker.mjs` refuses without
  * `--allow-protocol-change`, and that script is `utmctl file push` against a VM UUID: it cannot reach a
@@ -21,6 +21,32 @@
  * the channel it used was broken, and read as a flaky tool rather than a failed deploy.
  */
 import { requestJson } from "./worker-http.mjs";
+
+/**
+ * WHAT A FULL RECAPTURE COSTS, in the words the two deploy refusals print -- derived here and shown, not
+ * retyped (#2244). The refusals printed 2,122, a count from 2026-07-26; on 2026-09-23 the cache held 4,500
+ * captures across 1,715 cases.
+ *
+ * **The population is what a full RE-RUN produces, not what the cache holds.** A run captures each case
+ * `manifest.json` lists, twice; the cache holds 4,500 captures because it also holds cases the manifest no
+ * longer lists, and a protocol bump does not make those cost anything, since nothing will ask for them
+ * again. So 1,715 x 2 = 3,430 is the price an operator is deciding on, and 4,500 is not.
+ *
+ * The inputs are `orchestrator`'s reading on the corpus host, 2026-09-23T14:26Z (#1561 comment
+ * 5796655391), and are not re-measured here. This file cannot read the manifest -- the control host that
+ * runs the guard does not have the corpus -- so the reading is dated in the message itself, where a stale
+ * one is visible to the person who acts on it.
+ *
+ * **NO WALL-CLOCK.** This used to say "about four hours of fleet time". That was a rate times the 1,061-case
+ * corpus of 2026-07-26 on a fleet of a size nothing in this file can read, and #2155 dropped its own estimates for the same
+ * reason. The rate is what `npm run fleet:status` can show; the product is somebody's to time.
+ */
+const MANIFEST_CASES = 1715;
+const CAPTURES_PER_CASE = 2;
+export const RECAPTURE_COST =
+  `${(MANIFEST_CASES * CAPTURES_PER_CASE).toLocaleString("en-US")} captures `
+  + `(${MANIFEST_CASES.toLocaleString("en-US")} cases in manifest.json x ${CAPTURES_PER_CASE}, read `
+  + "2026-09-23T14:26Z; how long that takes depends on the fleet, so time a run rather than trust a figure)";
 
 /** How long a worker gets to answer `/health` before it counts as unreachable. */
 const HEALTH_TIMEOUT_MS = 5_000;
@@ -62,7 +88,7 @@ export function protocolVerdict({ local, served, allowed, source }) {
     `\nREFUSING TO DEPLOY: this checkout has CAPTURE_PROTOCOL_VERSION = ${local}, and the fleet does not.\n\n`
     + `${detail}\n\n`
     + "That value is a capture-cache key, so deploying it invalidates every cached capture and forces a\n"
-    + "full recapture (~2,122 captures, about four hours of fleet time).\n\n"
+    + `full recapture: ${RECAPTURE_COST}.\n\n`
     + "  If that is what you want:   npm run fleet:deploy -- --allow-protocol-change\n"
     + "  If it is not:               check what changed in packages/nvda-worker/src/capture-core.mjs\n" };
 }

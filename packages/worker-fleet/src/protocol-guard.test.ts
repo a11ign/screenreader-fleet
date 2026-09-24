@@ -1,5 +1,5 @@
 /**
- * The deploy guard that stops a CAPTURE_PROTOCOL_VERSION change invalidating 2,122 captures unnoticed.
+ * The deploy guard that stops a CAPTURE_PROTOCOL_VERSION change invalidating the capture cache unnoticed.
  *
  * It exists because the guard that WAS written reached only `worker:deploy` — `utmctl file push` against a
  * VM UUID, which cannot reach a bare-metal worker and fails off macOS. Every box in `inventory.yml` is bare
@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { protocolVerdict } from "./protocol-guard.mjs";
+import { protocolVerdict, RECAPTURE_COST } from "./protocol-guard.mjs";
 import { declareTreeWideGuard, walkTree } from "../../guards/src/tree-wide-guard.mjs";
 
 // #716/#704: this file's own population is the whole tracked tree, not one file -- declared here
@@ -35,6 +35,33 @@ test("A CHANGE IS REFUSED, and the refusal names every box and the cost", () => 
   assert.match(v.message, /w2 serves 6/);
   assert.match(v.message, /full recapture/, "a refusal that does not state the cost gets overridden blindly");
   assert.match(v.message, /--allow-protocol-change/, "and it must say how to proceed deliberately");
+});
+
+/**
+ * #2244: THE COST THE REFUSAL PRINTS IS DERIVED, DATED, AND NAMES ITS POPULATION. It printed 2,122 and
+ * "about four hours" after the corpus had passed 4,500 captures, to an operator deciding whether to spend
+ * the recapture. The figure below is `manifest.json`'s cases times two captures each, read
+ * 2026-09-23T14:26Z -- so the assertion is on the ARITHMETIC and the date, not on a number that would be
+ * retyped the next time the corpus moves.
+ */
+test("THE COST A REFUSAL PRINTS IS ITS POPULATION TIMES TWO, DATED, AND CARRIES NO WALL-CLOCK", () => {
+  const v = protocolVerdict({ local: 7, served: fleet(6), allowed: false });
+  assert.ok(v.message.includes(RECAPTURE_COST), "the refusal must print the one derived cost, not its own copy");
+  const [, total, cases] = /^([\d,]+) captures \(([\d,]+) cases in manifest\.json x 2, read 2026-09-23T14:26Z/
+    .exec(RECAPTURE_COST) ?? [];
+  assert.ok(total && cases, `the cost must show cases x 2 and the date it was read: ${RECAPTURE_COST}`);
+  const CAPTURES_PER_CASE = 2;
+  assert.equal(Number(total.replace(/,/g, "")), Number(cases.replace(/,/g, "")) * CAPTURES_PER_CASE,
+    "the printed total must be the printed cases times the printed captures-per-case");
+  assert.doesNotMatch(v.message, /2,?122|hours? of fleet time|four hours/,
+    "the stale figure and the re-guessed wall-clock are what this row removed");
+});
+
+test("deploy-worker.mjs prints the same derived cost in its own refusal, not a copy of it", () => {
+  const source = readFileSync(resolve(import.meta.dirname, "deploy-worker.mjs"), "utf8");
+  assert.match(source, /import \{ RECAPTURE_COST \} from "\.\/protocol-guard\.mjs"/);
+  assert.match(source, /`full recapture: \$\{RECAPTURE_COST\}\./,
+    "the UTM refusal must interpolate the shared cost; a retyped figure is how the two drifted apart");
 });
 
 test("--allow-protocol-change PROCEEDS AND SAYS WHAT IT DID, rather than passing quietly", () => {

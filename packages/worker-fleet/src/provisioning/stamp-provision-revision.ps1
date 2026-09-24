@@ -134,9 +134,9 @@ $combined = ([BitConverter]::ToString(
 #     just succeeded. Four healthy machines faced re-provisioning for a SHA.
 #
 # This repo already made exactly this decision one field over, and wrote down why: `workerCode` is
-# deliberately OUTSIDE the capture cache key because "it changes when a comment changes, and invalidating
-# 1,061 pairs over a reworded comment is how a cache gets switched off". A git SHA changes for strictly
-# more reasons than a code hash does.
+# deliberately OUTSIDE the capture cache key because "that hash changes when a comment changes, and
+# invalidating the WHOLE corpus over a reworded comment is how a cache becomes something people turn
+# off" (capture-cache.mjs). A git SHA changes for strictly more reasons than a code hash does.
 #
 # The content hash already answers the question the stamp exists to answer -- do two guests have different
 # NVDA/Edge configuration? -- and it answers it by describing the configuration rather than by naming a

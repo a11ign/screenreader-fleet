@@ -43,10 +43,11 @@ import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { refuseUnknownFlags, flagValue } from "./cli-flags.mjs";
 import { warnUtmDeprecated } from "./utm-deprecated.mjs";
 import { requestJson } from "./worker-http.mjs";
+import { RECAPTURE_COST } from "./protocol-guard.mjs";
 
 /**
  * `--allow-protocol-change` is the flag that lets a CAPTURE_PROTOCOL_VERSION bump ship, invalidating
- * 2,122 cached captures. A typo silently means "do not allow", which is the safe direction — but
+ * every cached capture. A typo silently means "do not allow", which is the safe direction — but
  * `--vm=` mistyped deploys to EVERY guest instead of the one named.
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
@@ -240,7 +241,7 @@ async function deployTo(vm, files, expected) {
  *
  * This deploys the WORKING TREE, which is right for testing a change and dangerous for one specific
  * change: the protocol version is a capture-cache key input, so shipping a bump invalidates every capture
- * on disk — 2,122 of them — and forces a full recapture that takes hours.
+ * on disk and forces a full recapture (`RECAPTURE_COST`, in protocol-guard.mjs, says how big).
  *
  * The trap is real and was live in this repo. An uncommitted bump in a shared checkout makes
  * `npm run worker:code` report every worker STALE, and the remedy it prints is "redeploy" — which would
@@ -278,7 +279,7 @@ function guardProtocolChange() {
     `\nREFUSING TO DEPLOY: the working tree has CAPTURE_PROTOCOL_VERSION = ${inTree}, but HEAD has ` +
     `${committed}.\n\n` +
     "That value is a capture-cache key, so deploying it invalidates all cached captures and forces a\n" +
-    "full recapture (2,122 captures, hours). If a `worker:code` STALE report sent you here, the stale\n" +
+    `full recapture: ${RECAPTURE_COST}. If a \`worker:code\` STALE report sent you here, the stale\n` +
     "hash is probably caused by this uncommitted bump rather than by the guests being out of date.\n\n" +
     "  git stash                            # deploy without the bump, or\n" +
     "  npm run worker:deploy -- --allow-protocol-change   # deploy it deliberately\n");
