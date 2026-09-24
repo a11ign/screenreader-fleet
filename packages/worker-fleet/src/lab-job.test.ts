@@ -729,7 +729,11 @@ const VIA_DERIVED_FACT: Record<string, string> = PLAY_VARS.lab_param_aliases;
 
 /** What a job's command actually reads: only what is INSIDE `{{ }}`, never literal text in a path. */
 function derivedParams(entry: JobEntry): Record<string, "required" | "optional"> {
-  let templates = (JSON.stringify(entry).match(/\{\{.*?\}\}/g) ?? []).join(" ");
+  // Quoted literals are text, not reads: a whole-argv template such as `'--model=' ~ (out | default(...))`
+  // carries the word `model` inside a string, and reading it as the parameter `model` reports a job as
+  // REQUIRING one it never touches (#2386). `namesRead` in the reachability guard strips them the same way.
+  let templates = (JSON.stringify(entry).match(/\{\{.*?\}\}/g) ?? []).join(" ")
+    .replace(/'[^']*'/g, "''");
   for (const [fact, param] of Object.entries(VIA_DERIVED_FACT)) {
     templates = templates.replaceAll(fact, param);
   }
