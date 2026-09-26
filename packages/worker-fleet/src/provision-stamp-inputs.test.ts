@@ -164,6 +164,10 @@ const EXEMPT: Record<string, string> = {
     "Account identity and auto-logon. No relationship to what a capture observes.",
   "packages/control/ansible/roles/worker/tasks/firewall.yml":
     "Network reachability (port rules, sshd). No relationship to what a capture observes.",
+  "packages/control/ansible/roles/worker/tasks/powershell-native-image.yml":
+    "NGEN of System.Management.Automation (#2672): changes how fast powershell.exe STARTS, never what a "
+    + "capture hears. It reads before it writes and names its assembly in the task file, not in "
+    + "defaults/main.yml, so it moves no hashed value.",
   "packages/control/ansible/roles/worker/tasks/verify.yml":
     "Read-only checks against what earlier tasks already did. Writes nothing.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_defender.ps1":
