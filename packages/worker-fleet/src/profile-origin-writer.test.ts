@@ -22,12 +22,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { layerFile } from "../../guards/src/layer-file.mjs";
 import { parse } from "yaml";
-// BY RELATIVE PATH to the source, never the package import -- `browsers.mjs` is not in the package's
-// `exports` map, and importing the PUBLISHED package would resolve to a `dist` that can be stale
-// against this worktree. The same technique, for the same reason, as `fault-remediation.test.ts`.
-import { BROWSERS, browserProfileDir } from "../../nvda-worker/src/browsers.mjs";
+// BY PACKAGE NAME (#2613), through the resolver: `browsers.mjs` is not in the package's `exports` map, and adding an export
+// to the layer's public surface for a test is a decision for the layer. `layerFile` answers "where is this file of
+// `@a11ign/nvda-worker`" the same way in the monorepo and in an install, and refuses a file the package does not publish.
+// Dynamic, because a path is not a specifier. The source itself is imported (not scraped): `browsers.mjs` is safe to load,
+// unlike `server.mjs`, which constructs a guidepup ScreenReader at module scope.
+const { BROWSERS, browserProfileDir } = await import(
+  pathToFileURL(layerFile("@a11ign/nvda-worker", "src/browsers.mjs", { from: import.meta.dirname })).href);
 
 const BESPOKE = fileURLToPath(
   new URL("../../control/ansible/roles/worker/tasks/bespoke.yml", import.meta.url));

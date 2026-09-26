@@ -7,6 +7,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fleetConsistency, describeMismatches, describeReportedOnly, MUST_MATCH, POLICY_MUST_MATCH,
   REPORTED_ONLY } from "./fleet-consistency.mjs";
+import { layerFile } from "../../guards/src/layer-file.mjs";
+
+/** The worker's `server.mjs` as TEXT, found by package name (#2613): it is not importable (guidepup at module scope) and not an export. */
+const workerServerSource = () =>
+  readFileSync(layerFile("@a11ign/nvda-worker", "src/server.mjs", { from: import.meta.dirname }), "utf8");
 
 /**
  * THE FIXTURE ADDRESSES, BUILT FROM OCTETS. #63's history purge replaced every RFC 1918 literal in the
@@ -156,7 +161,7 @@ test("EVERY MUST_MATCH FIELD IS ONE THE WORKER ACTUALLY REPORTS", () => {
   // Asserted against server.mjs's SOURCE, the same narrow exception `provision-stamp.test.ts` states:
   // `server.mjs` imports guidepup, which constructs a ScreenReader at module scope and throws on a host
   // with no screen reader, so this file cannot import it on any runner this repo has.
-  const server = readFileSync(new URL("../../nvda-worker/src/server.mjs", import.meta.url), "utf8");
+  const server = workerServerSource();
   const start = server.indexOf("function runtimeEnvironment() {");
   const end = server.indexOf("function provisionRevision() {");
   assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
@@ -569,7 +574,7 @@ test("#2063: EVERY REPORTED_ONLY FIELD IS ONE THE WORKER ACTUALLY REPORTS", () =
   // `EVERY MUST_MATCH FIELD…` above, for the second channel, and it matters MORE here: a typo in
   // `MUST_MATCH` at least shows up as a permanent coverage gap that refuses a run, while a typo here is
   // a field that reads `unreported` for ever and looks exactly like a fleet that has not been deployed.
-  const server = readFileSync(new URL("../../nvda-worker/src/server.mjs", import.meta.url), "utf8");
+  const server = workerServerSource();
   const start = server.indexOf("function runtimeEnvironment() {");
   const end = server.indexOf("function provisionRevision() {");
   assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
@@ -623,7 +628,7 @@ const HARDWARE_READINGS = [/640x480/, /Intel\(R\) (UHD|HD) Graphics 630/];
 
 const displayAdapterEntry = () => REPORTED_ONLY.find((f) => f.path === "displayAdapter")!.why;
 const workerDisplayAdapterComment = () => {
-  const server = readFileSync(new URL("../../nvda-worker/src/server.mjs", import.meta.url), "utf8");
+  const server = workerServerSource();
   // The comment is the SUBJECT here, so it is not stripped -- and it is located by the two CODE lines
   // that bracket it, so what is found cannot be a phrase that lives only in prose (#1213's defect).
   const start = server.indexOf("windowSize: CAPTURE_WINDOW_SIZE,");
