@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
-  workersFromInventory, portFromGroupVars, DEFAULT_WORKER_PORT, configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
+  workersFromInventory, portFromGroupVars, DEFAULT_WORKER_PORT, configuredWorkers, namedInventoryWorkers,
+  fleetEnvOutput, hostsOutOfCaptureSet } from "./fleet-env.mjs";
 
 test("hosts become worker URLs on the declared port", () => {
   const workers = workersFromInventory([
@@ -279,4 +280,75 @@ test("THE INVENTORY IS A FLEET DOCTOR CAN SEE, and it is named", () => {
 test("and it answers EMPTY rather than throwing when no inventory is declared", () => {
   // A checkout with no fleet is supported, and a hint must not fail the command it is advising.
   assert.ok(Array.isArray(namedInventoryWorkers()));
+});
+
+// A worker can be ENROLLED and not CAPTURING: five boxes serve with cold browser profiles, so a capture
+// guard refuses any run that includes them (#2654). The inventory says which, per host, and the two
+// questions -- "the fleet" and "the capture set" -- must not be one answer.
+const WITH_A_COLD_HOST = [
+  "all:", "  children:", "    a11y_workers:", "      hosts:",
+  "        a11y-worker-1:", "          ansible_host: 192.0.2.1", '          mac: "00:00:00:00:00:01"',
+  "        a11y-worker-2:", "          ansible_host: 192.0.2.2", "          a11y_capture: false",
+  "        a11y-worker-3:", "          a11y_capture: true", "          ansible_host: 192.0.2.3",
+  "    a11y_lab:", "      hosts:", "        a11y-lab:", "          ansible_host: 192.0.2.9",
+].join("\n");
+
+test("a host that declares a11y_capture: false is out of A11Y_WORKERS and still in the whole fleet", () => {
+  const env = fleetEnvOutput(WITH_A_COLD_HOST);
+  assert.equal(env.stdout, "export A11Y_WORKERS='http://192.0.2.1:8765,http://192.0.2.3:8765'\n");
+
+  // `--list` is the whole fleet: a reader that means "every enrolled worker" must still name the cold one.
+  const list = fleetEnvOutput(WITH_A_COLD_HOST, { mode: "list" });
+  assert.deepEqual(list.stdout.trim().split("\n"),
+    ["http://192.0.2.1:8765", "http://192.0.2.2:8765", "http://192.0.2.3:8765"]);
+
+  assert.deepEqual(workersFromInventory(WITH_A_COLD_HOST, { scope: "capture" }),
+    ["http://192.0.2.1:8765", "http://192.0.2.3:8765"]);
+  assert.equal(workersFromInventory(WITH_A_COLD_HOST).length, 3, "the default scope is the whole fleet");
+});
+
+test("the default is IN: a host that declares nothing is in the capture set, so the ten need no edit", () => {
+  const inventory = [
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
+    "        a11y-worker-1:", "          ansible_host: 192.0.2.1",
+    "        a11y-worker-2:", "          ansible_host: 192.0.2.2",
+  ].join("\n");
+  assert.deepEqual(workersFromInventory(inventory, { scope: "capture" }), workersFromInventory(inventory));
+  assert.deepEqual(hostsOutOfCaptureSet(inventory), []);
+  assert.equal(fleetEnvOutput(inventory).stderr, "", "nobody was left out, so there is nothing to say");
+});
+
+test("the excluded host is NAMED on stderr, with its address and why -- never silently dropped", () => {
+  const { stderr, stdout } = fleetEnvOutput(WITH_A_COLD_HOST);
+  assert.match(stderr, /a11y-worker-2 \(http:\/\/192\.0\.2\.2:8765\) is NOT in A11Y_WORKERS/);
+  assert.match(stderr, /a11y_capture: false/);
+  assert.doesNotMatch(stderr, /a11y-worker-[13]/, "only the host that was left out is named");
+  assert.doesNotMatch(stdout, /a11y-worker-2|192\.0\.2\.2/, "stderr, not stdout: stdout is eval-ed");
+  assert.equal(fleetEnvOutput(WITH_A_COLD_HOST, { mode: "list" }).stderr, "", "--list leaves nobody out");
+  assert.deepEqual(hostsOutOfCaptureSet(WITH_A_COLD_HOST),
+    [{ name: "a11y-worker-2", url: "http://192.0.2.2:8765" }]);
+});
+
+test("a declaration this reader cannot honour is an ERROR, not a host left in by accident", () => {
+  const under = (line: string) => [
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
+    "        a11y-worker-1:", "          ansible_host: 192.0.2.1", `          ${line}`,
+    "        a11y-worker-2:", "          ansible_host: 192.0.2.2",
+  ].join("\n");
+  for (const bad of ["a11y_capture: no", 'a11y_capture: "false"', "a11y_capture: [false]", "a11y_capture:"]) {
+    assert.throws(() => workersFromInventory(under(bad)), /not as `true` or `false`/, bad);
+  }
+  // On the group rather than a host: read and dropped would be the silent shape.
+  const onGroup = WITH_A_COLD_HOST.replace("      hosts:\n        a11y-worker-1:",
+    "      a11y_capture: false\n      hosts:\n        a11y-worker-1:");
+  assert.throws(() => workersFromInventory(onGroup), /not a host in a11y_workers/);
+});
+
+test("excluding EVERY host is refused, because an empty A11Y_WORKERS means 'find local VMs'", () => {
+  const all = [
+    "all:", "  children:", "    a11y_workers:", "      hosts:",
+    "        a11y-worker-1:", "          ansible_host: 192.0.2.1", "          a11y_capture: false",
+  ].join("\n");
+  assert.throws(() => fleetEnvOutput(all), /capture set is empty/);
+  assert.equal(fleetEnvOutput(all, { mode: "list" }).stdout, "http://192.0.2.1:8765\n");
 });

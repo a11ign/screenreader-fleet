@@ -101,6 +101,13 @@ const HOST_LINE = /^\s*ansible_host\s*:\s*(\S+)\s*$/;
 const SUSPECT = /ansible_host\s*:/;
 /** A mapping key, with or without an inline value. Indentation is the only thing that says where it sits. */
 const KEY_LINE = /^(\s*)([A-Za-z_][\w.-]*)\s*:/;
+/**
+ * A host var declaring whether the host is in the CAPTURE SET. Absent means in: the default is unchanged, so
+ * a host that says nothing needs no inventory edit.
+ */
+const CAPTURE_KEY = "a11y_capture";
+const CAPTURE_LINE = new RegExp(`^(\\s*)${CAPTURE_KEY}\\s*:\\s*(\\S+)\\s*$`);
+const CAPTURE_SUSPECT = new RegExp(`${CAPTURE_KEY}\\s*:`);
 
 /**
  * The inventory group whose hosts are capture workers.
@@ -127,7 +134,10 @@ export const WORKER_GROUP = "a11y_workers";
  * tool that ACTS on a worker takes the name, every tool that REPORTS on one printed the address, and
  * nothing mapped between them. `collectHost` explains the incident.
  *
- * @typedef {{name: string|undefined, host: string}} Host
+ * `capture` is false for a host that declares `a11y_capture: false`: enrolled, served, deployed to, and not
+ * handed corpus cases.
+ *
+ * @typedef {{name: string|undefined, host: string, capture: boolean}} Host
  */
 
 /**
@@ -181,25 +191,31 @@ export function groupPerLine(text) {
 }
 
 /**
- * Worker URLs from the text of an inventory file.
+ * The hosts of one inventory group, each with whether it is in the capture set.
  *
- * Exported and pure so the strictness above is testable: a reader that has never been shown to reject
- * anything is a reader nobody knows the limits of.
+ * ONE reader for both questions ("the whole fleet" and "the capture set"), because a second pass over the
+ * file is a second parser, and this repo has paid for that shape already (`fleet-discover.mjs`).
  *
  * @param {string} text
- * @param {{ port?: number, group?: string }} [options]
- * @returns {string[]}
+ * @param {string} group
+ * @returns {Host[]}
  */
-export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
+function hostsInGroup(text, group) {
   /** @type {Host[]} */
   const hosts = [];
   /** @type {Frame[]} */
   const stack = [];
+  /** @type {Map<string, {capture: boolean, line: number}>} */
+  const declared = new Map();
   text.split(/\r?\n/).forEach((line, index) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return;
     const match = line.match(HOST_LINE);
     if (match) {
       collectHost(hosts, { match, index, stack, group });
+      return;
+    }
+    if (CAPTURE_SUSPECT.test(line)) {
+      readCaptureDeclaration(declared, { line, index, stack });
       return;
     }
     if (SUSPECT.test(line)) {
@@ -213,7 +229,95 @@ export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group =
   if (!hosts.length) {
     throw new Error(`no hosts found under ${group}.hosts in inventory.yml. Add one before running.`);
   }
-  return hosts.map(({ host }) => `http://${host}:${port}`);
+  return applyCaptureDeclarations(hosts, declared, group);
+}
+
+/**
+ * Record `a11y_capture: true|false` against the host whose var it is — the nearest enclosing key.
+ *
+ * Strict for the reason the header gives: `a11y_capture: no` or `"false"` that this reader took for "not
+ * declared" would leave a cold host in the capture set, and a capture guard would then refuse the run
+ * naming the wrong cause. Only the two literals are read; anything else names its line.
+ *
+ * @param {Map<string, {capture: boolean, line: number}>} declared
+ * @param {{line: string, index: number, stack: Frame[]}} at
+ */
+function readCaptureDeclaration(declared, { line, index, stack }) {
+  const match = line.match(CAPTURE_LINE);
+  const value = match?.[2];
+  if (value !== "true" && value !== "false") {
+    throw new Error(
+      `inventory.yml:${index + 1} declares ${CAPTURE_KEY} but not as \`true\` or \`false\`: ${line.trim()}\n`
+      + "This reader takes those two literals and nothing else, so a host is never left in or out of the "
+      + "capture set by a spelling it did not understand.");
+  }
+  const indent = /** @type {RegExpMatchArray} */ (match)[1].length;
+  const owner = [...stack].reverse().find((frame) => frame.indent < indent)?.key;
+  declared.set(owner ?? "", { capture: value === "true", line: index + 1 });
+}
+
+/**
+ * Attach each declaration to its host, and refuse one that belongs to no host of the group.
+ *
+ * A declaration on a group or on a host in another group would otherwise be read and dropped, which is the
+ * silent shape this module exists to refuse: somebody believes a machine is out of the capture set and it is
+ * not.
+ *
+ * @param {Host[]} hosts
+ * @param {Map<string, {capture: boolean, line: number}>} declared
+ * @param {string} group
+ * @returns {Host[]}
+ */
+function applyCaptureDeclarations(hosts, declared, group) {
+  const names = new Set(hosts.map((host) => host.name));
+  for (const [owner, { line }] of declared) {
+    if (!names.has(owner)) {
+      throw new Error(
+        `inventory.yml:${line} declares ${CAPTURE_KEY} on \`${owner}\`, which is not a host in ${group}.\n`
+        + `Declare it directly under the host (\`${group}.hosts.<name>.${CAPTURE_KEY}\`); it is not read anywhere else.`);
+    }
+  }
+  return hosts.map((host) => ({ ...host, capture: declared.get(host.name ?? "")?.capture ?? true }));
+}
+
+/**
+ * Worker URLs from the text of an inventory file.
+ *
+ * `scope` says which question is asked. `"fleet"` (the default) is every enrolled worker -- what `doctor`,
+ * `worker:code`, `fleet:status` and the deploy tooling mean, and they must keep seeing a worker that is
+ * serving but not capturing. `"capture"` is the fleet minus every host that declares `a11y_capture: false`
+ * -- what `A11Y_WORKERS` means. It is a string and not a flag because a boolean argument does not say
+ * which of the two you got.
+ *
+ * Exported and pure so the strictness above is testable: a reader that has never been shown to reject
+ * anything is a reader nobody knows the limits of.
+ *
+ * @param {string} text
+ * @param {{ port?: number, group?: string, scope?: "fleet" | "capture" }} [options]
+ * @returns {string[]}
+ */
+export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP, scope = "fleet" } = {}) {
+  const hosts = hostsInGroup(text, group);
+  const chosen = scope === "capture" ? hosts.filter((host) => host.capture) : hosts;
+  if (!chosen.length) {
+    // An empty A11Y_WORKERS means "find the local VMs", which do not exist on the control plane -- so an
+    // inventory with every host excluded must fail HERE, naming the cause, not as something unrelated.
+    throw new Error(`every host under ${group}.hosts declares ${CAPTURE_KEY}: false, so the capture set is empty.`);
+  }
+  return chosen.map(({ host }) => `http://${host}:${port}`);
+}
+
+/**
+ * The hosts left OUT of the capture set, so the command that leaves them out can say so.
+ *
+ * @param {string} text
+ * @param {{ port?: number, group?: string }} [options]
+ * @returns {{name: string, url: string}[]}
+ */
+export function hostsOutOfCaptureSet(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
+  return hostsInGroup(text, group)
+    .filter((host) => !host.capture)
+    .map(({ name, host }) => ({ name: name ?? host, url: `http://${host}:${port}` }));
 }
 
 /**
@@ -264,7 +368,7 @@ function collectHost(hosts, { match, index, stack, group }) {
     // tool that REPORTS on one printed only the address — and nothing mapped them. On 2026-08-24 that
     // sent `fleet:sleep` at the wrong machine: `fleet:status` named .224 as the Edge-drifted box, and
     // .224 is a11y-worker-FIVE. Two commands, one fleet, no shared vocabulary.
-    hosts.push({ name: stack[stack.length - 1]?.key, host: match[1].replace(/^["']|["']$/g, "") });
+    hosts.push({ name: stack[stack.length - 1]?.key, host: match[1].replace(/^["']|["']$/g, ""), capture: true });
     return;
   }
   if (found === undefined) {
@@ -390,16 +494,39 @@ export function resolveWorkerPool({
   return { urls: [], source: "A11Y_WORKER(S), inventory.yml and the local UTM pool — all empty" };
 }
 
-function main() {
-  const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
-  const workers = workersFromInventory(readFileSync(INVENTORY, "utf8"), { port });
-  if (process.argv.includes("--list")) {
-    process.stdout.write(`${workers.join("\n")}\n`);
-    return;
+/**
+ * What `fleet:env` prints, as data: `stdout` is what a shell reads, `stderr` is what the operator reads.
+ *
+ * `mode: "list"` is the WHOLE fleet, one URL per line, and leaves nobody out. The default is the capture
+ * set as an `export`, and it NAMES every host it left out on stderr -- an omission with no line is a
+ * machine nothing reports, which is the failure this module's header is about. stderr, because stdout is
+ * `eval`-ed.
+ *
+ * @param {string} text the inventory
+ * @param {{ port?: number, mode?: "env" | "list" }} [options]
+ * @returns {{stdout: string, stderr: string}}
+ */
+export function fleetEnvOutput(text, { port = DEFAULT_WORKER_PORT, mode = "env" } = {}) {
+  if (mode === "list") {
+    return { stdout: `${workersFromInventory(text, { port }).join("\n")}\n`, stderr: "" };
   }
+  const workers = workersFromInventory(text, { port, scope: "capture" });
+  const stderr = hostsOutOfCaptureSet(text, { port })
+    .map(({ name, url }) =>
+      `fleet:env: ${name} (${url}) is NOT in A11Y_WORKERS -- its inventory entry declares ${CAPTURE_KEY}: false. `
+      + "It is still enrolled: `--list`, `doctor` and `fleet:status` name it.\n")
+    .join("");
   // Shell-quoted, so `eval "$(npm run --silent fleet:env)"` is safe even if a hostname ever contains
   // something the shell would otherwise split on.
-  process.stdout.write(`export A11Y_WORKERS='${workers.join(",")}'\n`);
+  return { stdout: `export A11Y_WORKERS='${workers.join(",")}'\n`, stderr };
+}
+
+function main() {
+  const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
+  const { stdout, stderr } = fleetEnvOutput(readFileSync(INVENTORY, "utf8"),
+    { port, mode: process.argv.includes("--list") ? "list" : "env" });
+  process.stderr.write(stderr);
+  process.stdout.write(stdout);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
