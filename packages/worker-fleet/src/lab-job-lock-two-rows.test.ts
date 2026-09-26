@@ -138,10 +138,19 @@ dir="$STATE/$unit"
 [ -f "$dir/stdout.log" ] && cat "$dir/stdout.log" || echo "(no output)"
 `;
 
+// Row A's job stays running until the TEST writes its release file, not for a fixed number of seconds
+// (#2598): row B's `ansible-playbook` must reach the lock check while A is still running, and how long B
+// takes to get there depends on the runner's load (a merge-queue run was ejected when a 2s sleep expired
+// first). The timeout is generous and only exists so a hung test still ends -- and fails, exit 1, with a
+// message the test reads through A's own output.
 const JOB_SCRIPT = `#!/usr/bin/env bash
 set -euo pipefail
 echo "START $ROW_LABEL $*" >> "$PROGRESS_FILE"
-sleep "\${SLEEP_SECS:-1}"
+deadline=$((SECONDS + RELEASE_TIMEOUT_SECS))
+until [ -f "$RELEASE_FILE" ]; do
+  if [ "$SECONDS" -ge "$deadline" ]; then echo "never released after $RELEASE_TIMEOUT_SECS s" >&2; exit 1; fi
+  sleep 0.1
+done
 echo "DONE $ROW_LABEL $*" >> "$PROGRESS_FILE"
 `;
 
@@ -192,20 +201,27 @@ function writeWrapperPlaybook(tmp: string, repoDir: string) {
 /** One row's dispatch vars: a distinct --dataset/--shard, but the SAME job name every time. Returns the
  * `@<path>` extra-vars file path `ansible-playbook -e` takes. */
 function writeRowVars(tmp: string, spec: { progressFile: string, label: string, dataset: string,
-  shard: string, sleepSecs: number, jobScript: string }): string {
+  shard: string, releaseFile: string, jobScript: string }): string {
   const path = join(tmp, `vars-${spec.label}.json`);
   writeFileSync(path, JSON.stringify({
     job_name: "capture",
-    job_timeout: 30,
+    // Ansible polls the unit every 10s for job_timeout/10 retries, so this must outlast however long row A
+    // is held running -- the fake unit ignores RuntimeMaxSec, and a poll budget shorter than the hold
+    // would fail row A's own dispatch rather than exercise the lock.
+    job_timeout: 600,
     pull: false,
     job_argv: ["/bin/bash", spec.jobScript, `--dataset=${spec.dataset}`, `--shard=${spec.shard}`],
-    job_setenv: [`PROGRESS_FILE=${spec.progressFile}`, `ROW_LABEL=${spec.label}`, `SLEEP_SECS=${spec.sleepSecs}`],
+    job_setenv: [`PROGRESS_FILE=${spec.progressFile}`, `ROW_LABEL=${spec.label}`, `RELEASE_FILE=${spec.releaseFile}`,
+      `RELEASE_TIMEOUT_SECS=${RELEASE_TIMEOUT_SECS}`],
   }));
   return path;
 }
 
 const POLL_INTERVAL_MS = 50;
 const RUNNING_TIMEOUT_MS = 15_000;
+const RELEASE_TIMEOUT_SECS = 120;
+/** Longer than the 2s row A used to live for (#2598), so a regression to a fixed lifetime cannot pass it. */
+const PAST_OLD_LIFETIME_MS = 3_000;
 
 /** Poll the fake unit's `substate` file until it reads `running`, or give up. */
 async function waitUntilRunning(unitDir: string) {
@@ -252,8 +268,18 @@ test("the refusal happens before ANY task that could touch the checkout or start
     "the refusal must come before fetch, before checkout, and before dispatch");
 });
 
-test("two DIFFERENT rows, one job name: the second is refused before it runs, and never touches the first's progress file", { skip: HAS_ANSIBLE ? undefined : SKIP_REASON }, async () => {
+
+type Dispatch = ReturnType<typeof dispatchInBackground>;
+type TwoRows = { tmp: string, runEnv: NodeJS.ProcessEnv, progressFile: string, releaseA: string,
+  varsB: string, rowA: Dispatch };
+
+/** Row A running in the background (held there by its release file), row B's vars written, nothing else
+ * started. Runs `body` and always releases A and reaps it before the scratch dir goes, so a failed
+ * assertion cannot leave A's ansible-playbook polling a directory that no longer exists. */
+async function withRowARunning(body: (rows: TwoRows) => Promise<void>) {
   const tmp = mkdtempSync(join(tmpdir(), "lab-job-lock-two-rows-"));
+  let rowA: Dispatch | undefined;
+  const releaseA = join(tmp, "release-row-1829-a");
   try {
     const bin = join(tmp, "bin");
     const state = join(tmp, "state");
@@ -290,13 +316,14 @@ test("two DIFFERENT rows, one job name: the second is refused before it runs, an
       ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_SYSTEMD_STATE: state,
       HOME: tmp, ANSIBLE_HOME: ansibleHome, ANSIBLE_REMOTE_TEMP: remoteTmp, ANSIBLE_REMOTE_TMP: remoteTmp,
     };
-    // Two DIFFERENT rows: distinct --dataset/--shard, the SAME job name ("capture") both times.
+    // Two DIFFERENT rows: distinct --dataset/--shard, the SAME job name ("capture") both times. Row B's
+    // release file is never written: its job body must never run at all.
     const varsA = writeRowVars(tmp,
-      { progressFile, label: "row-1829-a", dataset: "alpha", shard: "0/4", sleepSecs: 2, jobScript });
-    const varsB = writeRowVars(tmp,
-      { progressFile, label: "row-1829-b", dataset: "beta", shard: "2/4", sleepSecs: 1, jobScript });
+      { progressFile, label: "row-1829-a", dataset: "alpha", shard: "0/4", releaseFile: releaseA, jobScript });
+    const varsB = writeRowVars(tmp, { progressFile, label: "row-1829-b", dataset: "beta", shard: "2/4",
+      releaseFile: join(tmp, "release-row-1829-b"), jobScript });
 
-    const rowA = dispatchInBackground(tmp, varsA, runEnv);
+    rowA = dispatchInBackground(tmp, varsA, runEnv);
     // Wait for row A's fake unit to actually be running before dispatching row B -- a fixed sleep would
     // either race row A (flaky) or pad every run with dead time.
     const unitDir = join(state, "a11y-job-capture");
@@ -306,35 +333,65 @@ test("two DIFFERENT rows, one job name: the second is refused before it runs, an
       `row A never reached 'running' within ${RUNNING_TIMEOUT_MS}ms -- its own ansible-playbook output so `
       + `far, which is the harness (or its environment), not the lock:\n${rowA.output()}`);
 
-    // Row B: a DIFFERENT row, same job name, dispatched while row A is still running.
-    const rowB = spawnSync("ansible-playbook", ["wrapper.yml", "-e", `@${varsB}`],
-      { cwd: tmp, env: runEnv, encoding: "utf8" });
-    const rowBOutput = `${rowB.stdout}\n${rowB.stderr}`;
-
-    // Refused, not silently dropped and not queued-forever: a real exit code the caller can act on.
-    assert.notEqual(rowB.status, 0, "row B (a different row, same job name) must be refused, not accepted");
-    assert.match(rowBOutput, /a11y-job-capture is already running/,
-      "the refusal must name the unit two different rows collided on");
-    assert.match(rowBOutput, /This is the lock working, not a fault/);
-    // "refused with a message naming retry" -- the acceptance's own words.
-    assert.match(rowBOutput, /journalctl -u a11y-job-capture/);
-    assert.match(rowBOutput, /systemctl stop a11y-job-capture/);
-    // Never reached dispatch: row B's own job body (which would print "row-1829-b") never ran.
-    assert.ok(!rowBOutput.includes("Start it: capture"),
-      "row B must be refused BEFORE the task that would start its job, not after");
-    assert.ok(!rowBOutput.includes("row-1829-b"), "row B's own job body must never have run at all");
-
-    // Row A finishes on its own, unaffected by row B's refused attempt.
-    const rowAExit = await rowA.done;
-    assert.equal(rowAExit, 0, `row A must complete normally: ${rowA.output()}`);
-    assert.match(rowA.output(), /capture completed \(success, exit 0\)/);
-
-    // The progress file is row A's alone -- never dropped, never corrupted, never interleaved.
-    const progress = readFileSync(progressFile, "utf8");
-    assert.equal(progress,
-      "START row-1829-a --dataset=alpha --shard=0/4\nDONE row-1829-a --dataset=alpha --shard=0/4\n",
-      `row B must never have written to row A's progress file: ${JSON.stringify(progress)}`);
+    await body({ tmp, runEnv, progressFile, releaseA, varsB, rowA });
   } finally {
+    writeFileSync(releaseA, "");
+    await rowA?.done;
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Row B: a DIFFERENT row, same job name, dispatched while row A is still running. */
+function dispatchRowB(rows: TwoRows) {
+  const rowB = spawnSync("ansible-playbook", ["wrapper.yml", "-e", `@${rows.varsB}`],
+    { cwd: rows.tmp, env: rows.runEnv, encoding: "utf8" });
+  return { status: rowB.status, output: `${rowB.stdout}\n${rowB.stderr}` };
+}
+
+function assertRowBRefused(rowB: { status: number | null, output: string }) {
+  // Refused, not silently dropped and not queued-forever: a real exit code the caller can act on.
+  assert.notEqual(rowB.status, 0, "row B (a different row, same job name) must be refused, not accepted");
+  assert.match(rowB.output, /a11y-job-capture is already running/,
+    "the refusal must name the unit two different rows collided on");
+  assert.match(rowB.output, /This is the lock working, not a fault/);
+  // "refused with a message naming retry" -- the acceptance's own words.
+  assert.match(rowB.output, /journalctl -u a11y-job-capture/);
+  assert.match(rowB.output, /systemctl stop a11y-job-capture/);
+  // Never reached dispatch: row B's own job body (which would print "row-1829-b") never ran.
+  assert.ok(!rowB.output.includes("Start it: capture"),
+    "row B must be refused BEFORE the task that would start its job, not after");
+  assert.ok(!rowB.output.includes("row-1829-b"), "row B's own job body must never have run at all");
+}
+
+/** Row A finishes on its own once released, unaffected by row B's refused attempt. */
+async function assertRowAFinishesUnaffected(rows: TwoRows) {
+  writeFileSync(rows.releaseA, "");
+  const rowAExit = await rows.rowA.done;
+  assert.equal(rowAExit, 0, `row A must complete normally: ${rows.rowA.output()}`);
+  assert.match(rows.rowA.output(), /capture completed \(success, exit 0\)/);
+
+  // The progress file is row A's alone -- never dropped, never corrupted, never interleaved.
+  const progress = readFileSync(rows.progressFile, "utf8");
+  assert.equal(progress,
+    "START row-1829-a --dataset=alpha --shard=0/4\nDONE row-1829-a --dataset=alpha --shard=0/4\n",
+    `row B must never have written to row A's progress file: ${JSON.stringify(progress)}`);
+}
+
+test("two DIFFERENT rows, one job name: the second is refused before it runs, and never touches the first's progress file", { skip: HAS_ANSIBLE ? undefined : SKIP_REASON }, async () => {
+  await withRowARunning(async (rows) => {
+    assertRowBRefused(dispatchRowB(rows));
+    await assertRowAFinishesUnaffected(rows);
+  });
+});
+
+// #2598's POSITIVE CONTROL: row A's lifetime used to be a literal `sleep 2`, so a row B dispatched later
+// than that (a loaded runner) reached the lock check after A was gone and was correctly ACCEPTED -- the test
+// failed although the lock had not. With A held by its release file, however long B takes, it is refused;
+// restore a fixed 2s lifetime in JOB_SCRIPT and this is the case that turns red.
+test("two DIFFERENT rows, one job name: the second is refused however long its dispatch takes after the first is running", { skip: HAS_ANSIBLE ? undefined : SKIP_REASON }, async () => {
+  await withRowARunning(async (rows) => {
+    await new Promise((res) => setTimeout(res, PAST_OLD_LIFETIME_MS));
+    assertRowBRefused(dispatchRowB(rows));
+    await assertRowAFinishesUnaffected(rows);
+  });
 });
