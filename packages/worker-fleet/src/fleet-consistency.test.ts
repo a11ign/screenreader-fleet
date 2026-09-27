@@ -14,20 +14,27 @@ const workerServerSource = () =>
   readFileSync(layerFile("@a11ign/nvda-worker", "src/server.mjs", { from: import.meta.dirname }), "utf8");
 
 /**
- * Everything the worker's `/health` environment reports, as TEXT: `runtimeEnvironment`'s block, and the display
- * sampler's reading, which is merged in on every call because the two display fields are sampled on a timer and
- * carry their age (#2673). A field that moved out of `runtimeEnvironment` is still reported, and a guard that
- * read only the block would have called it never sent.
+ * Everything the worker's `/health` environment reports, as TEXT: `runtimeEnvironment`'s block, the display
+ * sampler's reading (#2673) and the version sampler's reading (#2684) -- all three merged in on every call
+ * because the display and version fields are sampled on a timer and carry their age. A field that moved out
+ * of `runtimeEnvironment` is still reported, and a guard that read only the block would have called it
+ * never sent.
  */
 const workerReportedFieldsSource = () => {
   const server = workerServerSource();
   const start = server.indexOf("function runtimeEnvironment() {");
   const end = server.indexOf("function provisionRevision() {");
   assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
-  const sampler = readFileSync(layerFile("@a11ign/nvda-worker", "src/display-sample.mjs", { from: import.meta.dirname }), "utf8");
-  const current = sampler.indexOf("current: () => ({");
-  assert.ok(current !== -1, "display-sample.mjs no longer has the reading `currentEnvironment` merges in");
-  return server.slice(start, end) + sampler.slice(current);
+  const displaySample = readFileSync(layerFile("@a11ign/nvda-worker", "src/display-sample.mjs", { from: import.meta.dirname }), "utf8");
+  const displayCurrent = displaySample.indexOf("current: () => ({");
+  assert.ok(displayCurrent !== -1, "display-sample.mjs no longer has the reading `currentEnvironment` merges in");
+  // `windowsVersion`/`screenReaderVersion`/`browserVersion` moved off `runtimeEnvironment` the same way and
+  // for the same reason (#2684): `createVersionSampler` lives in `file-version.mjs`, not `server.mjs`,
+  // because `server.mjs` needs guidepup and cannot be imported off Windows to test the move BEHAVIOURALLY.
+  const fileVersion = readFileSync(layerFile("@a11ign/nvda-worker", "src/file-version.mjs", { from: import.meta.dirname }), "utf8");
+  const versionCurrent = fileVersion.indexOf("current: () => ({");
+  assert.ok(versionCurrent !== -1, "file-version.mjs no longer has the reading `currentEnvironment` merges in");
+  return server.slice(start, end) + displaySample.slice(displayCurrent) + fileVersion.slice(versionCurrent);
 };
 
 /**
