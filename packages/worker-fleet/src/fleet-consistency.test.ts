@@ -14,6 +14,23 @@ const workerServerSource = () =>
   readFileSync(layerFile("@a11ign/nvda-worker", "src/server.mjs", { from: import.meta.dirname }), "utf8");
 
 /**
+ * Everything the worker's `/health` environment reports, as TEXT: `runtimeEnvironment`'s block, and the display
+ * sampler's reading, which is merged in on every call because the two display fields are sampled on a timer and
+ * carry their age (#2673). A field that moved out of `runtimeEnvironment` is still reported, and a guard that
+ * read only the block would have called it never sent.
+ */
+const workerReportedFieldsSource = () => {
+  const server = workerServerSource();
+  const start = server.indexOf("function runtimeEnvironment() {");
+  const end = server.indexOf("function provisionRevision() {");
+  assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
+  const sampler = readFileSync(layerFile("@a11ign/nvda-worker", "src/display-sample.mjs", { from: import.meta.dirname }), "utf8");
+  const current = sampler.indexOf("current: () => ({");
+  assert.ok(current !== -1, "display-sample.mjs no longer has the reading `currentEnvironment` merges in");
+  return server.slice(start, end) + sampler.slice(current);
+};
+
+/**
  * THE FIXTURE ADDRESSES, BUILT FROM OCTETS. #63's history purge replaced every RFC 1918 literal in the
  * tree with one constant string, so the distinct guest addresses here collapsed into the same value and
  * tests about telling two workers apart started comparing a thing to itself. Built, they survive any
@@ -161,11 +178,7 @@ test("EVERY MUST_MATCH FIELD IS ONE THE WORKER ACTUALLY REPORTS", () => {
   // Asserted against server.mjs's SOURCE, the same narrow exception `provision-stamp.test.ts` states:
   // `server.mjs` imports guidepup, which constructs a ScreenReader at module scope and throws on a host
   // with no screen reader, so this file cannot import it on any runner this repo has.
-  const server = workerServerSource();
-  const start = server.indexOf("function runtimeEnvironment() {");
-  const end = server.indexOf("function provisionRevision() {");
-  assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
-  const reported = server.slice(start, end);
+  const reported = workerReportedFieldsSource();
 
   const missing = MUST_MATCH.map((f) => f.path).filter((path) => !reported.includes(`${path}:`));
   assert.deepEqual(missing, [], "MUST_MATCH compares fields the worker's /health environment never sends");
@@ -574,11 +587,7 @@ test("#2063: EVERY REPORTED_ONLY FIELD IS ONE THE WORKER ACTUALLY REPORTS", () =
   // `EVERY MUST_MATCH FIELD…` above, for the second channel, and it matters MORE here: a typo in
   // `MUST_MATCH` at least shows up as a permanent coverage gap that refuses a run, while a typo here is
   // a field that reads `unreported` for ever and looks exactly like a fleet that has not been deployed.
-  const server = workerServerSource();
-  const start = server.indexOf("function runtimeEnvironment() {");
-  const end = server.indexOf("function provisionRevision() {");
-  assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
-  const reported = server.slice(start, end);
+  const reported = workerReportedFieldsSource();
 
   const missing = REPORTED_ONLY.map((f) => f.path).filter((path) => !reported.includes(`${path}:`));
   assert.deepEqual(missing, [], "REPORTED_ONLY names fields the worker's /health environment never sends");
@@ -629,13 +638,14 @@ const HARDWARE_READINGS = [/640x480/, /Intel\(R\) (UHD|HD) Graphics 630/];
 const displayAdapterEntry = () => REPORTED_ONLY.find((f) => f.path === "displayAdapter")!.why;
 const workerDisplayAdapterComment = () => {
   const server = workerServerSource();
-  // The comment is the SUBJECT here, so it is not stripped -- and it is located by the two CODE lines
-  // that bracket it, so what is found cannot be a phrase that lives only in prose (#1213's defect).
-  const start = server.indexOf("windowSize: CAPTURE_WINDOW_SIZE,");
-  const end = server.indexOf("displayAdapter: displayAdapter(),");
+  // The comment is the SUBJECT here, so it is not stripped -- and it is located by the heading that opens it and
+  // the CODE line that ends it, so what is found cannot be a phrase that lives only in prose (#1213's defect).
+  // Since #2673 the comment is `displayAdapter`'s own docblock: the field left `runtimeEnvironment` for the sampler.
+  const start = server.indexOf("WHICH GRAPHICS ADAPTER THIS GUEST IS RUNNING ON");
+  const end = server.indexOf("async function displayAdapter() {");
   assert.ok(start !== -1 && end > start, "server.mjs no longer carries displayAdapter's comment to read");
   const between = server.slice(start, end);
-  assert.ok(/WHICH ADAPTER IS DRIVING/.test(between), "the code anchors no longer bracket displayAdapter's comment");
+  assert.ok(/REPORTED, NEVER GATED/.test(between), "the anchors no longer bracket displayAdapter's comment");
   return between;
 };
 
