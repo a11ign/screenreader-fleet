@@ -26,7 +26,7 @@
 // It also refuses to declare a difference the samples do not support -- see `./worker-stats.mjs`.
 // "Not distinguishable" is a real answer, and it is the one that was missing.
 import { writeFileSync, mkdirSync, realpathSync } from "node:fs";
-import { refuseIfBusy } from "./measure-guard.mjs";
+import { refuseIfBusy, sampleVitals } from "./measure-guard.mjs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";
 import { sampleHost, diffHost } from "./host-metrics.mjs";
@@ -131,14 +131,9 @@ function sweepDetail(/** @type {any} */ entries) {
 }
 
 
-async function vitals(/** @type {any} */ worker) {
-  try {
-    // `requestJson`, not `fetch`: see `diagnostics`, above.
-    const response = await requestJson(`${worker.replace(/\/$/, "")}/health`, { timeoutMs: 20_000 });
-    return response.ok ? response.json?.vitals ?? null : null;
-  } catch {
-    return null;
-  }
+/** `sampleVitals` says on stderr why a worker has none, so a blank column in the report has a reason. */
+async function vitals(/** @type {string} */ worker) {
+  return sampleVitals(worker, { warn: (line) => process.stderr.write(line) });
 }
 
 /**

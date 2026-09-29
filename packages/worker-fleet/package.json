@@ -15,6 +15,10 @@
     "./capacity": {
       "default": "./dist/host-capacity.mjs"
     },
+    "./probe-outcome": {
+      "types": "./dist/probe-outcome.d.mts",
+      "default": "./dist/probe-outcome.mjs"
+    },
     "./worker-http": {
       "types": "./dist/worker-http.d.mts",
       "default": "./dist/worker-http.mjs"

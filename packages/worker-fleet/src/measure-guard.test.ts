@@ -61,7 +61,9 @@ test("UNREACHABLE IS NOT FREE", async () => {
   try {
     await assert.rejects(() => refuseIfBusy([w.url], { what: "the reap interval" }),
       (error: Error) => {
-        assert.match(error.message, /unreachable/);
+        // Said as what was OBSERVED (#2683): a dropped socket is "did not answer", never "unreachable" or "down".
+        assert.match(error.message, /did not answer/);
+        assert.doesNotMatch(error.message, /unreachable|\bdown\b/);
         return true;
       });
   } finally { await w.close(); }
