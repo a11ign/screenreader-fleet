@@ -284,8 +284,12 @@ test("the pooled corpus job addresses the whole fleet, and the value is proved b
   // applied to the environment instead of to argv.
   assert.match(LAB_JOB, /A11Y_WORKERS=\{\{ lab_fleet_workers \}\}/,
     "the corpus capture must reach every worker, or the fleet sits idle for ~17.7 h instead of ~4.4 h");
-  assert.match(LAB_JOB, /groups\['a11y_workers'\]\s*\n?\s*\| map\('extract', hostvars, 'ansible_host'\)/,
+  // #2764: the addresses are read off `lab_capture_hosts`, which is the inventory's `a11y_workers` minus
+  // every host declaring `a11y_capture: false`. Both halves are pinned, so neither can move without this.
+  assert.match(LAB_JOB, /lab_fleet_workers: >-\s*\n\s*\{\{ lab_capture_hosts\s*\n?\s*\| map\('extract', hostvars, 'ansible_host'\)/,
     "the addresses must come from the inventory, which ADR 0012 makes the single source of truth");
+  assert.match(LAB_JOB, /lab_capture_hosts: >-\s*\n\s*\{\{ groups\['a11y_workers'\]/,
+    "the capture hosts must be derived from the inventory's a11y_workers group, not listed by hand");
   assert.match(LAB_JOB, /lab_fleet_workers is match\('\^http:\/\/\[0-9\.\]\+:8765/,
     "and must be proved to be exactly an address list before it becomes an environment variable");
 
