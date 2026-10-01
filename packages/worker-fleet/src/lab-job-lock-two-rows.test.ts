@@ -154,11 +154,18 @@ done
 echo "DONE $ROW_LABEL $*" >> "$PROGRESS_FILE"
 `;
 
-/** Fake `systemctl`/`systemd-run`/`journalctl` on a scratch `bin/`, so no root and no real unit is needed. */
+/** run-job.yml asks `corepack pnpm --version` before it starts a unit (#2893); a CI runner has no
+ * `/usr/bin/corepack`, so the wrapper play points `lab_corepack` at this and the lock is what is tested. */
+const FAKE_COREPACK = `#!/usr/bin/env bash
+echo 10.0.0
+`;
+
+/** Fake `systemctl`/`systemd-run`/`journalctl`/`corepack` on a scratch `bin/`, so no root and no real unit is needed. */
 function writeFakeSystemd(bin: string) {
   writeFileSync(join(bin, "systemctl"), FAKE_SYSTEMCTL, { mode: 0o755 });
   writeFileSync(join(bin, "systemd-run"), FAKE_SYSTEMD_RUN, { mode: 0o755 });
   writeFileSync(join(bin, "journalctl"), FAKE_JOURNALCTL, { mode: 0o755 });
+  writeFileSync(join(bin, "corepack"), FAKE_COREPACK, { mode: 0o755 });
 }
 
 /** A scratch git checkout at `tmp/repo`, tracking `tmp/origin.git` -- something real for run-job.yml's own
@@ -183,7 +190,7 @@ function setupFixtureRepo(tmp: string): string {
 }
 
 /** The wrapper play that includes the REAL, unmodified `run-job.yml` directly against `hosts: localhost`. */
-function writeWrapperPlaybook(tmp: string, repoDir: string) {
+function writeWrapperPlaybook(tmp: string, repoDir: string, bin: string) {
   writeFileSync(join(tmp, "wrapper.yml"), `---
 - name: exercise run-job.yml's lock directly
   hosts: localhost
@@ -192,6 +199,7 @@ function writeWrapperPlaybook(tmp: string, repoDir: string) {
   vars:
     lab_repo_path: "${repoDir}"
     lab_runs_path: "/tmp"
+    lab_corepack: "${join(bin, "corepack")}"
   tasks:
     - name: run it
       ansible.builtin.include_tasks: "${RUN_JOB_PATH}"
@@ -218,15 +226,20 @@ function writeRowVars(tmp: string, spec: { progressFile: string, label: string, 
 }
 
 const POLL_INTERVAL_MS = 50;
-const RUNNING_TIMEOUT_MS = 15_000;
+// Row A's ansible-playbook runs ~25 tasks before it starts the unit, and each task is a fork: measured on a
+// host at load average ~62 on 16 cores (2026-10-01, #2915) that outlasted the 15s this used to be. It is the
+// same defect as #2598's fixed 2s lifetime -- a wall-clock guess about a machine's speed -- so the wait now
+// ends when row A's playbook EXITS (a real harness failure, reported at once) and this cap only bounds a hang.
+const RUNNING_TIMEOUT_MS = 240_000;
 const RELEASE_TIMEOUT_SECS = 120;
 /** Longer than the 2s row A used to live for (#2598), so a regression to a fixed lifetime cannot pass it. */
 const PAST_OLD_LIFETIME_MS = 3_000;
 
-/** Poll the fake unit's `substate` file until it reads `running`, or give up. */
-async function waitUntilRunning(unitDir: string) {
+/** Poll the fake unit's `substate` file until it reads `running`, row A's playbook exits (it will never
+ * get there), or the hang cap passes. */
+async function waitUntilRunning(unitDir: string, rowAExited: () => boolean) {
   const deadline = Date.now() + RUNNING_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !rowAExited()) {
     if (existsSync(join(unitDir, "substate"))
       && readFileSync(join(unitDir, "substate"), "utf8").trim() === "running") return;
     await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
@@ -239,8 +252,9 @@ function dispatchInBackground(tmp: string, varsPath: string, runEnv: NodeJS.Proc
   let output = "";
   child.stdout.on("data", (d) => { output += String(d); });
   child.stderr.on("data", (d) => { output += String(d); });
-  const done = new Promise<number | null>((res) => child.on("close", (code) => res(code)));
-  return { done, output: () => output };
+  let exited = false;
+  const done = new Promise<number | null>((res) => child.on("close", (code) => { exited = true; res(code); }));
+  return { done, output: () => output, exited: () => exited };
 }
 
 test("the unit name is derived from job_name ALONE -- never from job_argv or job_setenv", () => {
@@ -287,7 +301,7 @@ async function withRowARunning(body: (rows: TwoRows) => Promise<void>) {
     mkdirSync(state);
     writeFakeSystemd(bin);
     const repoDir = setupFixtureRepo(tmp);
-    writeWrapperPlaybook(tmp, repoDir);
+    writeWrapperPlaybook(tmp, repoDir, bin);
 
     const jobScript = join(tmp, "job.sh");
     writeFileSync(jobScript, JOB_SCRIPT, { mode: 0o755 });
@@ -327,11 +341,11 @@ async function withRowARunning(body: (rows: TwoRows) => Promise<void>) {
     // Wait for row A's fake unit to actually be running before dispatching row B -- a fixed sleep would
     // either race row A (flaky) or pad every run with dead time.
     const unitDir = join(state, "a11y-job-capture");
-    await waitUntilRunning(unitDir);
+    await waitUntilRunning(unitDir, rowA.exited);
     assert.equal(existsSync(join(unitDir, "substate")) && readFileSync(join(unitDir, "substate"), "utf8").trim(),
       "running",
-      `row A never reached 'running' within ${RUNNING_TIMEOUT_MS}ms -- its own ansible-playbook output so `
-      + `far, which is the harness (or its environment), not the lock:\n${rowA.output()}`);
+      `row A never reached 'running' (its playbook ${rowA.exited() ? "exited" : `still going after ${RUNNING_TIMEOUT_MS}ms`}) `
+      + `-- its own ansible-playbook output so far, which is the harness (or its environment), not the lock:\n${rowA.output()}`);
 
     await body({ tmp, runEnv, progressFile, releaseA, varsB, rowA });
   } finally {
