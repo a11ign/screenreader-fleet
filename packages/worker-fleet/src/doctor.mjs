@@ -2,8 +2,8 @@
 // @ts-check
 // Can I run right now? One command, one answer.
 //
-//   npm run doctor            human-readable, with the fix for anything broken
-//   npm run doctor -- --json  machine-readable, for an agent
+//   pnpm run doctor           human-readable, with the fix for anything broken
+//   pnpm run doctor -- --json machine-readable, for an agent
 //
 // This exists because "is the environment ready" took five commands and some inference, and
 // the inference went wrong: a healthy VM was reported as a corrupted one because `utmctl`
@@ -28,7 +28,7 @@ import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
-import { npmCliInvocation } from "./npm-cli-executable.mjs";
+import { pnpmCliInvocation } from "./npm-cli-executable.mjs";
 import { requestJson } from "./worker-http.mjs";
 
 /**
@@ -37,7 +37,7 @@ import { requestJson } from "./worker-http.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--json"], { entry: import.meta.url, command: "npm run doctor" });
+refuseUnknownFlags(["--json"], { entry: import.meta.url, command: "pnpm run doctor" });
 
 const run = promisify(execFile);
 const JSON_OUT = process.argv.includes("--json");
@@ -191,7 +191,7 @@ export function workerControlFix(observed) {
   // script succeeds under `A11Y_LOCAL_VM=1` and that is a different situation with a different remedy.
   if (/DEPRECATED|refusing: set A11Y_LOCAL_VM/i.test(observed)) {
     return {
-      fix: "npm run fleet:status",
+      fix: "pnpm run fleet:status",
       note: "the local UTM VM path is deprecated and refused to run; capture on the bare-metal fleet. "
         + `To use the deprecated local VM anyway: A11Y_LOCAL_VM=1 ${CTL} pool`,
     };
@@ -287,7 +287,7 @@ function checkPrimaryCheckoutMark() {
   advise("primary checkout",
     "not marked, so the primary-checkout guards are INERT here. Correct for the lab, a worker or a "
     + "colleague's clone; wrong for the machine that drives the fleet.",
-    "npm run primary:mark -- --set   (only on the fleet-driving checkout — see docs/primary-checkout.md)");
+    "pnpm run primary:mark -- --set   (only on the fleet-driving checkout — see docs/primary-checkout.md)");
 }
 
 function checkControlPlaneIsolation() {
@@ -368,8 +368,8 @@ export function tscProjectUpToDate(tsconfigPath, { run = defaultTscRun } = {}) {
   /** @type {string} */
   let output;
   try {
-    const npx = npmCliInvocation("npx", ["tsc", "--build", "--dry", tsconfigPath]);
-    output = run(npx.command, npx.args);
+    const tsc = pnpmCliInvocation(["exec", "tsc", "--build", "--dry", tsconfigPath]);
+    output = run(tsc.command, tsc.args);
   } catch (error) {
     // `--dry` still exits 0 for a stale project (measured); a thrown error here is a REAL failure --
     // a missing tsconfig, a syntax error blocking even the dry check -- and its stdout, if any, is still
@@ -423,7 +423,7 @@ function checkCrossPackageDist() {
     resolvedRealPath = realpathSync(createRequire(import.meta.url).resolve(specifier));
   } catch (error) {
     return advise("dist-resolution", `could not resolve ${specifier} to check whose dist it comes from -- `
-      + `${/** @type {Error} */ (error).message}`, "npm run build");
+      + `${/** @type {Error} */ (error).message}`, "pnpm run build");
   }
 
   if (resolvesToThisCheckout(resolvedRealPath, realpathSync(thisCheckoutRoot))) {
@@ -431,7 +431,7 @@ function checkCrossPackageDist() {
   } else {
     const behindNote = behindOriginMainNote(checkoutRootFor(resolvedRealPath));
     advise("dist-resolution", `${specifier} resolves to ${resolvedRealPath} (NOT this checkout${behindNote})`,
-      "npm run primary:update && npm run build   # if that is the primary checkout");
+      "pnpm run primary:update && pnpm run build   # if that is the primary checkout");
   }
 
   // THE HALF A RESOLUTION CHECK ALONE MISSES: resolving to your OWN tree is no protection if your own
@@ -443,13 +443,13 @@ function checkCrossPackageDist() {
   const upToDate = tscProjectUpToDate(tsconfigPath);
   if (upToDate === null) {
     return advise("dist-freshness", `could not ask tsc whether ${tsconfigPath} is up to date`,
-      "npm run build");
+      "pnpm run build");
   }
   if (upToDate) {
     return add("dist-freshness", true, `packages/judge under ${distRoot} is up to date (tsc --build --dry)`);
   }
   advise("dist-freshness", `packages/judge under ${distRoot} is NOT up to date (tsc --build --dry) -- a `
-    + "build compiled before the source it now reflects", "npm run build   # in that checkout");
+    + "build compiled before the source it now reflects", "pnpm run build   # in that checkout");
 }
 
 // The DEFAULT here was "codex", and every part of that was wrong. `judge.ts` has no codex case at all —
@@ -801,7 +801,7 @@ async function checkDatasetPages() {
   const manifestPath = resolve(DATASET, "manifest.json");
   if (!existsSync(manifestPath)) {
     return add("dataset", false, "no manifest — the dataset has not been generated",
-      "npm run training:generate");
+      "pnpm run training:generate");
   }
   // Ask for a REAL page, not `/`.
   //
@@ -834,11 +834,11 @@ function checkRunState() {
   if (!p.startedAt) return add("run", true, "no capture run recorded");
   if (!p.finishedAt) {
     return add("run", false, `a run is UNFINISHED (started ${p.startedAt})`,
-      "npm run training:wait, or npm run training:capture -- --resume --no-cache");
+      "pnpm run training:wait, or pnpm run training:capture -- --resume --no-cache");
   }
   const failed = Object.values(p.cases ?? {}).filter((c) => c.status === "failed").length;
   add("run", failed === 0, `last run ${p.outcome ?? "finished"}`,
-    failed ? "npm run training:capture -- --resume --no-cache" : null);
+    failed ? "pnpm run training:capture -- --resume --no-cache" : null);
 }
 
 // --- report ---------------------------------------------------------------
@@ -863,7 +863,7 @@ function checkRunState() {
  */
 export function nextCommand(checkList = checks) {
   const broken = checkList.find((c) => !c.ok);
-  if (!broken) return "npm run training:capture";
+  if (!broken) return "pnpm run training:capture";
   return broken.fix ?? null;
 }
 
@@ -872,7 +872,7 @@ export function nextCommand(checkList = checks) {
  *
  * #1059: the field carried *"unlock the Mac if it is locked, then re-run …"*, and CLAUDE.md tells an agent
  * to read it and do that. A shape check is the only thing that can tell a command from an imperative
- * sentence without running it: **a command begins with an executable token** — an npm/node/git invocation,
+ * sentence without running it: **a command begins with an executable token** — a pnpm/npm/node/git invocation,
  * a path, or a `VAR=value` prefix — **and an English sentence begins with a verb or an article.**
  * @param {string|null} line
  * @returns {boolean}
@@ -880,7 +880,7 @@ export function nextCommand(checkList = checks) {
 export function isRunnableCommand(line) {
   if (line === null) return false;                 // absent is not unrunnable; the caller distinguishes them
   const first = line.trim().split(/\s+/)[0] ?? "";
-  return /^(?:[A-Z][A-Z0-9_]*=\S*|npm|npx|node|git|\.?\.?\/\S+|[a-z0-9_-]+\.(?:sh|mjs|js|ts|py))$/.test(first);
+  return /^(?:[A-Z][A-Z0-9_]*=\S*|pnpm|npm|npx|node|git|\.?\.?\/\S+|[a-z0-9_-]+\.(?:sh|mjs|js|ts|py))$/.test(first);
 }
 
 /**
