@@ -85,7 +85,9 @@ function referenced(text: string, doc: unknown): Set<string> {
   return names;
 }
 
-const playbooks = readdirSync(ANSIBLE).filter((name) => name.endsWith(".yml"))
+// A playbook is never a dotfile, and `lab-clear-failed.test.ts` writes `.mutant-<pid>.yml` into this
+// directory for its mutation check, so a concurrent run lists a file that is gone by the time it is read (#2871).
+const playbooks = readdirSync(ANSIBLE).filter((name) => name.endsWith(".yml") && !name.startsWith("."))
   .concat(readdirSync(join(ANSIBLE, "tasks")).map((name) => `tasks/${name}`));
 
 /** Inventory group_vars are global, and so are the vars an include site hands to a task file. */
