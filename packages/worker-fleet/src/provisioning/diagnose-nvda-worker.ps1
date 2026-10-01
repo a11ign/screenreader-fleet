@@ -84,7 +84,7 @@ if (Test-Path $gpJson) {
   if ([version]($gp -replace '-.*$') -lt [version]'0.29.0') {
     Fail "guidepup $gp cannot drive NVDA 2026.x" 'bump to >=0.29.2; symptom is "NVDA not installed" thrown from NVDAClient.connect'
   } else { Pass "guidepup $gp speaks NVDA 2026 core Remote Access" }
-} else { Fail '@guidepup/guidepup not installed' 'npm install' }
+} else { Fail '@guidepup/guidepup not installed' 'corepack pnpm install --frozen-lockfile' }
 
 # ---------------------------------------------------------------------------
 Section 'Layer 4: NVDA install integrity'

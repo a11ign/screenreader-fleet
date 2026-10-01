@@ -20,7 +20,7 @@
 #   A11Y_REPO_PATH        checkout location (default %USERPROFILE%\a11y-witness)
 #   A11Y_PORT             worker port; must match the client's A11Y_WORKER (default 8765)
 #   A11Y_TASK_NAME        scheduled-task name (default a11ysrv)
-#   A11Y_SKIP_NPM_INSTALL set to 1 to re-apply only OS/NVDA configuration
+#   A11Y_SKIP_INSTALL     set to 1 to re-apply only OS/NVDA configuration
 
 $ErrorActionPreference = 'Stop'
 
@@ -50,16 +50,16 @@ function Resolve-RepoFile($name, [switch] $Required) {
 }
 $Port           = if ($env:A11Y_PORT) { [int] $env:A11Y_PORT } else { 8765 }
 $TaskName       = if ($env:A11Y_TASK_NAME) { $env:A11Y_TASK_NAME } else { 'a11ysrv' }
-$SkipNpmInstall = $env:A11Y_SKIP_NPM_INSTALL -eq '1'
+$SkipInstall    = $env:A11Y_SKIP_INSTALL -eq '1'
 $script:warnings = @()
 
 function Step($n, $msg) { Write-Host "`n[$n] $msg" -ForegroundColor Cyan }
 function OK($msg)       { Write-Host "    OK    $msg" -ForegroundColor Green }
 function Warn($msg)     { Write-Host "    WARN  $msg" -ForegroundColor Yellow; $script:warnings += $msg }
 
-# npm and npx write progress and warnings to stderr as a matter of course. With
+# pnpm and npx write progress and warnings to stderr as a matter of course. With
 # $ErrorActionPreference = 'Stop', PowerShell promotes ANY native stderr line to a
-# terminating NativeCommandError — so npm's routine "allow-scripts" warning would
+# terminating NativeCommandError — so pnpm's routine ignored-build-scripts warning would
 # abort provisioning with a misleading error. Relax error handling around native
 # calls and gate on the only trustworthy signal: the process exit code.
 function Invoke-Native($exe, [string[]] $cmdArgs, [string] $what, [int] $tail = 4) {
@@ -75,7 +75,10 @@ function Invoke-Native($exe, [string[]] $cmdArgs, [string] $what, [int] $tail = 
 
 # npx.ps1 is blocked by the default execution policy, so always call the .cmd.
 $npx = Join-Path $env:ProgramFiles 'nodejs\npx.cmd'
-$npm = Join-Path $env:ProgramFiles 'nodejs\npm.cmd'
+# #2890: pnpm is reached as `corepack pnpm`, never a global install: Node 24's zip ships corepack and
+# `packageManager` in package.json pins the version. The SAME spelling roles/worker/tasks/nvda.yml uses
+# (packages/control/src/worker-install-sites-match.test.ts, provisioning-installs-with-pnpm.test.ts).
+$corepack = Join-Path $env:ProgramFiles 'nodejs\corepack.cmd'
 
 # ---------------------------------------------------------------------------
 Step 1 'Preconditions'
@@ -83,10 +86,10 @@ Step 1 'Preconditions'
 if (-not (Test-Path $RepoPath)) { throw "Repo not found at $RepoPath. Clone it first, or pass -RepoPath." }
 OK "repo at $RepoPath"
 
-foreach ($exe in @($npx, $npm)) {
+foreach ($exe in @($npx, $corepack)) {
   if (-not (Test-Path $exe)) { throw "Node.js not found ($exe). Install it: winget install --id OpenJS.NodeJS.LTS -e --silent" }
 }
-OK "node $(& node --version), npm $(& $npm --version)"
+OK "node $(& node --version), pnpm $(& $corepack pnpm --version)"
 
 # NVDA is a GUI app: it needs a real logged-on desktop. Over SSH alone there is no
 # interactive session and NVDA announces nothing at all, so this is worth asserting
@@ -245,14 +248,28 @@ else { Warn 'not elevated: the firewall and Edge-policy steps will be skipped.' 
 # ---------------------------------------------------------------------------
 Step 2 'Dependencies'
 
-if ($SkipNpmInstall) { OK 'skipped (A11Y_SKIP_NPM_INSTALL=1)' }
+if ($SkipInstall) { OK 'skipped (A11Y_SKIP_INSTALL=1)' }
 else {
   Push-Location $RepoPath
-  try { Invoke-Native $npm @('install') 'npm install' }
+  try {
+    $env:COREPACK_ENABLE_DOWNLOAD_PROMPT = '0'
+    # ONE-TIME MIGRATION: a tree npm made carries node_modules\.package-lock.json, and pnpm installed over it
+    # leaves every npm-hoisted package in place -- the hoisting that lets an undeclared import resolve.
+    # `rmdir` rather than Remove-Item -Recurse: npm's workspace links are junctions, and rmdir removes a
+    # junction without following it into packages\.
+    if (Test-Path 'node_modules\.package-lock.json') {
+      OK 'node_modules was made by npm: removing it once, so nothing npm hoisted survives beside pnpm'
+      cmd.exe /d /c rmdir /s /q node_modules
+      if (Test-Path 'node_modules') { throw 'could not remove node_modules' }
+    }
+    # FROZEN: pnpm-lock.yaml is the specification, so a drifted manifest refuses rather than resolving a
+    # tree no other worker has (guidepup's version is evidence in the capture cache key).
+    Invoke-Native $corepack @('pnpm', 'install', '--frozen-lockfile', '--prefer-offline') 'installing dependencies'
+  }
   finally { Pop-Location }
 }
 $gpManifest = Join-Path $RepoPath 'node_modules\@guidepup\guidepup\package.json'
-if (-not (Test-Path $gpManifest)) { throw '@guidepup/guidepup is not installed. Run npm install.' }
+if (-not (Test-Path $gpManifest)) { throw '@guidepup/guidepup is not installed. Run: corepack pnpm install --frozen-lockfile' }
 $gpVersion = (Get-Content $gpManifest -Raw | ConvertFrom-Json).version
 OK "@guidepup/guidepup $gpVersion"
 
