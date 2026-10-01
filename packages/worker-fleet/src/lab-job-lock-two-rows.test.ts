@@ -154,11 +154,18 @@ done
 echo "DONE $ROW_LABEL $*" >> "$PROGRESS_FILE"
 `;
 
-/** Fake `systemctl`/`systemd-run`/`journalctl` on a scratch `bin/`, so no root and no real unit is needed. */
+/** run-job.yml asks `corepack pnpm --version` before it starts a unit (#2893); a CI runner has no
+ * `/usr/bin/corepack`, so the wrapper play points `lab_corepack` at this and the lock is what is tested. */
+const FAKE_COREPACK = `#!/usr/bin/env bash
+echo 10.0.0
+`;
+
+/** Fake `systemctl`/`systemd-run`/`journalctl`/`corepack` on a scratch `bin/`, so no root and no real unit is needed. */
 function writeFakeSystemd(bin: string) {
   writeFileSync(join(bin, "systemctl"), FAKE_SYSTEMCTL, { mode: 0o755 });
   writeFileSync(join(bin, "systemd-run"), FAKE_SYSTEMD_RUN, { mode: 0o755 });
   writeFileSync(join(bin, "journalctl"), FAKE_JOURNALCTL, { mode: 0o755 });
+  writeFileSync(join(bin, "corepack"), FAKE_COREPACK, { mode: 0o755 });
 }
 
 /** A scratch git checkout at `tmp/repo`, tracking `tmp/origin.git` -- something real for run-job.yml's own
@@ -183,7 +190,7 @@ function setupFixtureRepo(tmp: string): string {
 }
 
 /** The wrapper play that includes the REAL, unmodified `run-job.yml` directly against `hosts: localhost`. */
-function writeWrapperPlaybook(tmp: string, repoDir: string) {
+function writeWrapperPlaybook(tmp: string, repoDir: string, bin: string) {
   writeFileSync(join(tmp, "wrapper.yml"), `---
 - name: exercise run-job.yml's lock directly
   hosts: localhost
@@ -192,6 +199,7 @@ function writeWrapperPlaybook(tmp: string, repoDir: string) {
   vars:
     lab_repo_path: "${repoDir}"
     lab_runs_path: "/tmp"
+    lab_corepack: "${join(bin, "corepack")}"
   tasks:
     - name: run it
       ansible.builtin.include_tasks: "${RUN_JOB_PATH}"
@@ -287,7 +295,7 @@ async function withRowARunning(body: (rows: TwoRows) => Promise<void>) {
     mkdirSync(state);
     writeFakeSystemd(bin);
     const repoDir = setupFixtureRepo(tmp);
-    writeWrapperPlaybook(tmp, repoDir);
+    writeWrapperPlaybook(tmp, repoDir, bin);
 
     const jobScript = join(tmp, "job.sh");
     writeFileSync(jobScript, JOB_SCRIPT, { mode: 0o755 });
