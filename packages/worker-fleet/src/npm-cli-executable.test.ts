@@ -27,11 +27,13 @@ import {
   npmCliScriptCandidates as rootCandidates,
   resolveNpmCliScript as rootResolve,
   npmCliInvocation as rootInvocation,
+  pnpmCliInvocation as rootPnpm,
 } from "../../../scripts/npm-cli-executable.mjs";
 import {
   npmCliScriptCandidates as localCandidates,
   resolveNpmCliScript as localResolve,
   npmCliInvocation as localInvocation,
+  pnpmCliInvocation as localPnpm,
 } from "./npm-cli-executable.mjs";
 
 /** Runs `fn` with `process.execPath` overridden, and restores it afterwards even if `fn` throws. */
@@ -152,5 +154,48 @@ test("both copies build the identical argv shape: process.execPath, the resolved
     assert.deepEqual(localResult, rootResult);
     assert.equal(rootResult.command, process.execPath);
     assert.deepEqual(rootResult.args, [rootResolve(name), ...args]);
+  }
+});
+
+/** Runs `fn` with `npm_execpath` set (or removed), restored afterwards. */
+function withNpmExecpath(value: string | undefined, fn: () => void): void {
+  const original = process.env.npm_execpath;
+  if (value === undefined) delete process.env.npm_execpath;
+  else process.env.npm_execpath = value;
+  try {
+    fn();
+  } finally {
+    if (original === undefined) delete process.env.npm_execpath;
+    else process.env.npm_execpath = original;
+  }
+}
+
+test("#2890: both copies reach pnpm the same three ways, in the same order, and say what was tried when none exists", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "pnpm-cli-parity-")));
+  try {
+    const args = ["exec", "tsc", "--build"];
+    const parentScript = join(root, "pnpm.cjs");
+    writeFileSync(parentScript, "// fake pnpm.cjs\n");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "corepack"), "#!/bin/sh\n");
+    const agree = (expected: { command: string, args: string[] }) => {
+      assert.deepEqual(rootPnpm(args), expected);
+      assert.deepEqual(localPnpm(args), expected);
+    };
+    // 1. started BY pnpm: npm_execpath wins over everything on PATH
+    withNpmExecpath(parentScript, () => withPath(bin, () => agree({ command: process.execPath, args: [parentScript, ...args] })));
+    // 3. no pnpm anywhere but corepack on PATH: `corepack pnpm ...`
+    withNpmExecpath(undefined, () => withPath(bin, () => agree({ command: join(bin, "corepack"), args: ["pnpm", ...args] })));
+    // 2. a pnpm on PATH outranks corepack
+    writeFileSync(join(bin, "pnpm"), "#!/bin/sh\n");
+    withNpmExecpath(undefined, () => withPath(bin, () => agree({ command: join(bin, "pnpm"), args })));
+    // nothing at all: both throw the same words
+    withNpmExecpath(undefined, () => withPath("", () => {
+      assert.throws(() => rootPnpm(args), /could not find pnpm/);
+      assert.throws(() => localPnpm(args), /could not find pnpm/);
+    }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

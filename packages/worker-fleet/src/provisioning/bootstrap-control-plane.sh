@@ -39,11 +39,11 @@ REPO_PATH="${A11Y_REPO_PATH:-$HOME/a11y-witness}"
 # WHICH HALF OF THE CONTROL PLANE IS THIS?  (A11Y_ROLE=control|lab, default both)
 #
 # ADR 0012 splits them, and the reason is credentials rather than tidiness: the SSH key that can
-# reconfigure twelve Windows machines should not sit next to 100 MB of npm transitive dependencies and a
+# reconfigure twelve Windows machines should not sit next to 100 MB of transitive dependencies and a
 # Python venv, which are the largest supply-chain surface in the system.
 #
 #   control  ansible + the fleet key. No node_modules, no venv, no corpus. Rebuildable in a minute.
-#   lab      npm install + venv + the corpus. Talks to workers over HTTP only. Holds NO key.
+#   lab      pnpm install + venv + the corpus. Talks to workers over HTTP only. Holds NO key.
 #
 # `both` remains the default so a single-box setup still works and nobody is forced into two containers
 # on day one -- but it is the thing to grow out of, not the target.
@@ -108,7 +108,25 @@ else
 fi
 cd "$REPO_PATH"
 if is_lab; then
-  npm install --silent --no-audit --no-fund
+  # #2890: `corepack pnpm install --frozen-lockfile`, the SAME spelling `roles/worker/tasks/nvda.yml` uses
+  # (pinned by `provisioning-installs-with-pnpm.test.ts`). `packageManager` in package.json names the pnpm
+  # version and `pnpm-lock.yaml` is the specification: a plain install here resolved versions the lockfile
+  # never named, and a lab built that way captured evidence no other machine could reproduce.
+  command -v corepack >/dev/null || {
+    echo "corepack is not on PATH (Node 25+ no longer ships it). Use a Node that does (24 LTS), or install corepack from its own distribution" >&2
+    exit 1
+  }
+  export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+  # ONE-TIME MIGRATION: a tree npm made carries `node_modules/.package-lock.json`, and pnpm installed over it
+  # leaves every npm-hoisted package in place -- the hoisting that lets an undeclared import resolve.
+  if [ -f node_modules/.package-lock.json ]; then
+    ok 'node_modules was made by npm: removing it once, so nothing npm hoisted survives beside pnpm'
+    rm -rf "${REPO_PATH:?}/node_modules"
+  fi
+  corepack pnpm install --frozen-lockfile --silent
+  # The remedies this script prints below say `pnpm run ...`, so make `pnpm` a command an operator can type.
+  # `corepack enable` writes beside node, which needs root where node came from a package.
+  $SUDO corepack enable pnpm
   ok 'dependencies installed'
 
   # The LOCAL scorer is the default judge and the only one that ships (JUDGE_BACKEND defaults to
@@ -383,9 +401,9 @@ cat <<EOF
 --- Control plane ready ---
 
   Find and adopt workers:
-    npm run fleet:discover                 # scan, and reconcile against inventory.yml
+    pnpm run fleet:discover                # scan, and reconcile against inventory.yml
     \$EDITOR packages/control/ansible/inventory.yml     # ansible_host + mac per box
-    eval "\$(npm run --silent fleet:env)"   # A11Y_WORKERS, derived from that inventory
+    eval "\$(pnpm run --silent fleet:env)"  # A11Y_WORKERS, derived from that inventory
 
   Build one:
     packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub
@@ -396,9 +414,9 @@ cat <<EOF
     ansible-playbook wake.yml / sleep.yml
 
   Capture:
-    npm run doctor
-    npm run fleet:status
-    npm run training:capture
+    pnpm run doctor
+    pnpm run fleet:status
+    pnpm run training:capture
 
 Nothing here depends on a Mac. Re-run this script any time; every step skips itself
 when it is already done, and the corpus and repo are updated in place.
