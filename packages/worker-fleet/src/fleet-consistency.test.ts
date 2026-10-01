@@ -11,7 +11,7 @@ import { layerFile } from "../../guards/src/layer-file.mjs";
 
 /** The worker's `server.mjs` as TEXT, found by package name (#2613): it is not importable (guidepup at module scope) and not an export. */
 const workerServerSource = () =>
-  readFileSync(layerFile("@a11ign/nvda-worker", "src/server.mjs", { from: import.meta.dirname }), "utf8");
+  readFileSync(layerFile("@a11ign/screenreader-worker", "src/server.mjs", { from: import.meta.dirname }), "utf8");
 
 /**
  * Everything the worker's `/health` environment reports, as TEXT: `runtimeEnvironment`'s block, the display
@@ -25,13 +25,13 @@ const workerReportedFieldsSource = () => {
   const start = server.indexOf("function runtimeEnvironment() {");
   const end = server.indexOf("function provisionRevision() {");
   assert.ok(start !== -1 && end > start, "server.mjs no longer has a runtimeEnvironment block to read");
-  const displaySample = readFileSync(layerFile("@a11ign/nvda-worker", "src/display-sample.mjs", { from: import.meta.dirname }), "utf8");
+  const displaySample = readFileSync(layerFile("@a11ign/screenreader-worker", "src/display-sample.mjs", { from: import.meta.dirname }), "utf8");
   const displayCurrent = displaySample.indexOf("current: () => ({");
   assert.ok(displayCurrent !== -1, "display-sample.mjs no longer has the reading `currentEnvironment` merges in");
   // `windowsVersion`/`screenReaderVersion`/`browserVersion` moved off `runtimeEnvironment` the same way and
   // for the same reason (#2684): `createVersionSampler` lives in `file-version.mjs`, not `server.mjs`,
   // because `server.mjs` needs guidepup and cannot be imported off Windows to test the move BEHAVIOURALLY.
-  const fileVersion = readFileSync(layerFile("@a11ign/nvda-worker", "src/file-version.mjs", { from: import.meta.dirname }), "utf8");
+  const fileVersion = readFileSync(layerFile("@a11ign/screenreader-worker", "src/file-version.mjs", { from: import.meta.dirname }), "utf8");
   const versionCurrent = fileVersion.indexOf("current: () => ({");
   assert.ok(versionCurrent !== -1, "file-version.mjs no longer has the reading `currentEnvironment` merges in");
   return server.slice(start, end) + displaySample.slice(displayCurrent) + fileVersion.slice(versionCurrent);

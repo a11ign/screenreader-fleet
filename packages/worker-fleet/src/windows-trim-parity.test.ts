@@ -22,7 +22,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { REMOVABLE_APPX, KEEP_PATTERNS } from "@a11ign/nvda-worker/windows-trim";
+import { REMOVABLE_APPX, KEEP_PATTERNS } from "@a11ign/screenreader-worker/windows-trim";
 
 const PS1 = fileURLToPath(
   new URL("./provisioning/build-lean-worker-image.ps1", import.meta.url));

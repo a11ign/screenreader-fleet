@@ -37,7 +37,7 @@
  * ## The comparison itself lives in `code-drift.mjs`, and this file is the reason for the split
  *
  * `expectedWorkerCode` below needs `codeVersion`/`workerSourceDir`, reached through a SUBPATH export
- * (`@a11ign/nvda-worker/code-version`) rather than a relative path — a relative one drags
+ * (`@a11ign/screenreader-worker/code-version`) rather than a relative path — a relative one drags
  * `nvda-worker`'s `.mjs` files into this package's own tsc project and the build dies with TS5055 ("would
  * overwrite input file"). That subpath resolves through `node_modules`, which is exactly what
  * `packages/control` does not have (ADR 0012) — so when `lab-job.mjs` needed this same comparison BEFORE
@@ -53,7 +53,7 @@ import { codeDrift, describeCodeDrift, describeEmptyPool, readWorkerCode, remedy
 // also the shape already in use for the same reason -- `@a11ign/worker-fleet/worker-http`.
 // `code-version.mjs` imports nothing but node stdlib and `worker-files.mjs`, which is why it is safe and
 // why it is its own module. Still the ONE hasher: the subpath is the same function.
-import { codeVersion, workerSourceDir } from "@a11ign/nvda-worker/code-version";
+import { codeVersion, workerSourceDir } from "@a11ign/screenreader-worker/code-version";
 
 /** The hash this checkout expects every worker to be serving. One hasher, shared with the guest. */
 export const expectedWorkerCode = () => codeVersion(workerSourceDir());

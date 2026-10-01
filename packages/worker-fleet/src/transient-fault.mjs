@@ -18,7 +18,7 @@
 // are copied as string literals... because no ./capture-faults subpath is exported". `capture-faults.mjs`
 // has no imports of its own, so it was always safe to expose; the subpath just did not exist. Reading the
 // actual codes here means a renamed fault cannot silently stop being recognised as recoverable.
-import { FAULT } from "@a11ign/nvda-worker/capture-faults";
+import { FAULT } from "@a11ign/screenreader-worker/capture-faults";
 
 /**
  * Recoverable, or the end of this case?
