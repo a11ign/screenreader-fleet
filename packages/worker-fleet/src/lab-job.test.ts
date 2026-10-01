@@ -610,7 +610,7 @@ test("a job that pulled rebuilds, or a gate scores compiled code that is not the
   // The sibling failure is already in CLAUDE.md — "a release-gate re-run measured code from three commits
   // earlier" — but that was a pull that silently failed. This is a pull that SUCCEEDED and a build that
   // never happened, which is harder to notice: `git log` says exactly what you expect.
-  assert.match(RUN_JOB, /argv: \[\/usr\/bin\/npm, run, build\]/, "a pulled checkout must be rebuilt");
+  assert.match(RUN_JOB, /argv: \[\/usr\/bin\/corepack, pnpm, run, build\]/, "a pulled checkout must be rebuilt");
   const build = RUN_JOB.indexOf("Rebuild the compiled packages");
   const merge = RUN_JOB.indexOf("Fast-forward to origin/main");
   const start = RUN_JOB.indexOf('- name: "Start it:');
@@ -1012,7 +1012,7 @@ function resolvedScriptFile(argv: unknown): string | undefined {
   const direct = tokens.find((t) => t.endsWith(".mjs") || t.endsWith(".ts"));
   if (direct) return direct;
   const runIndex = tokens.indexOf("run");
-  if (!tokens[0]?.includes("npm") || runIndex < 0) return undefined;
+  if (!/npm|corepack/.test(tokens[0] ?? "") || runIndex < 0) return undefined; // `/usr/bin/corepack pnpm run` (#2893) or npm
   const scriptName = tokens[runIndex + 1] === "--silent" ? tokens[runIndex + 2] : tokens[runIndex + 1];
   const command = PACKAGE_SCRIPTS[scriptName ?? ""];
   return command ? resolvedScriptFile(command.split(/\s+/)) : undefined;
