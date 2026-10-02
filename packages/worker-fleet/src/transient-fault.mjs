@@ -8,7 +8,7 @@
  * package already exists for exactly that ("host-side lifecycle, health and capacity for a fleet of
  * Windows NVDA capture workers"), and `capture-client.mjs` — which needs this to decide whether a lost
  * response is worth reconciling rather than failing outright — moved here alongside it for the same
- * reason: `packages/cli` can depend on `@a11ign/worker-fleet` (it already does, for `requestJson`)
+ * reason: `packages/cli` can depend on `@a11ign/screenreader-fleet` (it already does, for `requestJson`)
  * but must never depend on `@a11ign/lab`, which is private and never published.
  *
  * `capture-decisions.mjs` re-exports `isTransient` from here so every existing lab-side importer is

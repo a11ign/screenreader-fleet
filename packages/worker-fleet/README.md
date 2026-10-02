@@ -1,15 +1,15 @@
-# `@a11ign/worker-fleet`
+# `@a11ign/screenreader-fleet`
 
 Host-side lifecycle, health and capacity for a fleet of Windows NVDA capture workers. Runs on the machine that
 *drives* the workers — no NVDA, no guidepup, no Windows.
 
 ```bash
-npm install @a11ign/worker-fleet
+npm install @a11ign/screenreader-fleet
 npx a11ign-doctor          # can I run right now? every check names its own fix
 ```
 
 ```js
-import { leaseWorker } from "@a11ign/worker-fleet";
+import { leaseWorker } from "@a11ign/screenreader-fleet";
 
 const lease = await leaseWorker({ after: "stop" });
 try {
@@ -44,7 +44,7 @@ own Windows box, the VM lifecycle below still applies to you exactly as written.
 ## Capacity is measured, never assumed
 
 ```js
-import { availableHostMemoryMb, workersHostCanRun } from "@a11ign/worker-fleet/capacity";
+import { availableHostMemoryMb, workersHostCanRun } from "@a11ign/screenreader-fleet/capacity";
 ```
 
 A worker VM costs the host **~8 GB**, not the 4 GB it is configured with — QEMU's overhead on top of guest RAM
@@ -65,7 +65,7 @@ Two rules follow, both learned the hard way:
 ## Health: watch `recoveries`, not failures
 
 ```js
-import { assessWorker } from "@a11ign/worker-fleet/health";
+import { assessWorker } from "@a11ign/screenreader-fleet/health";
 ```
 
 The worst worker fault this fleet has had produced **zero failures**. One guest's NVDA went mute on 4 of 4
@@ -79,7 +79,7 @@ appears to work.
 ## The provisioning scripts ship with the package
 
 ```js
-import { fleetScriptPaths } from "@a11ign/worker-fleet";
+import { fleetScriptPaths } from "@a11ign/screenreader-fleet";
 fleetScriptPaths().workerCtl;   // absolute path to worker-ctl.sh
 ```
 

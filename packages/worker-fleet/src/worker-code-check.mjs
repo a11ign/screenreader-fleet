@@ -50,7 +50,7 @@ import { codeDrift, describeCodeDrift, describeEmptyPool, readWorkerCode, remedy
 
 // A SUBPATH export, not a deep relative path: `../../nvda-worker/src/...` drags those .mjs files into
 // worker-fleet's tsc project and the build dies with TS5055 "would overwrite input file". The subpath is
-// also the shape already in use for the same reason -- `@a11ign/worker-fleet/worker-http`.
+// also the shape already in use for the same reason -- `@a11ign/screenreader-fleet/worker-http`.
 // `code-version.mjs` imports nothing but node stdlib and `worker-files.mjs`, which is why it is safe and
 // why it is its own module. Still the ONE hasher: the subpath is the same function.
 import { codeVersion, workerSourceDir } from "@a11ign/screenreader-worker/code-version";

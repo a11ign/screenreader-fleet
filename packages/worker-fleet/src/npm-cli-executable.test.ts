@@ -2,7 +2,7 @@
  * `npm-cli-executable.mjs` is a DELIBERATE duplicate of the repo-root `scripts/npm-cli-executable.mjs`,
  * forced by the identical publish boundary `git-safe-env.test.ts` (beside this file) already explains:
  * `check-worker-code.mjs`/`deploy-worker.mjs` ship as `bin` entries, so nothing they import can reach
- * outside `@a11ign/worker-fleet`.
+ * outside `@a11ign/screenreader-fleet`.
  *
  * This is CLAUDE.md's remedy #3 ("pin them equal with a test") applied to the one case remedy #1
  * ("delete a copy") cannot reach: the two files cross a package-publishing boundary neither side can

@@ -73,9 +73,9 @@ const UNGUARDED: Record<string, string> = {
   //
   // `check-schema-migration.mjs` is COPIED INTO A THROWAWAY DIRECTORY AND RUN THERE by
   // `migration-gate-refuses.test.ts`, which is how that gate is proved end to end rather than by reading
-  // its source. A copied script has no `node_modules`, so importing `@a11ign/worker-fleet/cli-flags`
+  // its source. A copied script has no `node_modules`, so importing `@a11ign/screenreader-fleet/cli-flags`
   // makes it die on startup: measured, `ERR_MODULE_NOT_FOUND: Cannot find package
-  // '@a11ign/worker-fleet'`, three tests red. Guarding it would trade a real proof that the
+  // '@a11ign/screenreader-fleet'`, three tests red. Guarding it would trade a real proof that the
   // migration gate refuses for a guard against a mistyped flag, which is the worse bargain.
   //
   // The alternative — a second copy of `refuseUnknownFlags` with no workspace import — is the
@@ -92,7 +92,7 @@ const UNGUARDED: Record<string, string> = {
     + "this exemption affordable rather than a hole",
   // #535: THE IDENTICAL BIND, hit for real rather than only in a test. `pre-commit` runs this guard in
   // EVERY worktree, including one created before `node_modules` is symlinked in -- and there, importing
-  // `@a11ign/worker-fleet/cli-flags` threw `ERR_MODULE_NOT_FOUND` before this guard's own code ever ran,
+  // `@a11ign/screenreader-fleet/cli-flags` threw `ERR_MODULE_NOT_FOUND` before this guard's own code ever ran,
   // which `pre-commit`'s `>/dev/null 2>&1` swallowed and misread as a #180 hazard on EVERY staged line
   // (18 of them measured live: `fi`, `else`, `run: |`, prose comments -- none of them pipe anything).
   // Fixed by removing the workspace import outright, following `check-schema-migration.mjs`'s own
