@@ -68,6 +68,11 @@ const UNGUARDED: Record<string, string> = {
     + "route open to it: an unrecognised command NAME is refused with the near miss named, never ignored, "
     + "because a dispatcher that ran nothing and exited 0 would make \"no such command\" and \"the "
     + "command found nothing\" the same observation. `command-dispatcher.test.ts` pins that refusal.",
+  "scripts/pnpm.mjs":
+    "a PASSTHROUGH (#3141): `node scripts/pnpm.mjs run X --silent -- --flag` is `pnpm run X --silent -- --flag` on a "
+    + "box with no `pnpm` on PATH, so every argument belongs to pnpm and is handed over verbatim; "
+    + "`refuseUnknownFlags` here would refuse `--silent`. Nothing is dropped, which is the guarantee that guard "
+    + "exists for: pnpm itself refuses a script or flag it does not know, and its exit status is returned.",
   // NO LONGER EMPTY, as of 2026-09-07 (#164), and the single entry is a real constraint rather than an
   // oversight — which is exactly what this set exists to record.
   //
