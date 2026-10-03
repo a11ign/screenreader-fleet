@@ -178,6 +178,11 @@ const EXEMPT: Record<string, string> = {
     "NIC selective-suspend and wake settings. Affects Wake-on-LAN and reachability, never capture content.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_nic_power.py":
     "Documentation for a11y_nic_power.ps1 (see that entry). No independent runtime effect.",
+  "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_wake_prereqs.ps1":
+    "Firmware Wake-on-LAN and the adapter's IP configuration (#3230). Affects whether a box can be woken and "
+    + "where it answers, never capture content.",
+  "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_wake_prereqs.py":
+    "Documentation for a11y_wake_prereqs.ps1 (see that entry). No independent runtime effect.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_power_timeouts.ps1":
     "AC sleep timeouts, so the worker does not vanish. Affects reachability, never capture content.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_power_timeouts.py":
