@@ -66,11 +66,11 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@a11ign/judge": "0.0.0",
+    "@a11ign/judge": "0.1.0",
     "@a11ign/screenreader-worker": "0.0.0"
   },
   "devDependencies": {
-    "@a11ign/evidence": "0.0.0",
+    "@a11ign/evidence": "0.1.0",
     "yaml": "^2.9.1",
     "typescript": "^6.0.3"
   },
