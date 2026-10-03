@@ -242,12 +242,14 @@ export async function leaseWorker(
   if (process.env.A11Y_LOCAL_VM === "0") return { worker: DEFAULT_WORKER, source: "default", release };
 
   // Reached only with no explicit worker and no inventory.yml entry — architecture-audit.md §8's own
-  // finding, named exactly: this fallback IS the deprecated path being the CLI's default. Warned here,
-  // not refused, because deleting it is a separate proposal and some machines still only have a UTM
-  // guest to reach.
-  warnUtmDeprecated("this run (no worker named, no fleet configured)");
+  // finding, named exactly: this fallback IS the deprecated path being the CLI's default. Warned, not
+  // refused, because deleting it is a separate proposal and some machines still only have a UTM guest
+  // to reach.
   const vm = deps.findLocalVm ? await deps.findLocalVm() : await findLocalVm();
   if (!vm) return { worker: DEFAULT_WORKER, source: "default", release };
+  // Only once a VM exists: the notice says this run "manages a local UTM worker VM", which is false
+  // on a machine with none, and the stranger running the published `npx a11ign` is that machine (#3219).
+  warnUtmDeprecated("this run (no worker named, no fleet configured)");
   return acquireLocalWorker(vm, after);
 }
 

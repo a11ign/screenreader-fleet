@@ -105,3 +105,37 @@ test("no inventory and no local VM falls through to the historical default, unch
   assert.equal(lease.worker, DEFAULT_WORKER);
   assert.equal(lease.source, "default");
 });
+
+/**
+ * #3219: the UTM notice says the run "manages a local UTM worker VM", so it may only be printed once a
+ * VM has been found. It used to be written BEFORE the lookup, so a stranger running the published
+ * `npx a11ign` on a machine with no worker and no VM was told about a VM that did not exist.
+ */
+async function stderrDuring(run: () => Promise<unknown>): Promise<string> {
+  const original = process.stderr.write;
+  let captured = "";
+  process.stderr.write = ((chunk: string | Uint8Array) => { captured += String(chunk); return true; }) as typeof process.stderr.write;
+  try { await run(); } finally { process.stderr.write = original; }
+  return captured;
+}
+
+const UTM_NOTICE = /DEPRECATED: .* manages a local UTM worker VM/;
+
+test("#3219: no worker, no inventory and no VM writes nothing to stderr", async () => {
+  const written = await stderrDuring(() => leaseWorker(
+    { worker: null, after: "restore" },
+    { inventory: () => [], findLocalVm: async () => null },
+  ));
+  assert.equal(written, "", "a run that manages no VM must not announce one");
+});
+
+test("#3219: a VM that is found still gets the notice", async () => {
+  const vm = { uuid: "u", name: "a11y-worker", state: "started", ip: "198.51.100.2", port: 8765, healthy: true, busy: false };
+  // acquireLocalWorker re-asks the real findLocalVm, which finds nothing off a Mac and so throws; the notice
+  // is written before that, and the lease is not what this test is about.
+  const written = await stderrDuring(() => leaseWorker(
+    { worker: null, after: "restore" },
+    { inventory: () => [], findLocalVm: async () => vm },
+  ).catch(() => undefined));
+  assert.match(written, UTM_NOTICE);
+});
