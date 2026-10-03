@@ -37,11 +37,14 @@ test("the client enables TCP keepalive, so a silent capture connection is not re
   // test connected its own socket, set keepalive on it and asserted that had worked — which tests node,
   // not this module, and would have passed with the hook deleted. That is the "canary that cannot express
   // the fault" rule, committed inside a test written to honour it.
-  const calls: Array<[boolean, number | undefined]> = [];
+  const calls: Array<[unknown, unknown]> = [];
   const original = Socket.prototype.setKeepAlive;
-  Socket.prototype.setKeepAlive = function (enable?: boolean, delay?: number) {
-    calls.push([enable ?? false, delay]);
-    return original.call(this, enable, delay);
+  // TYPED AS A REST, because @types/node 26.6.3 added a `setKeepAlive(options)` overload and a two-parameter
+  // function is assignable to the old single signature only (TS2322 on the next @types/node bump, #3162).
+  // `unknown[]` satisfies every overload, so this survives the next one too.
+  Socket.prototype.setKeepAlive = function (this: Socket, ...args: unknown[]) {
+    calls.push([args[0], args[1]]);
+    return original.apply(this, args as [boolean?, number?]);
   };
   const s = await server(() => {});
   try {
