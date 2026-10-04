@@ -53,7 +53,7 @@ $ErrorActionPreference = 'Stop'
 # the launcher and stay behind in the stamp. A declaration that is absent or does not say THROWS: the stamp
 # must not fall back to a literal, because a literal that was right yesterday is the stamp describing less
 # than it claims. The VALUES are unchanged, so `provisionRevision` is too -- `layer-launchers.test.ts`
-# hashes the five files before and after and pins it.
+# asserts that this row's own diff names none of the five files.
 function Get-LayerFile {
     param([Parameter(Mandatory = $true)][string] $Layer, [Parameter(Mandatory = $true)][string] $Relative)
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $RepoPath 'packages\control\layers.json') | ConvertFrom-Json
