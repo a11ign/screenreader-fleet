@@ -252,7 +252,7 @@ function guardProtocolChange() {
   let committed;
   try {
     committed = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"],
+      execFileSync("git", ["-C", NVDA_DIR, "show", "HEAD:./protocol-version.mjs"],
         { encoding: "utf8", env: sandboxGitEnv() }))?.[1];
   } catch {
     // Two very different situations, and one of them is a guard that has quietly stopped guarding: there may
@@ -263,9 +263,9 @@ function guardProtocolChange() {
     try {
       execFileSync("git", ["rev-parse", "--verify", "HEAD"], { stdio: "ignore", env: sandboxGitEnv() });
       process.stdout.write(
-        "  note: cannot compare CAPTURE_PROTOCOL_VERSION against HEAD — packages/nvda-worker/src/"
-        + "protocol-version.mjs is not in HEAD.\n        Expected for a brand-new or just-moved file; if the "
-        + "path moved, fix it here or this guard is off.\n");
+        "  note: cannot compare CAPTURE_PROTOCOL_VERSION against HEAD — "
+        + `${resolve(NVDA_DIR, "protocol-version.mjs")} is not in HEAD.\n`
+        + "        Expected for a brand-new or just-moved file; if the path moved, fix it here or this guard is off.\n");
     } catch { /* genuinely not a git checkout: nothing to compare, and nothing to warn about */ }
     return;
   }
