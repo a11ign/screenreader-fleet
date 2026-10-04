@@ -382,6 +382,32 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
   Record 'repo' 'cloned'
 }
 
+# A LAYER THAT LIVES IN ITS OWN REPOSITORY IS A SECOND CLONE, at the path the monorepo used (ADR 0039 item 6,
+# #3395). Which layers is read from the manifest in the checkout just made -- `packages/control/layers.json`, the
+# one place that says -- and never restated here, because this script is run as `irm <url> | iex` and a list
+# written into it would outlive the layer it names. A layer with no `remote` is inside the core checkout and is
+# skipped; so is a core that predates the manifest, which can have no layer of its own. Like the core, it is
+# cloned at its default branch: the PIN is the deploy's (`tasks/layer-checkouts.yml`), which has the layer's commit.
+$layersManifest = Join-Path $RepoPath 'packages\control\layers.json'
+if (Test-Path $layersManifest) {
+  $layers = (Get-Content -Raw $layersManifest | ConvertFrom-Json).layers
+  foreach ($layer in $layers.PSObject.Properties) {
+    if (-not $layer.Value.remote) { continue }
+    $layerPath = Join-Path $RepoPath ($layer.Value.path -replace '/', '\')
+    if (Test-Path (Join-Path $layerPath '.git')) {
+      Invoke-Native 'git' @('-C', $layerPath, 'pull', '--ff-only') "pull of layer $($layer.Name)" 2
+      OK "layer $($layer.Name) already cloned at $layerPath (pulled)"
+      Record "layer $($layer.Name)" 'pulled'
+    } else {
+      Invoke-Native 'git' @('clone', $layer.Value.remote, $layerPath) "clone of layer $($layer.Name)" 2
+      OK "layer $($layer.Name) cloned to $layerPath"
+      Record "layer $($layer.Name)" 'cloned'
+    }
+  }
+} else {
+  OK "no layers manifest at $layersManifest (a checkout older than #3394): no separate layer to clone"
+}
+
 Step 5 'Pin Edge and stop its updater — BEFORE the box has time to update itself'
 # THE STEP THAT WAS MISSING, and a11y-worker-7 is what it cost.
 #
