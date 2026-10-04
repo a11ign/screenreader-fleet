@@ -106,6 +106,41 @@ else
   git clone --quiet "$REPO_URL" "$REPO_PATH"
   ok "cloned to $REPO_PATH ($(git -C "$REPO_PATH" rev-parse --short HEAD))"
 fi
+# A LAYER IN ITS OWN REPOSITORY IS A SECOND CHECKOUT BESIDE THE CORE'S (ADR 0039 item 6, row 6c, #3396). The core
+# checkout above is one repository; a layer that `packages/control/layers.json` gives a `remote` lives in another,
+# at its declared path inside this one, and the control plane and the lab both read it there. This clones it when
+# it is absent and FETCHES it when it is there, and nothing more: where it STANDS is the pair's second half, which
+# `fleet:deploy --layer-ref=` and a lab job's `layer_refs` set and read back, so a pull here would be a third
+# thing moving it. With no layer that declares a `remote` the loop below has nothing to do, which is today.
+#
+# It REFUSES to clone over a directory that is not a git checkout: the monorepo's own copy of the layer is one,
+# and a clone on top of it would be the core's tree answering for the layer. The path is excluded from the core's
+# `git status` (`.git/info/exclude`, which is local and never committed), because a nested clone is otherwise
+# `??` there, which reads as "somebody is working in the lab checkout" and stops every job from pulling.
+LAYER_ROWS="$(node -e '
+  const layers = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).layers;
+  for (const [name, l] of Object.entries(layers)) {
+    if (!l.remote) continue;
+    if (!/^[A-Za-z0-9._\/-]+$/.test(l.path) || l.path.includes("..")) { console.error(`layer ${name}: path ${l.path} is not a plain relative path`); process.exit(1); }
+    if (!/^https:\/\/[A-Za-z0-9._\/-]+\.git$/.test(l.remote)) { console.error(`layer ${name}: remote ${l.remote} is not an https .git URL`); process.exit(1); }
+    console.log([name, l.path, l.remote, l.branch || ""].join("\t"));
+  }' "$REPO_PATH/packages/control/layers.json")"
+while IFS=$'\t' read -r LAYER_NAME LAYER_DIR LAYER_REMOTE LAYER_BRANCH; do
+  [ -n "$LAYER_NAME" ] || continue
+  LAYER_PATH="$REPO_PATH/$LAYER_DIR"
+  if [ -d "$LAYER_PATH/.git" ]; then
+    git -C "$LAYER_PATH" fetch --quiet origin
+    ok "layer $LAYER_NAME fetched at $LAYER_DIR (on $(git -C "$LAYER_PATH" rev-parse --short HEAD); the pin moves it, not this)"
+  elif [ -e "$LAYER_PATH" ] && [ -n "$(ls -A "$LAYER_PATH" 2>/dev/null)" ]; then
+    echo "layer $LAYER_NAME is declared at $LAYER_DIR and $LAYER_PATH exists and is not a git checkout; refusing to clone over it." >&2
+    exit 1
+  else
+    git clone --quiet ${LAYER_BRANCH:+--branch "$LAYER_BRANCH"} "$LAYER_REMOTE" "$LAYER_PATH"
+    ok "layer $LAYER_NAME cloned to $LAYER_DIR ($(git -C "$LAYER_PATH" rev-parse --short HEAD))"
+  fi
+  mkdir -p "$REPO_PATH/.git/info"
+  grep -qxF "/$LAYER_DIR/" "$REPO_PATH/.git/info/exclude" 2>/dev/null || printf '/%s/\n' "$LAYER_DIR" >> "$REPO_PATH/.git/info/exclude"
+done <<< "$LAYER_ROWS"
 cd "$REPO_PATH"
 if is_lab; then
   # #2890: `corepack pnpm install --frozen-lockfile`, the SAME spelling `roles/worker/tasks/nvda.yml` uses
