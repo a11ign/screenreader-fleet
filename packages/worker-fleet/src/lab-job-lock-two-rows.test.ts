@@ -39,6 +39,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sandboxGitEnv } from "./git-safe-env.mjs";
 
+const LAYERS_PATH = fileURLToPath(new URL("../../control/layers.json", import.meta.url));
+/** Relative to the scratch dir the playbooks run from. */
+const WRAPPER = join("ansible", "wrapper.yml");
 const RUN_JOB_PATH = fileURLToPath(new URL("../../control/ansible/tasks/run-job.yml", import.meta.url));
 const RUN_JOB_TEXT = readFileSync(RUN_JOB_PATH, "utf8");
 
@@ -191,7 +194,11 @@ function setupFixtureRepo(tmp: string): string {
 
 /** The wrapper play that includes the REAL, unmodified `run-job.yml` directly against `hosts: localhost`. */
 function writeWrapperPlaybook(tmp: string, repoDir: string, bin: string) {
-  writeFileSync(join(tmp, "wrapper.yml"), `---
+  // run-job.yml's layer include reads `playbook_dir/../layers.json` (#3396), as it does in the real tree where the playbook
+  // sits in `ansible/` beside `layers.json`'s directory. So the wrapper is one level down and the real manifest is one up.
+  mkdirSync(join(tmp, "ansible"));
+  writeFileSync(join(tmp, "layers.json"), readFileSync(LAYERS_PATH));
+  writeFileSync(join(tmp, WRAPPER), `---
 - name: exercise run-job.yml's lock directly
   hosts: localhost
   connection: local
@@ -248,7 +255,7 @@ async function waitUntilRunning(unitDir: string, rowAExited: () => boolean) {
 
 /** Row A: started and left running in the background, exactly like a real dispatch nobody waits beside. */
 function dispatchInBackground(tmp: string, varsPath: string, runEnv: NodeJS.ProcessEnv) {
-  const child = spawn("ansible-playbook", ["wrapper.yml", "-e", `@${varsPath}`], { cwd: tmp, env: runEnv });
+  const child = spawn("ansible-playbook", [WRAPPER, "-e", `@${varsPath}`], { cwd: tmp, env: runEnv });
   let output = "";
   child.stdout.on("data", (d) => { output += String(d); });
   child.stderr.on("data", (d) => { output += String(d); });
@@ -357,7 +364,7 @@ async function withRowARunning(body: (rows: TwoRows) => Promise<void>) {
 
 /** Row B: a DIFFERENT row, same job name, dispatched while row A is still running. */
 function dispatchRowB(rows: TwoRows) {
-  const rowB = spawnSync("ansible-playbook", ["wrapper.yml", "-e", `@${rows.varsB}`],
+  const rowB = spawnSync("ansible-playbook", [WRAPPER, "-e", `@${rows.varsB}`],
     { cwd: rows.tmp, env: rows.runEnv, encoding: "utf8" });
   return { status: rowB.status, output: `${rowB.stdout}\n${rowB.stderr}` };
 }
