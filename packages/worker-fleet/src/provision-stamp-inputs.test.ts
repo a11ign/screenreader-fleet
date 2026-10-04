@@ -49,13 +49,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stampEnvironmentFiles } from "../../../scripts/test-support/stamp-files.ts";
 
-// #929: THIS GUARD READS ONLY `packages/control`, `packages/worker-fleet`, so a diff that cannot reach it need not run this file.
+// #929: THIS GUARD READS ONLY `packages/control`, `packages/nvda-worker`, `packages/worker-fleet`, so a diff that cannot reach it need not run this file.
 // Undeclared means unbounded, which is why the selector runs 173 always-run guards on every pull
 // request. The declaration is ENFORCED rather than trusted: `declareWalkScope` observes what this
 // file actually reads and fails it here if anything lands outside the scope -- so a scope that is
 // too narrow is loud, never a guard that silently stopped running.
-export const WALK_SCOPE = ["packages/control","packages/worker-fleet"];
+export const WALK_SCOPE = ["packages/control","packages/nvda-worker","packages/worker-fleet"];
 await declareWalkScope(import.meta.url);
 
 const ROLE = fileURLToPath(new URL("../../control/ansible/roles/worker/", import.meta.url));
@@ -80,8 +81,8 @@ function hashedFiles(): string[] {
   assert.ok(start !== -1 && end > start,
     "could not find $ENVIRONMENT_FILES in the stamp script — the parser has drifted from the source, "
     + "and every assertion below would examine an empty list");
-  const list = stamp.slice(start, end);
-  const files = [...list.matchAll(/^\s*'([^']+)'\s*$/gm)].map((m) => m[1]);
+  // Two entries are READ by the stamp from the layer's declarations (#3397), not quoted in it.
+  const files = stampEnvironmentFiles(stamp);
   assert.ok(files.length >= 4, `parsed ${files.length} hashed file(s); the stamp declares at least four`);
   return files;
 }
