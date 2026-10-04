@@ -183,6 +183,16 @@ const EXEMPT: Record<string, string> = {
     + "where it answers, never capture content.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_wake_prereqs.py":
     "Documentation for a11y_wake_prereqs.ps1 (see that entry). No independent runtime effect.",
+  "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_boot_order.ps1":
+    "Firmware boot order, network boot out of it (#3387), SHIPPED OFF behind worker_enforce_boot_order. Affects "
+    + "what a box tries to boot and whether a PXE server can take it, never what a capture hears, so it is "
+    + "EXEMPT like the other firmware/power modules. #3387's done-when 8 asked for HASHED, which needs a line "
+    + "in `$ENVIRONMENT_FILES` in stamp-provision-revision.ps1, outside that row's Region; reported on the row "
+    + "rather than widened here. `provisionRevision` DOES move when this merges, because the PR adds "
+    + "`worker_enforce_boot_order` to defaults/main.yml, which IS hashed: the fleet reads INCONSISTENT until the "
+    + "next fleet:provision, which is expected and not a regression.",
+  "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_boot_order.py":
+    "Documentation for a11y_boot_order.ps1 (see that entry). No independent runtime effect.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_power_timeouts.ps1":
     "AC sleep timeouts, so the worker does not vanish. Affects reachability, never capture content.",
   "packages/control/ansible/collections/ansible_collections/a11y/worker/plugins/modules/a11y_power_timeouts.py":
