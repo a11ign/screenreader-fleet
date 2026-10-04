@@ -1,0 +1,31 @@
+{
+  // Shared compiler options for every package under `packages/`. Extended, never used directly.
+  //
+  // `composite: true` is the load-bearing setting, not a formality: with project references it makes the
+  // dependency graph a COMPILER-ENFORCED invariant. ADR 0005's reasoning is that this repo's three most
+  // expensive defects were all "a fix applied at one call site when the behaviour reached several", and
+  // neither eslint nor plain `tsc` could see any of them. A reference graph can see this class.
+  //
+  // Emit is mandatory rather than optional, and M0 measured why: Node **refuses** to strip types for files
+  // under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), whatever flags a consumer passes.
+  // So there is no "ship the sources and let them transpile" fallback — see `docs/isolation-spike.md`.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+
+    // `.mjs` ships verbatim (ADR 0005) and is still type-checked, so JS must be allowed in.
+    "allowJs": true,
+
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  }
+}

@@ -6,6 +6,7 @@ import ts from "typescript";
 import { fileURLToPath } from "node:url";
 import { sourceFiles } from "./source-walk.mjs";
 
+const MJS_FLOOR = 25;
 const PACKAGES = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 /**
@@ -45,7 +46,9 @@ test("every .mjs parses, which lint and tsc cannot tell you", () => {
     .map(([rel]) => rel)
     .filter((rel) => rel.endsWith(".mjs"));
 
-  assert.ok(files.length > 50,
+  // The floor was 50 for the monorepo's whole `packages/` (123 modules); this repository walks the one package, and the walk found 30
+  // when it moved (a11ign/a11ign#2702). A floor, not a count: it only has to tell "found the corpus" from "found nothing".
+  assert.ok(files.length > MJS_FLOOR,
     `expected the walker to find the .mjs corpus, got ${files.length} — a discovery test that finds ` +
     "nothing passes having examined nothing");
 
