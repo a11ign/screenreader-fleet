@@ -12,6 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stampEnvironmentFiles } from "../../../scripts/test-support/stamp-files.ts";
 
 const STAMP = readFileSync(
   fileURLToPath(new URL("./provisioning/stamp-provision-revision.ps1", import.meta.url)),
@@ -54,9 +55,10 @@ test("the FIVE hashed files are exactly the environment, and the list has not dr
   // Terminated on a line-initial `)`, not the first one found: a parenthesis in a COMMENT inside the array
   // truncated the slice the moment anyone documented an entry, and a parser returning a SHORT list makes a
   // present entry look absent.
-  const start = STAMP.indexOf("$ENVIRONMENT_FILES = @(");
-  const list = STAMP.slice(start, STAMP.indexOf("\n)", start));
-  const paths = [...list.matchAll(/^\s*'([^']+)'\s*$/gm)].map((m) => m[1]);
+  //
+  // Two entries are READ by the stamp from the layer's declarations (#3397), so the list is resolved through
+  // the same two files and not parsed as quoted lines alone, which would see three.
+  const paths = stampEnvironmentFiles(STAMP);
   assert.deepEqual(paths, [
     "packages/worker-fleet/src/provisioning/provision-nvda-worker.ps1",
     "packages/nvda-worker/src/run-server.cmd",

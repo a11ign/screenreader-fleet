@@ -47,12 +47,39 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# TWO OF THE FIVE PATHS ARE NOT WRITTEN HERE (ADR 0039 item 6d, #3397). Where the worker layer lives is
+# declared in `packages/control/layers.json`, and what its launchers reach outside it in the layer's own
+# `src/launcher-reach.cmd`, which `run-capture-check.cmd` `call`s. Both are READ, so a path cannot change in
+# the launcher and stay behind in the stamp. A declaration that is absent or does not say THROWS: the stamp
+# must not fall back to a literal, because a literal that was right yesterday is the stamp describing less
+# than it claims. The VALUES are unchanged, so `provisionRevision` is too -- `layer-launchers.test.ts`
+# asserts that this row's own diff names none of the five files.
+function Get-LayerFile {
+    param([Parameter(Mandatory = $true)][string] $Layer, [Parameter(Mandatory = $true)][string] $Relative)
+    $manifest = Get-Content -Raw -LiteralPath (Join-Path $RepoPath 'packages\control\layers.json') | ConvertFrom-Json
+    "$($manifest.layers.$Layer.path)/$Relative"
+}
+
+function Get-DeclaredReach {
+    param([Parameter(Mandatory = $true)][string] $Name)
+    $declaration = Join-Path $RepoPath ((Get-LayerFile -Layer 'nvda-worker' -Relative 'src/launcher-reach.cmd') -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $declaration)) {
+        throw "provision stamp: the launcher declaration $declaration is missing. Refusing to guess where the launchers reach."
+    }
+    $line = Select-String -LiteralPath $declaration -Pattern "^set `"$Name=(.+)`"\s*$" | Select-Object -First 1
+    if (-not $line) { throw "provision stamp: $declaration does not declare $Name." }
+    $line.Matches[0].Groups[1].Value -replace '\\', '/'
+}
+
+$RUN_SERVER = Get-LayerFile -Layer 'nvda-worker' -Relative 'src/run-server.cmd'
+$FOREGROUND_LOCK = Get-DeclaredReach -Name 'FLT'
+
 # The single definition. Explicit paths rather than a filename search, because `main.yml` is not unique
 # in this repo and a search would silently pick the wrong one.
 $ENVIRONMENT_FILES = @(
     'packages/worker-fleet/src/provisioning/provision-nvda-worker.ps1'
-    'packages/nvda-worker/src/run-server.cmd'
-    'packages/worker-fleet/src/provisioning/apply-foreground-lock-timeout.ps1'
+    $RUN_SERVER
+    $FOREGROUND_LOCK
     'packages/control/ansible/roles/worker/defaults/main.yml'
     # SPEECH VIEWER, added 2026-09-05, and it is the same shape as `apply-foreground-lock-timeout.ps1`
     # above: a script that carries its own hardcoded ENVIRONMENT value rather than reading one from
