@@ -199,10 +199,12 @@ test("the git-HEAD comparison targets protocol-version.mjs, not the file the con
   const root = resolve(import.meta.dirname, "../../..");
   for (const file of ["packages/worker-fleet/src/deploy-worker.mjs", "packages/worker-fleet/src/check-worker-code.mjs"]) {
     const source = readFileSync(resolve(root, file), "utf8");
-    assert.match(source, /HEAD:packages\/nvda-worker\/src\/protocol-version\.mjs/,
+    // `git -C <the worker's source dir> show HEAD:./protocol-version.mjs` (#3394): the directory is asked of the
+    // worker package rather than named here, so `./` is protocol-version.mjs's own directory.
+    assert.match(source, /"-C",[^\]]*"show",\s*"HEAD:\.\/protocol-version\.mjs"/,
       `${file}'s HEAD comparison must target protocol-version.mjs -- capture-core.mjs no longer declares `
       + "the constant, so scraping it there would silently stop matching");
-    assert.doesNotMatch(source, /HEAD:packages\/nvda-worker\/src\/capture-core\.mjs/,
+    assert.doesNotMatch(source, /HEAD:(?:\.\/|packages\/nvda-worker\/src\/)capture-core\.mjs/,
       `${file} still compares against capture-core.mjs at HEAD, which the constant no longer lives in`);
   }
 });

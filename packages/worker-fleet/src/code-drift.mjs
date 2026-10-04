@@ -200,14 +200,24 @@ export async function readWorkerCode(url) {
 }
 
 /**
- * Is the worker source in this checkout modified against HEAD?
+ * Is the worker source in `sourceDir` modified against HEAD?
+ *
+ * The DIRECTORY IS THE CALLER'S, never a path guessed here: this file is reached from `control` (which asks
+ * `layer-checkouts.mjs`) and from `worker-fleet` (which asks the worker package by name), and a guessed
+ * monorepo path would read the wrong tree the day the layer lives in another repository (#3394).
  *
  * Guarded, exactly like `protocolBumpNote`: outside a git checkout there is simply nothing to add, and a
  * precondition that throws because `git` is missing is worse than the drift it was checking for.
+ *
+ * @param {string} sourceDir
  */
-export function workerSourceDirty() {
+export function workerSourceDirty(sourceDir) {
+  // Outside the `try`: a missing directory is a caller's bug, and the catch below would turn it into "clean".
+  if (typeof sourceDir !== "string" || !sourceDir) {
+    throw new TypeError("workerSourceDirty needs the worker source directory to read; there is no default");
+  }
   try {
-    return execFileSync("git", ["status", "--porcelain", "--", "packages/nvda-worker/src"],
+    return execFileSync("git", ["-C", sourceDir, "status", "--porcelain", "--", "."],
       { encoding: "utf8", env: sandboxGitEnv() }).trim().split("\n").filter(Boolean).join("; ");
   } catch {
     return "";
@@ -256,10 +266,13 @@ export function describeEmptyPool(workers, expected) {
  *
  * @param {string} expected
  * @param {string[]} workers
- * @param {{when?: string, allow?: boolean, read?: (url: string) => Promise<string|null>, bareMetalUrls?: string[]}} options
+ * `sourceDir` is the worker source the `expected` hash was computed over, so a dirty tree is read from the
+ * same place the hash came from.
+ *
+ * @param {{when?: string, allow?: boolean, read?: (url: string) => Promise<string|null>, bareMetalUrls?: string[], sourceDir: string}} options
  */
-export async function assertWorkersServe(expected, workers, options = {}) {
-  const { when = "before the run", allow = false, read = readWorkerCode, bareMetalUrls = [] } = options;
+export async function assertWorkersServe(expected, workers, options) {
+  const { when = "before the run", allow = false, read = readWorkerCode, bareMetalUrls = [], sourceDir } = options;
   if (allow) {
     process.stdout.write("--allow-stale-workers: NOT checking that the fleet runs this checkout.\n");
     return;
@@ -272,7 +285,7 @@ export async function assertWorkersServe(expected, workers, options = {}) {
   const readings = await Promise.all(workers.map(async (worker) =>
     ({ worker, code: await read(worker) })));
   const drift = codeDrift(expected, readings);
-  const refusal = describeCodeDrift(drift, { when, bareMetalUrls, sourceDirty: workerSourceDirty() });
+  const refusal = describeCodeDrift(drift, { when, bareMetalUrls, sourceDirty: workerSourceDirty(sourceDir) });
   if (!refusal) {
     // Says it CHECKED, not merely that nothing was wrong. A silent pass and a check that never ran look
     // identical from the outside, which is the `refreshBrowseBuffer` lesson applied to a precondition.

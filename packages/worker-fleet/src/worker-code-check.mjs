@@ -78,5 +78,5 @@ export { codeDrift, describeCodeDrift, describeEmptyPool, readWorkerCode, remedy
  * @param {{when?: string, allow?: boolean, read?: (url: string) => Promise<string|null>, bareMetalUrls?: string[]}} options
  */
 export async function assertFleetRunsThisCheckout(workers, options = {}) {
-  return assertWorkersServe(expectedWorkerCode(), workers, options);
+  return assertWorkersServe(expectedWorkerCode(), workers, { ...options, sourceDir: workerSourceDir() });
 }

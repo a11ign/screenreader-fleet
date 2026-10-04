@@ -19,6 +19,7 @@ import { sandboxGitEnv } from "./git-safe-env.mjs";
 // The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
 // `protocol-version.mjs` is dependency-free for exactly this: safe to import from a portable tree.
 import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11ign/screenreader-worker/protocol-version";
+import { workerSourceDir } from "@a11ign/screenreader-worker/code-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
@@ -57,7 +58,7 @@ function protocolBumpNote() {
   try {
     const inTree = String(PROTOCOL_IN_TREE);
     const committed = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      execFileSync("git", ["show", "HEAD:packages/nvda-worker/src/protocol-version.mjs"],
+      execFileSync("git", ["-C", workerSourceDir(), "show", "HEAD:./protocol-version.mjs"],
         { encoding: "utf8", env: sandboxGitEnv() }))?.[1];
     if (inTree && committed && inTree !== committed) {
       return `\nNOTE: your working tree has CAPTURE_PROTOCOL_VERSION = ${inTree} but HEAD has ${committed}.\n` +
