@@ -35,7 +35,9 @@ The package's test directory was written for the monorepo, and 27 of its 53 test
 ## Releasing
 
 This repository releases on its own, not with `a11ign/a11ign`. A change that should reach npm carries a changeset
-(`pnpm exec changeset`); its merge opens the **Version packages** pull request, and **merging that is the release**
-(`.github/workflows/release.yml`, `.changeset/README.md`). The publish uses npm trusted publishing over OIDC with
-provenance and no stored token. The first release, 0.1.0, is the merge of the pull request that added the workflow: the
-registry holds only the reservation `0.0.0-reserved.0`, so the manifest is ahead of it and no changeset is pending.
+(`pnpm exec changeset`), and **merging it to `main` is the release**: `.github/workflows/release.yml` calls the one
+reusable per-merge workflow in `a11ign/toolchain`, which versions the merge on a detached commit, publishes, tags and
+releases it. There is no version pull request and nothing is written to `main`, so its `package.json` version and
+`CHANGELOG.md` lag the last tag (`.changeset/README.md`). The publish uses npm trusted publishing over OIDC with
+provenance and no stored token. The first release, 0.1.0, was published before this workflow existed;
+no git tag names it, so the first per-merge release bases on `main`'s 0.1.0.
