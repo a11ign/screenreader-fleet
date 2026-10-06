@@ -1,5 +1,43 @@
 # @a11ign/screenreader-fleet
 
+## 0.5.0
+
+### Minor Changes
+
+- ecf18eb: The hash `a11ign-worker-code` and every capture's `assertFleetRunsThisCheckout` expect is the layer CLONE's, the one `fleet:deploy` and the lab already ask for (`layerCodeVersion("nvda-worker")`): the clone's own `code-version.mjs` over the clone's `src/`. It read the installed `@a11ign/screenreader-worker` before, so the first guest deployed at a layer sha whose `.mjs` differed from the release (what `--layer-ref` is for) made every worker read STALE, with a remedy ("redeploy") that could not clear it. With no clone it falls back to the installed package and the output says so. The clone is found from the checkout root's `packages/control/layers.json`, the root being the cwd or the new `checkoutRoot` option; a clone that is there and cannot hash is refused, never answered for by the installed copy. With a clone, the dirty-tree note reads the clone's git tree again.
+  
+  **Breaking:** `expectedWorkerCode()` is replaced by `resolveExpectedWorkerCode({ checkoutRoot })`, which is ASYNC (the clone's hasher can only be imported dynamically) and returns `{ code, source, sourceDir, note }`. The one caller outside the package is the core's own `worker-code-check.test.ts`, which moves with the bump.
+
+## 0.4.2
+
+### Patch Changes
+
+- f8c29aa: `a11ign-doctor` no longer reads the monorepo layout from its own module location in four more checks. The `primary checkout`, `isolation`, `dist-resolution` and `dist-freshness` checks took `../../../` as the repo root, which from an installed package is `node_modules`, so each reported on a directory that is not the machine's checkout (`…/node_modules/packages/judge/tsconfig.json`); outside a checkout they now report `n/a: installed package` as an advisory naming the directory, and inside one nothing changes. The `judge` check read the scorer's weights from `../../scorer/models/…`, so it said "present" or "missing" by where a package manager had put `@a11ign/scorer`; it now asks `@a11ign/scorer`'s own `scorerPaths()`, reached through `@a11ign/judge` (its peer), and says so when the scorer cannot be resolved.
+
+## 0.4.1
+
+### Patch Changes
+
+- e31106f: `a11ign-doctor`, `a11ign-worker-compare` and `fleet-env` no longer resolve monorepo-layout paths from inside an installed package, where `../../../` is `node_modules` and `../../control/ansible/` is a package the tarball does not hold: `doctor` and `worker-compare` would have read and written under the dependency, and `fleet-env --list` died on an ENOENT. `a11ign-doctor` and `a11ign-worker-compare` take `--runs-dir=<the runs directory>` and `fleet-env` takes `--inventory=<file>` and `--group-vars=<file>`; each defaults to the monorepo path only when that exists, and otherwise exits 2 naming the missing path and the flag that supplies it.
+
+## 0.4.0
+
+### Minor Changes
+
+- f1eb72a: `a11ign-worker-deploy` is removed. It pushed each worker file from `workerSourceDir()`, which is `dist/` in the built `@a11ign/screenreader-worker` and holds no `capture-core.mjs`, so against an installed package it threw ENOENT; a guest runs the raw `src/*.mjs` (ADR 0031), so the fix could not be to read `dist` either. It was already the UTM path `warnUtmDeprecated` warns about, no fleet box was reachable by it, and nothing in the package or the core ran it: the fleet deploys by Ansible (`fleet:deploy`). `a11ign-worker-code`'s remedy for a stale worker outside `inventory.yml` says no command deploys to it, where it named the removed one.
+
+## 0.3.0
+
+### Minor Changes
+
+- ea68d7a: The package is built with Rslib, where 0.1.0 was `tsc --build` output. Every `exports` key now points at a `dist/*.mjs` with a declaration beside it (`.d.mts`, and `.d.ts` for the `.` entry, which is `index.ts`); 0.1.0 declared types for 9 of its 12 keys and mapped `.` to `dist/index.js`. The four `bin` commands (`a11ign-doctor`, `a11ign-worker-code`, `a11ign-worker-compare`, `a11ign-worker-deploy`) are `dist/*.mjs` entries with their shebang kept and the executable bit set, and `a11ign-worker-ctl` is still the shell script under `src/local-worker`. The import specifiers are unchanged. No `.map` files ship: they pointed at a `src` the tarball does not carry for the compiled files. Every built file sits directly under `dist`, so `fleetScriptPaths()` still finds `src/local-worker` and `src/provisioning` as `../src/...` from its own built file. The tests run on rstest through `@a11ign/toolchain` (180 tests in 29 files, the same count `tsx --test` reported).
+
+## 0.2.0
+
+### Minor Changes
+
+- 5ee974d: `expectedWorkerCode()` asks the installed `@a11ign/screenreader-worker` for its code hash with `codeVersion()` and no directory, where it hashed `workerSourceDir()`, which is `dist/` in the built package and made `a11ign-worker-code` and every capture's fleet check throw ENOENT. It works on the raw 0.1.0 as well. `a11ign-worker-code` no longer prints the "your working tree has an uncommitted `CAPTURE_PROTOCOL_VERSION` bump" note, which read a git working tree of the worker's source and so could not fire against an installed package.
+
 ## 0.1.0
 
 ### Minor Changes
