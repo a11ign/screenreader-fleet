@@ -1,7 +1,7 @@
 // The expected worker hash is computable from the BUILT `@a11ign/screenreader-worker` (a11ign/a11ign#3740, orchestrator Ruling 2 on #3552).
 //
 // Its 0.2.0 is a build: `workerSourceDir()` is the package's `dist/`, which holds none of the files a guest runs (a guest runs the raw
-// `src/*.mjs`, ADR 0031), so `expectedWorkerCode()` as it was, `codeVersion(workerSourceDir())`, threw ENOENT, and `a11ign-worker-code` and
+// `src/*.mjs`, ADR 0031), so `resolveExpectedWorkerCode()` as it was, `codeVersion(workerSourceDir())`, threw ENOENT, and `a11ign-worker-code` and
 // every capture's `assertFleetRunsThisCheckout` with it. This repository pins 0.1.0 (raw `src`), where that call works, so a test against
 // the INSTALLED package cannot be red here; the fixture below is a package laid out the way the build emits it, and is what can be.
 //
@@ -47,20 +47,23 @@ function fixtureWithBuiltWorker(): string {
   return root;
 }
 
-test("`expectedWorkerCode()` is the hash a BUILT worker package carries, and the old expression against that package throws (control)", async () => {
+test("`resolveExpectedWorkerCode()` is the hash a BUILT worker package carries, and the old expression against that package throws (control)", async () => {
   const root = fixtureWithBuiltWorker();
   try {
     const built = await import(pathToFileURL(join(root, "node_modules/@a11ign/screenreader-worker/dist/code-version.mjs")).href);
     // The control: the fixture is shaped like the build, so the expression this row replaced fails on it as it failed on 0.2.0.
     assert.throws(() => built.codeVersion(built.workerSourceDir()), { code: "ENOENT" });
-    const { expectedWorkerCode } = await import(pathToFileURL(join(root, "worker-code-check.mjs")).href);
-    assert.equal(expectedWorkerCode(), BAKED);
+    const { resolveExpectedWorkerCode } = await import(pathToFileURL(join(root, "worker-code-check.mjs")).href);
+    // `checkoutRoot: root` holds no `layers.json`, so the installed (here: built) package answers.
+    assert.equal((await resolveExpectedWorkerCode({ checkoutRoot: root })).code, BAKED);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("`expectedWorkerCode()` answers with the package that is installed, whatever shape that is", async () => {
-  const { expectedWorkerCode } = await import("./worker-code-check.mjs");
-  assert.match(expectedWorkerCode(), /^[0-9a-f]{16}$/);
+test("`resolveExpectedWorkerCode()` answers with the package that is installed, whatever shape that is", async () => {
+  const { resolveExpectedWorkerCode } = await import("./worker-code-check.mjs");
+  const expected = await resolveExpectedWorkerCode({ checkoutRoot: tmpdir() });
+  assert.equal(expected.source, "installed");
+  assert.match(expected.code, /^[0-9a-f]{16}$/);
 });
