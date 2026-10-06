@@ -27,18 +27,19 @@
  * looks like a host entry but does not parse is an error naming the line, and finding no hosts at all is an
  * error too.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { assertWorkerUrl } from "./worker-http.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { flagValue, refuseUnknownFlags } from "./cli-flags.mjs";
 
 /**
  * its output is `eval`-ed by a shell, so a wrong shape is executed rather than read.
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--list"], { entry: import.meta.url, command: "npm run fleet:env" });
+refuseUnknownFlags(["--list", "--inventory=", "--group-vars="], { entry: import.meta.url, command: "npm run fleet:env" });
 
 export const DEFAULT_WORKER_PORT = 8765;
 
@@ -92,8 +93,44 @@ export function configuredWorkers() {
 // own comments). What injection buys is that the assumption is now a NAMED, overridable default rather
 // than a hidden module constant -- a caller outside this monorepo (or a test) can supply its own path
 // instead of silently inheriting one that can only ever resolve here.
-const INVENTORY = fileURLToPath(new URL("../../control/ansible/inventory.yml", import.meta.url));
-const GROUP_VARS = fileURLToPath(new URL("../../control/ansible/group_vars/a11y_workers.yml", import.meta.url));
+const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
+const monorepoAnsibleFile = (/** @type {string} */ relative, /** @type {string} */ baseDir = MODULE_DIR) =>
+  resolve(baseDir, "..", "..", "control", "ansible", relative);
+const INVENTORY = monorepoAnsibleFile("inventory.yml");
+const GROUP_VARS = monorepoAnsibleFile("group_vars/a11y_workers.yml");
+
+/**
+ * The two files the COMMAND reads, from the caller or else from the monorepo layout, and a refusal naming the path
+ * and the flag when the one it would read is not there (a11ign/a11ign#3767).
+ *
+ * `INVENTORY` above points into `packages/control`, which an installed `@a11ign/screenreader-fleet` does not have, so
+ * `fleet-env --list` there died on an ENOENT for a path nobody could have guessed. The library functions keep their
+ * default because their answer for "no inventory here" is `[]`, which is supported; a command that prints
+ * `export A11Y_WORKERS=''` for a missing file would be the same silent wrong answer, so it refuses.
+ *
+ * `baseDir` is INJECTED so a test can stand in for either layout without moving a file.
+ *
+ * @param {{ argv?: readonly string[], baseDir?: string }} [options]
+ * @returns {{ inventoryPath: string, groupVarsPath: string }}
+ */
+export function inventoryPathsFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR } = {}) {
+  const inventoryPath = existingPath({
+    flag: "inventory", supplied: flagValue(argv, "inventory"), fallback: monorepoAnsibleFile("inventory.yml", baseDir),
+  });
+  const groupVarsPath = existingPath({
+    flag: "group-vars", supplied: flagValue(argv, "group-vars"),
+    fallback: monorepoAnsibleFile("group_vars/a11y_workers.yml", baseDir),
+  });
+  return { inventoryPath, groupVarsPath };
+}
+
+/** @param {{ flag: string, supplied: string | undefined, fallback: string }} path @returns {string} */
+function existingPath({ flag, supplied, fallback }) {
+  const path = supplied ?? fallback;
+  if (existsSync(path)) return path;
+  const origin = supplied === undefined ? "the monorepo layout this command defaults to has no such file" : "no such file";
+  throw new Error(`fleet:env: ${path} does not exist (${origin}). Pass --${flag}=<file>.`);
+}
 
 /** A line that declares a host address, ignoring anything commented out. */
 const HOST_LINE = /^\s*ansible_host\s*:\s*(\S+)\s*$/;
@@ -522,8 +559,16 @@ export function fleetEnvOutput(text, { port = DEFAULT_WORKER_PORT, mode = "env" 
 }
 
 function main() {
-  const port = portFromGroupVars(readFileSync(GROUP_VARS, "utf8"));
-  const { stdout, stderr } = fleetEnvOutput(readFileSync(INVENTORY, "utf8"),
+  let paths;
+  try {
+    paths = inventoryPathsFor();
+  } catch (error) {
+    process.stderr.write(`${/** @type {Error} */ (error).message}\n`);
+    process.exitCode = 2;
+    return;
+  }
+  const port = portFromGroupVars(readFileSync(paths.groupVarsPath, "utf8"));
+  const { stdout, stderr } = fleetEnvOutput(readFileSync(paths.inventoryPath, "utf8"),
     { port, mode: process.argv.includes("--list") ? "list" : "env" });
   process.stderr.write(stderr);
   process.stdout.write(stdout);
