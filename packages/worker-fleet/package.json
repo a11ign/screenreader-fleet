@@ -58,8 +58,7 @@
     "a11ign-doctor": "./dist/doctor.mjs",
     "a11ign-worker-code": "./dist/check-worker-code.mjs",
     "a11ign-worker-compare": "./dist/compare-workers.mjs",
-    "a11ign-worker-ctl": "./src/local-worker/worker-ctl.sh",
-    "a11ign-worker-deploy": "./dist/deploy-worker.mjs"
+    "a11ign-worker-ctl": "./src/local-worker/worker-ctl.sh"
   },
   "files": [
     "dist",

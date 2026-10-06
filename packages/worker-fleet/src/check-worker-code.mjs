@@ -96,7 +96,7 @@ async function versionOf(url) {
 }
 
 /**
- * Nothing here runs on import, for the same reason as `deploy-worker.mjs`: a module that probes every worker
+ * Nothing here runs on import: a module that probes every worker
  * over HTTP should be invoked, not merely mentioned. It also lets `code-version.test.ts` import this rather
  * than parse its source as text.
  */
