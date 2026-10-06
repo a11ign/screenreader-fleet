@@ -16,11 +16,6 @@ updates:
     # registry's copy over the workspace's.
     ignore:
       - dependency-name: "@a11ign/screenreader-fleet"
-      # 0.2.0 is a BUILD: `workerSourceDir()` is `dist/` and `expectedWorkerCode` throws ENOENT, where 0.1.0 shipped raw `src`.
-      # Merging that bump breaks `a11ign-worker-code`. This is DATA rather than a sentence so no pull request is opened to merge by
-      # mistake; remove it when a11ign/a11ign#3740 (the expected-hash row) merges. Ruling: a11ign/a11ign#3552, row a11ign/a11ign#3739.
-      - dependency-name: "@a11ign/screenreader-worker"
-        versions: [">=0.2.0"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
