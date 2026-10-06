@@ -66,7 +66,7 @@ PORT="${A11Y_PORT:-8765}"
 
 # Accept `--vm=<name>` as well as A11Y_VM_NAME, and accept it in ANY position.
 #
-# `worker:deploy` has always taken `--vm=`, so anyone who has used that reaches for it here too — and this
+# `worker:deploy` (since removed, #3765) always took `--vm=`, so anyone who used that reaches for it here too — and this
 # script silently ignored it, then reported a DIFFERENT VM's state under the name you asked for. Silently,
 # because a stray argument was simply never read. Two tools in one fleet disagreeing about how to name a
 # machine is the kind of paper cut that gets diagnosed as "the guest is broken".

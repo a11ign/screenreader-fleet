@@ -33,7 +33,7 @@ function directUtmctlCallers(): string[] {
   for (const entry of readdirSync(SRC, { withFileTypes: true })) {
     if (!entry.isFile() || !/\.(mjs|ts)$/.test(entry.name) || entry.name.endsWith(".test.ts")) continue;
     const src = readFileSync(join(SRC, entry.name), "utf8");
-    // The literal command name (deploy-worker.mjs pushes files with it) or the hardcoded app path
+    // The literal command name or the hardcoded app path
     // (guest-run.mjs, normalise-fleet.mjs) — the two real shapes a direct call takes here.
     if (/"utmctl"|UTMCTL\s*=/.test(src)) found.push(entry.name);
   }
@@ -49,8 +49,10 @@ function localWorkerShellScripts(): string[] {
 
 test("the discovery finds every known direct utmctl caller, or it is checking nothing", () => {
   const found = directUtmctlCallers();
-  assert.ok(found.length >= 3,
-    `only found ${found.length} direct utmctl caller(s): ${found.join(", ")} — the discovery is broken, `
+  // Named rather than counted: deploy-worker.mjs was the third and its removal (#3765) moved the floor from 3 to 2.
+  assert.deepEqual(found.filter((name) => ["guest-run.mjs", "normalise-fleet.mjs"].includes(name)),
+    ["guest-run.mjs", "normalise-fleet.mjs"],
+    `found ${found.length} direct utmctl caller(s): ${found.join(", ")} — the discovery is broken, `
     + "not the codebase clean");
 });
 

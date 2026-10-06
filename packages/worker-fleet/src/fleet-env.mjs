@@ -391,7 +391,7 @@ export function portFromGroupVars(text) {
  *
  * Exists so a caller can tell a physical box from a local UTM VM, which decides how it is deployed to and
  * therefore what remedy to print. `worker:code` used to tell every stale worker to run `utmctl` and
- * `npm run worker:deploy`, which CANNOT reach a bare-metal box — it is a `utmctl file push` keyed on a VM
+ * `npm run worker:deploy` (since removed, #3765), which CANNOT reach a bare-metal box — it was a `utmctl file push` keyed on a VM
  * UUID and fails immediately off macOS. Following that advice on this fleet wastes the time it takes to
  * discover the tool was describing a different kind of machine.
  *

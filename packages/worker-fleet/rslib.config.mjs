@@ -14,7 +14,6 @@ const BIN_ENTRIES = {
   doctor: "./src/doctor.mjs",
   "check-worker-code": "./src/check-worker-code.mjs",
   "compare-workers": "./src/compare-workers.mjs",
-  "deploy-worker": "./src/deploy-worker.mjs",
 };
 
 export default defineConfig({

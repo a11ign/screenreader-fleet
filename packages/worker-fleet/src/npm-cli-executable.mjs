@@ -6,7 +6,7 @@
 // anywhere). See `scripts/npm-cli-executable.mjs`'s own header for the full incident and the two-layout
 // resolution this file duplicates behaviourally.
 //
-// This package publishes `check-worker-code.mjs` and `deploy-worker.mjs` as `bin` entries
+// This package publishes `check-worker-code.mjs` as a `bin` entry
 // (`package.json`), so every file they import -- `doctor.mjs` among them -- ships in the published
 // tarball and can only import from INSIDE `@a11ign/screenreader-fleet`. The repo-root `scripts/` directory
 // does not exist once this package is installed from npm, so importing it here would work in this

@@ -5,7 +5,7 @@
 // `packages/guards/src/git-env.mjs`'s header for the incident that proved it (a pre-push-hook test forged 15 commits
 // across all refs of the real repo).
 //
-// This package publishes `check-worker-code.mjs` and `deploy-worker.mjs` as `bin` entries
+// This package publishes `check-worker-code.mjs` as a `bin` entry
 // (`package.json`), so every file they import -- `code-drift.mjs` among them -- ships in the published
 // tarball and can only import from INSIDE `@a11ign/screenreader-fleet`. The repo-root `scripts/` directory
 // does not exist once this package is installed from npm, so importing it here would work in this

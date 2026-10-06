@@ -589,7 +589,7 @@ if (-not $handedOff) {
   #   - `workerCode` is recorded on every capture so you know what produced it. A worker that
   #     silently updates itself on reboot can span two code versions inside one corpus run, and the
   #     provenance stops meaning anything.
-  #   - `worker:deploy` exists and VERIFIES over /health.code, which shares no failure mode with the
+  #   - `fleet:deploy` VERIFIES over /health.code, which shares no failure mode with the
   #     push. An unattended self-update has no such check.
   #   - one bad push would then brick every box in the fleet at its next restart, simultaneously.
   if (Get-ScheduledTask -TaskName 'a11ybootstrap' -ErrorAction SilentlyContinue) {

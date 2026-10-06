@@ -71,9 +71,10 @@ export function codeDrift(expected, readings) {
 /**
  * Name the deploy route that can actually reach these workers.
  *
- * There are two, they share no mechanism, and the wrong one wastes real time. `worker:deploy` is
- * `utmctl file push` plus a `utmctl` reboot: it takes a VM UUID and fails immediately off macOS, so it
- * cannot touch a physical box. Bare-metal workers are git-cloned and deploy by PULLING, through Ansible.
+ * Only bare-metal workers have one: they are git-cloned and deploy by PULLING, through Ansible. The UTM
+ * route (`a11ign-worker-deploy`, `utmctl file push` plus a `utmctl` reboot, keyed on a VM UUID) is gone: it
+ * pushed from the worker package's `src`, which a built install does not have (#3765), and no fleet box
+ * was ever reachable by it.
  *
  * This printed the utmctl advice unconditionally, including to a fleet of four mini PCs where none of it
  * applies — a tool confidently prescribing a remedy for a different kind of machine. Which kind a worker is
@@ -97,12 +98,12 @@ export function remedyLines(staleUrls, bareMetalUrls) {
   if (physical.length) {
     lines.push(`\n  ${physical.length} in inventory.yml — bare metal, so they deploy by PULLING:`,
       "    npm run fleet:deploy",
-      "  `npm run worker:deploy` cannot reach these: it is utmctl, keyed on a VM UUID.");
+      "  The UTM push (`a11ign-worker-deploy`) was removed and never reached these.");
   }
   if (vms.length) {
-    lines.push(`\n  ${vms.length} not in inventory.yml — local VM(s). A restart via \`utmctl exec\``,
-      "  silently does nothing on some guests; rebooting always picks up a pushed file:",
-      "    npm run worker:deploy");
+    lines.push(`\n  ${vms.length} not in inventory.yml — local VM(s). No command deploys to them any more`,
+      "  (`a11ign-worker-deploy` was removed, #3765): re-provision the VM, or declare it in inventory.yml",
+      "  so `npm run fleet:deploy` reaches it.");
   }
   return lines;
 }

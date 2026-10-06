@@ -1,9 +1,10 @@
 /**
  * `worker:code` must name a deploy route that can actually reach the worker it is talking about.
  *
- * There are two routes and they share no mechanism. `npm run worker:deploy` is `utmctl file push` plus a
- * `utmctl` reboot — it takes a VM UUID and fails immediately off macOS, so it cannot touch a physical box.
- * Bare-metal workers are git-cloned and deploy by PULLING, via `npm run fleet:deploy`.
+ * Only bare-metal workers have a route: they are git-cloned and deploy by PULLING, via `npm run fleet:deploy`.
+ * The UTM route (`a11ign-worker-deploy`, `utmctl file push` plus a `utmctl` reboot, keyed on a VM UUID) was
+ * removed in #3765, so a worker outside `inventory.yml` is told there is none rather than sent to a command
+ * that no longer exists.
  *
  * The remedy names the NPM SCRIPT, not `ansible-playbook deploy.yml`, and that is a second wrong-machine
  * bug rather than a style preference: the fleet's SSH is filtered from a laptop, so the raw playbook fails
@@ -29,22 +30,24 @@ const LOCAL_VM = "http://REDACTED-INTERNAL-ADDRESS:8765";
 
 const joined = (stale: string[], fleet = BARE_METAL) => remedyLines(stale, fleet).join("\n");
 
-test("a bare-metal worker is told to PULL, and told worker:deploy cannot reach it", () => {
+test("a bare-metal worker is told to PULL, and never sent to the removed UTM push", () => {
   const out = joined([BARE_METAL[0]]);
   assert.match(out, /npm run fleet:deploy/);
-  assert.match(out, /cannot reach these/);
+  assert.match(out, /never reached these/);
   assert.doesNotMatch(out, /^\s*npm run worker:deploy$/m,
     "a bare-metal-only fleet must not be told to run the utmctl deploy as its remedy");
 });
 
-test("a local VM still gets the utmctl route", () => {
+test("a local VM is told no command deploys to it, and is not sent to the removed utmctl route", () => {
   const out = joined([LOCAL_VM]);
-  assert.match(out, /npm run worker:deploy/);
+  assert.match(out, /No command deploys to them any more/);
+  assert.doesNotMatch(out, /^\s*npm run worker:deploy$/m,
+    "worker:deploy does not exist: a remedy naming it sends the reader to a command that fails");
   assert.doesNotMatch(out, /ansible-playbook/,
     "a VM absent from inventory.yml cannot be deployed to by pulling — it has no checkout to pull into");
 });
 
-test("a mixed fleet is given BOTH routes, and says which applies to how many", () => {
+test("a mixed fleet is told which half has a route, and says which applies to how many", () => {
   // The case that makes a single unconditional message wrong rather than merely imprecise: half the fleet
   // would follow advice that cannot work, and the failure looks like an unreachable machine.
   const out = joined([BARE_METAL[0], LOCAL_VM, BARE_METAL[1]]);
@@ -52,7 +55,7 @@ test("a mixed fleet is given BOTH routes, and says which applies to how many", (
   assert.match(out, /2 in inventory\.yml/);
   assert.match(out, /1 not in inventory\.yml/);
   assert.match(out, /npm run fleet:deploy/);
-  assert.match(out, /npm run worker:deploy/);
+  assert.match(out, /No command deploys to them any more/);
 });
 
 test("with no bare-metal fleet declared, every worker is treated as a VM", () => {
