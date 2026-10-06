@@ -1,13 +1,12 @@
 {
-  "extends": "../../tsconfig.base.json",
-  // `@a11ign/screenreader-worker` ships its `.mjs` as written, with no declarations (its `exports` carry no `types`), so under `strict`
-  // every import of one is TS7016. In the monorepo a project reference supplied the sources; here the published package is all there
-  // is, and depth 2 (a module and what it imports) lets the compiler read the JS it already ships. Nothing in `node_modules` is emitted.
-  "compilerOptions": { "outDir": "dist", "rootDir": "src", "maxNodeModuleJsDepth": 2 },
-  // The `.mjs` here are host-side, so unlike the worker's they have no "must run under plain node on the
-  // guest" constraint — including them lets tsc emit them into `dist` alongside the compiled TS, which is what
-  // makes `dist/local-vm.js`'s `./host-capacity.mjs` import resolve. `allowJs` without `checkJs` transpiles
-  // them without type-checking.
+  // What Rslib reads to lay out and declare the package: its own `src` and no test. The ROOT `tsconfig.json` is the typecheck (`tsc --noEmit`,
+  // tests and `scripts/` included); Rslib builds, `tsc` here emits nothing.
+  "extends": "@a11ign/toolchain/tsconfig.base.json",
+  // `@a11ign/screenreader-worker` ships `.mjs` with `.d.mts` beside it only from its next release; until then the compiler reads the JS it
+  // ships (a module and what it imports), and nothing in `node_modules` is emitted.
+  "compilerOptions": { "rootDir": "src", "noEmit": true, "maxNodeModuleJsDepth": 2 },
+  // The `.mjs` here are host-side and ship as built modules beside the compiled TS; `allowJs` without `checkJs` reads them without
+  // type-checking.
   "include": ["src/**/*.ts", "src/**/*.mjs"],
   "exclude": ["src/**/*.test.ts"]
 }

@@ -7,12 +7,14 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "default": "./dist/index.mjs"
     },
     "./health": {
+      "types": "./dist/worker-health.d.mts",
       "default": "./dist/worker-health.mjs"
     },
     "./capacity": {
+      "types": "./dist/host-capacity.d.mts",
       "default": "./dist/host-capacity.mjs"
     },
     "./probe-outcome": {
@@ -24,6 +26,7 @@
       "default": "./dist/worker-http.mjs"
     },
     "./cli-flags": {
+      "types": "./dist/cli-flags.d.mts",
       "default": "./dist/cli-flags.mjs"
     },
     "./transient-fault": {
@@ -71,8 +74,10 @@
   },
   "devDependencies": {
     "@a11ign/evidence": "0.1.0",
-    "yaml": "^2.9.1",
-    "typescript": "^6.0.3"
+    "@a11ign/toolchain": "0.1.2",
+    "@rslib/core": "1.0.3",
+    "typescript": "^6.0.3",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": ">=20"
@@ -81,7 +86,8 @@
     "access": "public"
   },
   "scripts": {
-    "prepack": "tsc --build"
+    "build": "rslib build",
+    "prepack": "rslib build"
   },
   "repository": {
     "type": "git",

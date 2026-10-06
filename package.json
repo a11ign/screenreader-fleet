@@ -7,17 +7,20 @@
     "node": ">=22"
   },
   "scripts": {
+    "build": "pnpm --filter @a11ign/screenreader-fleet run build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"packages/*/src/**/*.test.ts\" \"scripts/*.test.ts\""
+    "test": "rstest run"
   },
   "devDependencies": {
+    "@a11ign/toolchain": "0.1.2",
     "@changesets/cli": "3.0.3",
     "@eslint/js": "^10.0.1",
+    "@rslib/core": "1.0.3",
+    "@rstest/core": "0.12.3",
     "@types/node": "^26.6.4",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
-    "tsx": "4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.0",
     "yaml": "^2.9.1"
