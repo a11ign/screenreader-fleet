@@ -15,11 +15,6 @@
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
-import { sandboxGitEnv } from "./git-safe-env.mjs";
-// The WORKING-TREE value, imported rather than regex-scraped — architecture-audit.md §5, item 3.
-// `protocol-version.mjs` is dependency-free for exactly this: safe to import from a portable tree.
-import { CAPTURE_PROTOCOL_VERSION as PROTOCOL_IN_TREE } from "@a11ign/screenreader-worker/protocol-version";
-import { workerSourceDir } from "@a11ign/screenreader-worker/code-version";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
@@ -44,31 +39,6 @@ const CTL = fleetScriptPaths().workerCtl;
 // request after a Windows boot may need PowerShell file-version discovery, so four seconds
 // was too tight and made a healthy worker look unreachable.
 const HEALTH_TIMEOUT_MS = 15000;
-
-// The guest and the host now call the SAME function over the SAME list, so they cannot disagree by
-// construction. This used to be two copies of one loop kept in step by a comment.
-/**
- * A STALE report is usually a real stale guest — but not when the working tree carries an uncommitted
- * CAPTURE_PROTOCOL_VERSION bump. Then every worker reports stale because the LOCAL hash moved, and the
- * obvious remedy (redeploy) would ship the bump and invalidate every cached capture.
- *
- * Saying so here costs one line and saves someone an unexplained full recapture.
- */
-function protocolBumpNote() {
-  try {
-    const inTree = String(PROTOCOL_IN_TREE);
-    const committed = /CAPTURE_PROTOCOL_VERSION = (\d+)/.exec(
-      execFileSync("git", ["-C", workerSourceDir(), "show", "HEAD:./protocol-version.mjs"],
-        { encoding: "utf8", env: sandboxGitEnv() }))?.[1];
-    if (inTree && committed && inTree !== committed) {
-      return `\nNOTE: your working tree has CAPTURE_PROTOCOL_VERSION = ${inTree} but HEAD has ${committed}.\n` +
-        "That alone changes the local hash, so the guests may not be stale at all. Deploying it would\n" +
-        "invalidate every cached capture — `npm run worker:deploy` refuses unless you pass\n" +
-        "--allow-protocol-change.\n";
-    }
-  } catch { /* not a git checkout; nothing to add */ }
-  return "";
-}
 
 /**
  * Which workers to ask, AND WHERE THAT LIST CAME FROM — the second half is not decoration.
@@ -165,8 +135,6 @@ async function main() {
   }
   if (staleUrls.length) {
     for (const line of remedyLines(staleUrls, inventoryWorkerUrls())) console.log(line);
-    const note = protocolBumpNote();
-    if (note) console.log(note);
   }
   process.exit(staleUrls.length ? 1 : 0);
 }

@@ -55,8 +55,15 @@ import { codeDrift, describeCodeDrift, describeEmptyPool, readWorkerCode, remedy
 // why it is its own module. Still the ONE hasher: the subpath is the same function.
 import { codeVersion, workerSourceDir } from "@a11ign/screenreader-worker/code-version";
 
-/** The hash this checkout expects every worker to be serving. One hasher, shared with the guest. */
-export const expectedWorkerCode = () => codeVersion(workerSourceDir());
+/**
+ * The hash every worker is expected to be serving: the one the installed `@a11ign/screenreader-worker` was released with.
+ *
+ * NO ARGUMENT, and that is the point (a11ign/a11ign#3740). The package is BUILT, so `workerSourceDir()` is its `dist/`, which holds
+ * none of the files a guest runs (a guest runs the raw `src/*.mjs`, ADR 0031) and `codeVersion(workerSourceDir())` threw ENOENT.
+ * Built, `codeVersion()` returns the hash of the `src` the package was built from, which is what `/health.code` is over. Raw (0.1.0,
+ * which ships `src`), the same call hashes the module's own directory, which is the source: the one expression is right for both.
+ */
+export const expectedWorkerCode = () => codeVersion();
 
 // Re-exported rather than duplicated: existing callers (`capture-real-pages.mjs`,
 // `capture-screenreader-dataset.mjs`, and this module's own test) import these from here, and moving their
