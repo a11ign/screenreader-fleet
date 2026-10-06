@@ -29,7 +29,6 @@ import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
 import { flagValue, refuseUnknownFlags } from "./cli-flags.mjs";
-import { pnpmCliInvocation } from "./npm-cli-executable.mjs";
 import { requestJson } from "./worker-http.mjs";
 
 /**
@@ -391,47 +390,46 @@ export function checkoutRootFor(resolvedRealPath) {
   return idx === -1 ? null : resolvedRealPath.slice(0, idx);
 }
 
-/** @type {(cmd: string, args: string[]) => string} */
-const defaultTscRun = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8" });
+/**
+ * Every file a package's `exports` map points at, as paths relative to the package directory. Conditions nest
+ * (`types`, `default`, `import`), so this walks the whole map rather than reading one key.
+ *
+ * @param {unknown} exportsField
+ * @returns {string[]}
+ */
+function exportTargets(exportsField) {
+  if (typeof exportsField === "string") return [exportsField];
+  if (exportsField === null || typeof exportsField !== "object") return [];
+  return Object.values(exportsField).flatMap(exportTargets);
+}
 
 /**
- * Whether `tsc --build --dry` -- the SAME authority the real build uses, deferred to rather than
- * reimplemented -- considers `tsconfigPath`'s own outputs up to date.
+ * The `exports` targets of `packageDir` that are NOT on disk, or `null` when the package's manifest could not be
+ * read or declares none -- "could not tell" and "missing" need opposite responses (investigate vs. rebuild), and a
+ * lookup failure is never read as a clean answer.
  *
- * NOT a timestamp comparison, and that correction cost a wrong first version of this check (#256, live-
- * measured): a directory's mtime does not move on rewrite; a file's mtime moves on `git checkout` with no
- * content change at all, which is the ordinary case of switching branches; and `tsc --build` itself is
- * content-addressed for the files it actually recompiles, so a real build can be legitimately up to date
- * with source files whose mtimes are newer than its outputs. Measured on two live worktrees straight
- * after a branch switch: several source files newer than `dist/index.js`, and `tsc --build --dry` still
- * correctly reported "is up to date". A raw mtime comparison would have flagged both as stale --
- * permanently, on every worktree, the moment `git checkout` runs -- which is exactly the "readiness
- * command that cries wolf" this file's own `advise` doc warns against.
+ * WHY EXISTENCE AND NOT FRESHNESS. This asked `tsc --build --dry` whether the package's outputs were current, and
+ * a11ign builds `judge` with Rslib now (a11ign/a11ign#3580): its `tsconfig.json` is `noEmit`, so tsc has no output to
+ * be up to date about and answered wrongly on every run (a11ign/a11ign#3810). Rslib writes no stamp of the source it
+ * built from, and a timestamp comparison is the wrong first version this check once had (#256: `git checkout` moves
+ * source mtimes with no content change, so every worktree would read stale the moment it switched branches). So what
+ * is read is what Rslib's output actually IS: the files `exports` promises. A present but out-of-date `dist` is
+ * therefore NOT caught here, and the check says "present", never "up to date".
  *
- * `null`, not `false`, when the run failed outright or its report never mentioned this project at all --
- * "could not tell" and "not up to date" need opposite responses (investigate vs. rebuild), and this repo's
- * own rule is that a lookup failure is never silently read as a clean answer.
- *
- * @param {string} tsconfigPath
- * @param {{ run?: (cmd: string, args: string[]) => string }} [deps]
- * @returns {boolean | null}
+ * @param {string} packageDir
+ * @returns {string[] | null}
  */
-export function tscProjectUpToDate(tsconfigPath, { run = defaultTscRun } = {}) {
-  /** @type {string} */
-  let output;
+export function missingExportTargets(packageDir) {
+  /** @type {unknown} */
+  let manifest;
   try {
-    const tsc = pnpmCliInvocation(["exec", "tsc", "--build", "--dry", tsconfigPath]);
-    output = run(tsc.command, tsc.args);
-  } catch (error) {
-    // `--dry` still exits 0 for a stale project (measured); a thrown error here is a REAL failure --
-    // a missing tsconfig, a syntax error blocking even the dry check -- and its stdout, if any, is still
-    // worth reading rather than discarded.
-    output = /** @type {{stdout?: string}} */ (error)?.stdout ?? "";
-    if (!output) return null;
+    manifest = JSON.parse(readFileSync(resolve(packageDir, "package.json"), "utf8"));
+  } catch {
+    return null;
   }
-  const line = output.split("\n").find((l) => l.includes(tsconfigPath));
-  if (!line) return null;
-  return /is up to date/.test(line);
+  const targets = exportTargets(/** @type {{ exports?: unknown }} */ (manifest)?.exports);
+  if (targets.length === 0) return null;
+  return targets.filter((target) => !existsSync(resolve(packageDir, target)));
 }
 
 /**
@@ -488,21 +486,20 @@ export function checkCrossPackageDist({ baseDir = MODULE_DIR } = {}) {
   }
 
   // THE HALF A RESOLUTION CHECK ALONE MISSES: resolving to your OWN tree is no protection if your own
-  // dist is stale -- so this checks freshness of whichever checkout the specifier ACTUALLY resolved to,
-  // not always this one. `tsc --build --dry`, never a raw mtime comparison -- see `tscProjectUpToDate`'s
-  // own doc for the live-measured reason.
+  // dist was never built -- so this reads whichever checkout the specifier ACTUALLY resolved to, not always
+  // this one. Existence of the `exports` targets, not freshness: see `missingExportTargets`.
   const distRoot = checkoutRootFor(resolvedRealPath) ?? thisCheckoutRoot;
-  const tsconfigPath = resolve(distRoot, "packages/judge/tsconfig.json");
-  const upToDate = tscProjectUpToDate(tsconfigPath);
-  if (upToDate === null) {
-    return advise("dist-freshness", `could not ask tsc whether ${tsconfigPath} is up to date`,
+  const judgeDir = resolve(distRoot, "packages/judge");
+  const missing = missingExportTargets(judgeDir);
+  if (missing === null) {
+    return advise("dist-freshness", `could not read the exports of ${judgeDir}/package.json to see whether its dist is built`,
       "pnpm run build");
   }
-  if (upToDate) {
-    return add("dist-freshness", true, `packages/judge under ${distRoot} is up to date (tsc --build --dry)`);
+  if (missing.length === 0) {
+    return add("dist-freshness", true, `every exports target of packages/judge under ${distRoot} is present (existence only: Rslib leaves no stamp to read freshness from)`);
   }
-  advise("dist-freshness", `packages/judge under ${distRoot} is NOT up to date (tsc --build --dry) -- a `
-    + "build compiled before the source it now reflects", "pnpm run build   # in that checkout");
+  advise("dist-freshness", `packages/judge under ${distRoot} is missing ${missing.length} exports target(s): ${missing.join(", ")}`,
+    "pnpm run build   # in that checkout");
 }
 
 // The DEFAULT here was "codex", and every part of that was wrong. `judge.ts` has no codex case at all —
