@@ -59,14 +59,34 @@ const PAGES_PORT = Number(process.env.DATASET_PAGES_PORT || 5050);
 // moved: doctor then reported "no local VM tooling here" on a host with three registered VMs, which reads as
 // a broken environment rather than a broken path.
 const CTL = fleetScriptPaths().workerCtl;
-// Resolved from THIS module, never the cwd. The scorer being resolved against `process.cwd()` is the
-// defect that made a fresh clone unable to run its own default judge (see packages/scorer/src/index.ts),
-// so nothing here may repeat it.
-const SCORER_MODEL_DIR = fileURLToPath(new URL("../../scorer/models/screenreader-scorer/", import.meta.url));
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 /** A checkout, not `node_modules`: the layout `../../../` from this module only means "the repo root" inside one. */
 const isMonorepoRoot = (/** @type {string} */ root) =>
   existsSync(resolve(root, "packages")) && existsSync(resolve(root, "package.json"));
+
+/**
+ * The checkout root three checks read, or `null` from an installed package (a11ign/a11ign#3784).
+ *
+ * `../../../` from `dist/` is the repo root in a checkout and `node_modules` when installed, where a check that reads it
+ * reports on a directory that is not the machine's checkout and turns on that. `baseDir` is INJECTED so a test can
+ * stand in for either layout, as `runsDirFor`'s does.
+ * @param {string} [baseDir]
+ * @returns {{ root: string, checkout: boolean }}
+ */
+function checkoutLayout(baseDir = MODULE_DIR) {
+  const root = resolve(baseDir, "..", "..", "..");
+  return { root, checkout: isMonorepoRoot(root) };
+}
+
+/**
+ * What a checkout-only check reports from an installed package: ADVISORY, naming the directory it declined to read.
+ * Never `ok: false`, which would turn READY into NOT READY on a path it should not have read.
+ */
+const notACheckout = (/** @type {string[]} */ names, /** @type {string} */ root) => {
+  for (const name of names) {
+    advise(name, `n/a: installed package -- ${root} is not a checkout, so there is nothing here for this check to read`);
+  }
+};
 
 /**
  * The `runs/` directory doctor reads the dataset from: the caller's `--runs-dir=`, else the monorepo's own `runs/`,
@@ -98,6 +118,8 @@ const PROBE_TIMEOUT_MS = 8000;
 /** @type {{name: string, id: string, ok: boolean, detail: string, fix: string|null, note?: string|null,
  *    advisory?: boolean}[]} */
 const checks = [];
+/** What the checks have recorded so far, for a test that drives one check through the real recorder. */
+export const recordedChecks = () => checks;
 /**
  * DOES THIS CHECK DECIDE `ready`? -- #1073, product-manager's ruling: **the dataset check must REPORT and
  * not gate.**
@@ -287,8 +309,9 @@ async function httpJson(/** @type {any} */ url) {
  * and telling four of those five to mark themselves would be the #198 defect wearing an advisory's
  * clothes. It states what is true and names the command; the operator decides.
  */
-function checkPrimaryCheckoutMark() {
-  const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+export function checkPrimaryCheckoutMark({ baseDir = MODULE_DIR } = {}) {
+  const { root, checkout } = checkoutLayout(baseDir);
+  if (!checkout) return notACheckout(["primary checkout"], root);
   // A linked worktree's `.git` is a FILE (`gitdir: ...`) and it SHARES `.git/config` with the repository
   // it was created from -- so the mark alone reads true inside every worktree off a marked primary. Both
   // conditions, exactly as `scripts/git-hooks/lib/is-primary-checkout.sh` requires them; a doctor that
@@ -318,19 +341,20 @@ function checkPrimaryCheckoutMark() {
     "pnpm run primary:mark -- --set   (only on the fleet-driving checkout — see docs/primary-checkout.md)");
 }
 
-function checkControlPlaneIsolation() {
+export function checkControlPlaneIsolation({ baseDir = MODULE_DIR } = {}) {
+  const { root, checkout } = checkoutLayout(baseDir);
+  if (!checkout) return notACheckout(["isolation"], root);
   // `~` is a SHELL expansion, not a filesystem one: `existsSync("~/.ssh/...")` is always false, which
   // would make this guard report every machine as compliant. The silent-pass failure mode, in the guard
   // written because a document silently passed.
   const raw = process.env.A11Y_SSH_KEY || "~/.ssh/a11y-witness_ed25519";
   const keyPath = raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
   const hasFleetKey = existsSync(keyPath);
-  const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
   const hasNodeModules = existsSync(resolve(root, "node_modules"));
   // A workspace is a checkout with sources, which is what makes "delete node_modules" the wrong advice
-  // here and the right advice on a control plane.
-  const isWorkspace = existsSync(resolve(root, "packages")) && existsSync(resolve(root, "package.json"));
-  const verdict = controlPlaneIsolation({ hasNodeModules, hasFleetKey, isWorkspace });
+  // here and the right advice on a control plane. Always true past the guard above: an installed package
+  // never reaches this far.
+  const verdict = controlPlaneIsolation({ hasNodeModules, hasFleetKey, isWorkspace: checkout });
   // NOT a hard failure: this machine cannot do its job without the key today, and a doctor that refuses
   // to say READY over an architectural debt would simply be ignored. It is reported every run so it stays
   // visible, which is the difference between a known debt and a forgotten one.
@@ -442,9 +466,10 @@ function behindOriginMainNote(otherRoot) {
  * environmental fact would be ignored, which is how a guard gets switched off. It is reported every run
  * so a stale answer is a known condition, not a silent one.
  */
-function checkCrossPackageDist() {
+export function checkCrossPackageDist({ baseDir = MODULE_DIR } = {}) {
   const specifier = "@a11ign/judge/rules";
-  const thisCheckoutRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+  const { root: thisCheckoutRoot, checkout } = checkoutLayout(baseDir);
+  if (!checkout) return notACheckout(["dist-resolution", "dist-freshness"], thisCheckoutRoot);
   /** @type {string} */
   let resolvedRealPath;
   try {
@@ -488,15 +513,41 @@ function checkCrossPackageDist() {
 //
 // Mirrors judge.ts's default deliberately: a doctor that disagrees with the thing it inspects is worse
 // than no doctor.
-async function checkJudge() {
+/**
+ * Where the trained scorer's weights are, asked of `@a11ign/scorer` itself (a11ign/a11ign#3784).
+ *
+ * This was `../../scorer/models/...` from this module: the monorepo layout, which from an installed package points into
+ * `node_modules/@a11ign/` and answers "missing" under pnpm, where the scorer sits beside `@a11ign/judge` in the store and
+ * not beside this package. The scorer is a PEER of the judge, so it is resolved FROM the judge's real path, the one place
+ * both layouts agree it is reachable, and its own `scorerPaths()` says where its weights are ("the weights are the API").
+ * `from` is INJECTED so a test can stand in for either layout.
+ *
+ * @param {{ from?: string }} [options] a path or file URL to resolve `@a11ign/judge` from
+ * @returns {Promise<string>}
+ */
+export async function scorerWeightsFor({ from = import.meta.url } = {}) {
+  const judgeEntry = realpathSync(createRequire(from).resolve("@a11ign/judge"));
+  const scorerEntry = realpathSync(createRequire(judgeEntry).resolve("@a11ign/scorer"));
+  const { scorerPaths } = await import(pathToFileURL(scorerEntry).href);
+  return scorerPaths().weights;
+}
+
+export async function checkJudge({ from = import.meta.url } = {}) {
   // `||`, not `??`: an env var set to the EMPTY string is how CI passes "unset", and `??` only defaults
   // on nullish — so an empty JUDGE_BACKEND matched no backend and reported a typo that nobody made.
   const backend = (process.env.JUDGE_BACKEND || "local").toLowerCase();
   if (backend === "local") {
-    const weights = resolve(SCORER_MODEL_DIR, "model.safetensors");
+    let weights;
+    try {
+      weights = await scorerWeightsFor({ from });
+    } catch (error) {
+      // Could not ASK, which is not "the weights are missing": the message names what failed to resolve.
+      return add("judge", false, `backend=local, but @a11ign/scorer could not be resolved from @a11ign/judge: ${/** @type {Error} */ (error).message}`,
+        "install @a11ign/scorer (a peer dependency of @a11ign/judge) beside @a11ign/judge");
+    }
     return add("judge", existsSync(weights),
       existsSync(weights) ? "backend=local, trained scorer present" : "backend=local, but the trained scorer is missing",
-      `expected weights at ${weights} — they ship in the repo, so this means an incomplete checkout`);
+      `expected weights at ${weights} (where @a11ign/scorer says they are) — reinstall @a11ign/scorer`);
   }
   if (backend === "anthropic" || backend === "openai") {
     const key = backend === "anthropic" ? "ANTHROPIC_API_KEY" : "JUDGE_BASE_URL";
