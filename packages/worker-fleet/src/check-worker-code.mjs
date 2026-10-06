@@ -19,7 +19,7 @@ import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.mjs";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
 // the same question before every run and a second copy of "is this worker stale" is a second answer.
-import { expectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
+import { resolveExpectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
 import { refuseUnknownFlags } from "./cli-flags.mjs";
 import { errorText } from "@a11ign/screenreader-worker/error-text";
 import { requestJson } from "./worker-http.mjs";
@@ -101,9 +101,11 @@ async function versionOf(url) {
  * than parse its source as text.
  */
 async function main() {
-  const expected = expectedWorkerCode();
+  const { code: expected, note } = await resolveExpectedWorkerCode();
   const { urls, source } = workerUrls();
-  console.log(`this checkout: ${expected}`);
+  // Says WHICH tree the hash is of: the clone's and the installed copy's differ the moment a guest is deployed at a layer sha whose
+  // `.mjs` is not the release's, and a bare hash cannot say which one a "STALE" below was measured against.
+  console.log(`this checkout: ${expected}  (from ${note})`);
   if (!urls.length) {
     console.log("no worker configured, running locally, or listed in inventory.yml — nothing to compare");
     process.exit(0);
