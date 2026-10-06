@@ -25,14 +25,14 @@
 //
 // It also refuses to declare a difference the samples do not support -- see `./worker-stats.mjs`.
 // "Not distinguishable" is a real answer, and it is the one that was missing.
-import { writeFileSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { refuseIfBusy, sampleVitals } from "./measure-guard.mjs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";
 import { sampleHost, diffHost } from "./host-metrics.mjs";
 import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.mjs";
 import { resolve } from "node:path";
-import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { flagValue, refuseUnknownFlags } from "./cli-flags.mjs";
 
 /**
  * takes a page and two workers POSITIONALLY. `--runs=` is a documented alias of `--rounds=`, so both
@@ -40,21 +40,46 @@ import { refuseUnknownFlags } from "./cli-flags.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--rounds=", "--runs="], { entry: import.meta.url, command: "npm run worker:compare" });
+refuseUnknownFlags(["--rounds=", "--runs=", "--runs-dir="], { entry: import.meta.url, command: "npm run worker:compare" });
 
 // `requestJson`, not `fetch`: undici stops waiting for response HEADERS at 300 s whatever the
 // AbortSignal says, and the worker writes its status and body together at the END of a capture.
 // See worker-http.mjs -- this budget sits at or above that cap, so it never applied.
-// Resolved from THIS module, never the cwd -- same reason as `doctor.mjs`'s `DATASET`: this package
-// cannot import `@a11ign/lab`'s canonical `runs/` resolution without a dependency cycle.
-const OUT = resolve(fileURLToPath(new URL("../../../", import.meta.url)), "runs/worker-compare");
+const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
+/** A checkout, not `node_modules`: the layout `../../../` from this module only means "the repo root" inside one. */
+const isMonorepoRoot = (/** @type {string} */ root) =>
+  existsSync(resolve(root, "packages")) && existsSync(resolve(root, "package.json"));
+
+/**
+ * Where the report is written: under the caller's `--runs-dir=`, else the monorepo's own `runs/`, else a refusal naming
+ * the directory and the flag (a11ign/a11ign#3767).
+ *
+ * Resolved from THIS module, never the cwd -- same reason as `doctor.mjs`'s `runsDirFor`, which this duplicates because
+ * this package cannot import `@a11ign/lab`'s canonical `runs/` resolution without a dependency cycle. From an INSTALLED
+ * package `../../../` is `node_modules`, so the default would write the report under the dependency. A supplied
+ * directory need not exist: the report's own `mkdirSync` makes it, which is what asking for one means.
+ * `baseDir` is INJECTED so a test can stand in for either layout.
+ *
+ * @param {{ argv?: readonly string[], baseDir?: string }} [options]
+ * @returns {string}
+ */
+export function outDirFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR } = {}) {
+  const supplied = flagValue(argv, "runs-dir");
+  if (supplied === "") throw new Error("worker:compare: --runs-dir= is empty. Pass --runs-dir=<the runs directory>.");
+  if (supplied !== undefined) return resolve(supplied, "worker-compare");
+  const root = resolve(baseDir, "..", "..", "..");
+  if (isMonorepoRoot(root)) return resolve(root, "runs", "worker-compare");
+  throw new Error(`worker:compare: no runs directory: ${root} is not a checkout (this is an installed package), so there is `
+    + "no runs/ to write worker-compare/ under. Pass --runs-dir=<the runs directory>.");
+}
+
 const MS_PER_S = 1000;
 
 /**
- * `dataset-paths.mjs`'s `refuseIfRunsReadonly`, duplicated rather than imported -- same reason `OUT`
+ * `dataset-paths.mjs`'s `refuseIfRunsReadonly`, duplicated rather than imported -- same reason `outDirFor`
  * above resolves from this module's own location instead of importing `runsRoot()`: this package cannot
  * import `@a11ign/lab` without a dependency cycle (see `dataset-paths.test.ts`'s own EXEMPT entry
- * for this file). `A11Y_RUNS_READONLY=1 npm run worker:compare ...` must refuse and name `OUT` exactly
+ * for this file). `A11Y_RUNS_READONLY=1 npm run worker:compare ...` must refuse and name the report exactly
  * like every other runs/ writer, so a peer asking "is this safe to run" gets one answer regardless of
  * which package the script happens to live in.
  */
@@ -63,6 +88,16 @@ function refuseIfRunsReadonly() {
   console.error("REFUSING to write runs/worker-compare/compare.json — A11Y_RUNS_READONLY=1 is set.");
   console.error("  Unset A11Y_RUNS_READONLY to run this for real.");
   process.exit(3);
+}
+
+/** The report directory, or the refusal printed and the process ended: a config mistake is a usage error (2), like a missing page. */
+function refuseUnlessOutDir() {
+  try {
+    return outDirFor();
+  } catch (error) {
+    process.stderr.write(`${/** @type {Error} */ (error).message}\n`);
+    return process.exit(2);
+  }
 }
 
 const args = process.argv.slice(2);
@@ -149,6 +184,7 @@ async function main() {
     process.stderr.write("usage: npm run worker:compare -- <page-url> <worker> <worker> [--rounds=6]\n");
     process.exit(2);
   }
+  const outDir = refuseUnlessOutDir();
   refuseIfRunsReadonly();
 
   // REFUSE A BUSY BOX BEFORE MEASURING IT. This whole tool exists to answer "which worker is the
@@ -201,7 +237,7 @@ async function main() {
     results[worker].diagnostics = await diagnostics(worker);
   }
 
-  report({ results, vitalsBefore, vitalsAfter, hostBefore });
+  report({ results, vitalsBefore, vitalsAfter, hostBefore, outDir });
 }
 
 /**
@@ -210,7 +246,7 @@ async function main() {
  * the other decides what the numbers mean. `compare-workers` exists because reading two `bench-capture`
  * printouts side by side attributed a 2x difference to the wrong phase for hours.
  */
-function report(/** @type {any} */ { results, vitalsBefore, vitalsAfter, hostBefore }) {
+function report(/** @type {any} */ { results, vitalsBefore, vitalsAfter, hostBefore, outDir }) {
   // Shared by both tables below: which phases exist at all, and how to pull one worker's samples.
   const allPhases = [...new Set(Object.values(results).flatMap((r) => r.phases.flatMap(Object.keys)))];
   const phaseSamples = (/** @type {any} */ worker, /** @type {any} */ phase) => results[worker].phases.map((/** @type {any} */ p) => (p[phase] ?? 0) / MS_PER_S);
@@ -218,11 +254,11 @@ function report(/** @type {any} */ { results, vitalsBefore, vitalsAfter, hostBef
   reportPhases({ results, allPhases, phaseSamples });
   const { foundations, hostAfter } = reportFoundations({ hostBefore });
 
-  mkdirSync(OUT, { recursive: true });
-  writeFileSync(resolve(OUT, "compare.json"),
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(resolve(outDir, "compare.json"),
     JSON.stringify({ page, rounds: runs, results, verdict, recoveryDeltas: deltas,
                      foundations, hostBefore, hostAfter }, null, 2) + "\n", "utf8");
-  process.stdout.write(`\nReport: ${resolve(OUT, "compare.json")}\n`);
+  process.stdout.write(`\nReport: ${resolve(outDir, "compare.json")}\n`);
 }
 
 /** Wall time and the verdict, first, because that is the question being asked. */

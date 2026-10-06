@@ -10,7 +10,8 @@
 // answers `unknown` when the UTM app is closed. Every check below therefore reports what it
 // observed AND the exact command that fixes it, so nothing has to be deduced.
 //
-// Exit codes: 0 ready, 1 something is broken (details in the report).
+// Exit codes: 0 ready, 1 something is broken (details in the report), 2 refused: a directory it must read is missing
+// and no `--runs-dir=` names one (a11ign/a11ign#3767).
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -27,7 +28,7 @@ import { assessWorker } from "./worker-health.mjs";
 import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
 import { fleetScriptPaths } from "./fleet-scripts.mjs";
 import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
-import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { flagValue, refuseUnknownFlags } from "./cli-flags.mjs";
 import { pnpmCliInvocation } from "./npm-cli-executable.mjs";
 import { requestJson } from "./worker-http.mjs";
 
@@ -37,10 +38,12 @@ import { requestJson } from "./worker-http.mjs";
  *
  * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
  */
-refuseUnknownFlags(["--json"], { entry: import.meta.url, command: "pnpm run doctor" });
+refuseUnknownFlags(["--json", "--runs-dir="], { entry: import.meta.url, command: "pnpm run doctor" });
 
 const run = promisify(execFile);
 const JSON_OUT = process.argv.includes("--json");
+/** The exit code of a run that did not start because a directory it must read was not named. */
+const REFUSED = 2;
 // A11Y_WORKERS (plural) is how a bare-metal fleet is configured -- bootstrap-control-plane.sh tells you
 // to set exactly that -- and this read only A11Y_WORKER. So doctor reported "no A11Y_WORKER set and no
 // local VM tooling here" against a healthy fleet of ten machines, and doctor is the FIRST command
@@ -60,11 +63,36 @@ const CTL = fleetScriptPaths().workerCtl;
 // defect that made a fresh clone unable to run its own default judge (see packages/scorer/src/index.ts),
 // so nothing here may repeat it.
 const SCORER_MODEL_DIR = fileURLToPath(new URL("../../scorer/models/screenreader-scorer/", import.meta.url));
-// Same rule as SCORER_MODEL_DIR above: resolved from THIS module, never the cwd. `@a11ign/lab`
-// owns the canonical `runs/` resolution (`packages/lab/src/dataset-paths.mjs`), but `lab` depends on
-// `worker-fleet`, so this package cannot import it without a cycle — this is the same computation,
-// duplicated for that reason rather than left cwd-anchored.
-const DATASET = resolve(fileURLToPath(new URL("../../../", import.meta.url)), "runs/screenreader-dataset");
+const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
+/** A checkout, not `node_modules`: the layout `../../../` from this module only means "the repo root" inside one. */
+const isMonorepoRoot = (/** @type {string} */ root) =>
+  existsSync(resolve(root, "packages")) && existsSync(resolve(root, "package.json"));
+
+/**
+ * The `runs/` directory doctor reads the dataset from: the caller's `--runs-dir=`, else the monorepo's own `runs/`,
+ * else a refusal naming the directory and the flag (a11ign/a11ign#3767).
+ *
+ * `@a11ign/lab` owns the canonical `runs/` resolution (`packages/lab/src/dataset-paths.mjs`), but `lab` depends on
+ * `worker-fleet`, so this package cannot import it without a cycle: the same computation, duplicated (and again in
+ * `compare-workers.mjs`) rather than left cwd-anchored. From an INSTALLED package `../../../` is `node_modules`, so the
+ * default is taken only when that directory is a checkout; a missing `runs/` inside one is normal (a fresh clone).
+ * `baseDir` is INJECTED so a test can stand in for either layout.
+ *
+ * @param {{ argv?: readonly string[], baseDir?: string }} [options]
+ * @returns {string}
+ */
+export function runsDirFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR } = {}) {
+  const supplied = flagValue(argv, "runs-dir");
+  if (supplied !== undefined) {
+    if (existsSync(supplied)) return resolve(supplied);
+    throw new Error(`doctor: --runs-dir=${supplied} does not exist. Pass --runs-dir=<the runs directory>.`);
+  }
+  const root = resolve(baseDir, "..", "..", "..");
+  if (isMonorepoRoot(root)) return resolve(root, "runs");
+  throw new Error(`doctor: no runs directory: ${root} is not a checkout (this is an installed package), so there is no runs/ `
+    + "to default to. Pass --runs-dir=<the runs directory>.");
+}
+const datasetDir = () => resolve(runsDirFor(), "screenreader-dataset");
 const PROBE_TIMEOUT_MS = 8000;
 
 /** @type {{name: string, id: string, ok: boolean, detail: string, fix: string|null, note?: string|null,
@@ -798,7 +826,7 @@ function checkHostCapacity(/** @type {any} */ pool) {
 // host's localhost is not reachable from inside the VM. The capture command leases the page
 // server for the run, so an idle host with no listener on this port is ready, not broken.
 async function checkDatasetPages() {
-  const manifestPath = resolve(DATASET, "manifest.json");
+  const manifestPath = resolve(datasetDir(), "manifest.json");
   if (!existsSync(manifestPath)) {
     return add("dataset", false, "no manifest — the dataset has not been generated",
       "pnpm run training:generate");
@@ -828,7 +856,7 @@ async function checkDatasetPages() {
 // A run left mid-flight is the difference between "start" and "--resume", and getting it
 // wrong either re-captures for hours or silently skips work.
 function checkRunState() {
-  const progress = resolve(DATASET, "capture-progress.json");
+  const progress = resolve(datasetDir(), "capture-progress.json");
   if (!existsSync(progress)) return add("run", true, "no capture run recorded");
   const p = JSON.parse(readFileSync(progress, "utf8"));
   if (!p.startedAt) return add("run", true, "no capture run recorded");
@@ -945,11 +973,20 @@ export function errorDocument(error) {
  * The whole run, as a function of its steps and its streams, returning an exit code.
  *
  * @param {{ steps?: (() => unknown)[], json?: boolean, out?: (line: string) => void,
- *           err?: (line: string) => void }} [deps]
+ *           err?: (line: string) => void, runsDir?: () => string }} [deps]
  * @returns {Promise<number>}
  */
 export async function doctorRun(deps = {}) {
-  const { steps = DEFAULT_STEPS, json = JSON_OUT, out = console.log, err = console.error } = deps;
+  const { steps = DEFAULT_STEPS, json = JSON_OUT, out = console.log, err = console.error, runsDir = runsDirFor } = deps;
+  // BEFORE any step: a missing runs directory is the caller's to supply, and the checks that probe workers must not
+  // run first only for the dataset one to refuse at the end.
+  try {
+    runsDir();
+  } catch (error) {
+    if (json) out(JSON.stringify(errorDocument(error), null, 2));
+    else err(/** @type {Error} */ (error).message);
+    return REFUSED;
+  }
   try {
     for (const step of steps) await step();
   } catch (error) {
