@@ -1,5 +1,17 @@
 # @a11ign/screenreader-fleet
 
+## 0.3.0
+
+### Minor Changes
+
+- ea68d7a: The package is built with Rslib, where 0.1.0 was `tsc --build` output. Every `exports` key now points at a `dist/*.mjs` with a declaration beside it (`.d.mts`, and `.d.ts` for the `.` entry, which is `index.ts`); 0.1.0 declared types for 9 of its 12 keys and mapped `.` to `dist/index.js`. The four `bin` commands (`a11ign-doctor`, `a11ign-worker-code`, `a11ign-worker-compare`, `a11ign-worker-deploy`) are `dist/*.mjs` entries with their shebang kept and the executable bit set, and `a11ign-worker-ctl` is still the shell script under `src/local-worker`. The import specifiers are unchanged. No `.map` files ship: they pointed at a `src` the tarball does not carry for the compiled files. Every built file sits directly under `dist`, so `fleetScriptPaths()` still finds `src/local-worker` and `src/provisioning` as `../src/...` from its own built file. The tests run on rstest through `@a11ign/toolchain` (180 tests in 29 files, the same count `tsx --test` reported).
+
+## 0.2.0
+
+### Minor Changes
+
+- 5ee974d: `expectedWorkerCode()` asks the installed `@a11ign/screenreader-worker` for its code hash with `codeVersion()` and no directory, where it hashed `workerSourceDir()`, which is `dist/` in the built package and made `a11ign-worker-code` and every capture's fleet check throw ENOENT. It works on the raw 0.1.0 as well. `a11ign-worker-code` no longer prints the "your working tree has an uncommitted `CAPTURE_PROTOCOL_VERSION` bump" note, which read a git working tree of the worker's source and so could not fire against an installed package.
+
 ## 0.1.0
 
 ### Minor Changes
