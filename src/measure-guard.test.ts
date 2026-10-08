@@ -94,10 +94,10 @@ test("one busy box in a fleet refuses the whole measurement, and says which", as
  * `completeness.ts` duplicating C2. Both were invisible to every test and every gate.
  */
 test("a MEASUREMENT tool refuses a busy box, rather than sampling it", () => {
-  const root = resolve(import.meta.dirname, "../../..");
+  const root = resolve(import.meta.dirname, "..");
   const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   // Tools whose whole output is per-worker timing. A number taken from a busy box is not slow, it is wrong.
-  const MEASURERS = ["packages/worker-fleet/src/compare-workers.mjs"];
+  const MEASURERS = ["src/compare-workers.mjs"];
   const unguarded = MEASURERS.filter((file) =>
     !/\brefuseIfBusy\s*\(/.test(strip(readFileSync(resolve(root, file), "utf8"))));
   assert.ok(MEASURERS.length > 0,

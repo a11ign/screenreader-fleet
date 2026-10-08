@@ -77,9 +77,9 @@ export function configuredWorkers() {
 }
 
 // THE INVENTORY LIVES IN `packages/control`, because it describes the machines the CONTROL PLANE drives
-// and it is read by the ansible that runs there. `packages/worker-fleet` is PUBLISHED, and `control` is
+// and it is read by the ansible that runs there. this package is PUBLISHED, and `control` is
 // never published (ADR 0012), so this constant is a real cycle -- audit §3.2 -- and NOT the sanctioned
-// direction: `control` reaching `worker-fleet` by relative import is fine (control has no
+// direction: `control` reaching this package by relative import is fine (control has no
 // `node_modules`); this file, reaching back into a package that will not exist in an installed
 // `node_modules/@a11ign/screenreader-fleet`, is what the audit calls "ships code whose data file lives in
 // a package that is never published".

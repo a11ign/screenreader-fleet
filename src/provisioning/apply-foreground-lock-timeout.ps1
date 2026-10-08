@@ -22,7 +22,7 @@
 # and run-server.cmd (so every worker start re-applies it for that session).
 #
 # Style note: `#` line comments and no param() block, matching the other scripts here --
-# see packages/worker-fleet/src/provisioning/diagnose-nvda-worker.ps1 for why.
+# see src/provisioning/diagnose-nvda-worker.ps1 for why.
 
 $ErrorActionPreference = 'Stop'
 

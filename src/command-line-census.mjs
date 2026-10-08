@@ -29,7 +29,11 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "@a11ign/evidence/source-text";
 
-/** Every top-level directory a `.mjs` command line can live under, relative to the repo root. */
+/**
+ * Every top-level directory a `.mjs` command line can live under, relative to `repoRoot`, which is the CORE's checkout (`a11ign/a11ign`):
+ * its `layers.json` lays this repository at `packages/worker-fleet` there, and the walk names it by where it is laid, not where it is
+ * written.
+ */
 const ROOTS = ["scripts", ...["packages/lab", "packages/worker-fleet"]
   .flatMap((pkg) => ["src", "scripts"].map((sub) => `${pkg}/${sub}`))];
 

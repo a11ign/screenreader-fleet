@@ -32,8 +32,8 @@ import { sourceFiles } from "./source-walk.mjs";
  * `diagnostics.mjs` had two of) without being told they exist.
  *
  * POPULATION, STATED because a guard whose walk is narrower than its prose is this repo's fourth census
- * shape: `sourceFiles` is `packages/` only, excluding `dist` and `*.test.ts`. **`scripts/` is not walked
- * here**, which is not an oversight but is a real limit — and it is the same population gap #240 exists to
+ * shape: `sourceFiles` is the repository root, excluding `node_modules`, `dist`, dot-directories and `*.test.*`. **`scripts/`
+ * holds only tests here, so it contributes nothing**, which is a real limit — and it is the same population gap #240 exists to
  * close, so this guard grows when that one does rather than by a second list.
  */
 

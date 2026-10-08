@@ -3,7 +3,7 @@
 # Run this ONCE, in the VM, in an elevated PowerShell, right after Windows setup:
 #
 #   Set-ExecutionPolicy -Scope Process Bypass -Force
-#   irm https://raw.githubusercontent.com/a11ign/a11ign/main/packages/worker-fleet/src/provisioning/bootstrap-windows-worker.ps1 | iex
+#   irm https://raw.githubusercontent.com/a11ign/screenreader-fleet/main/src/provisioning/bootstrap-windows-worker.ps1 | iex
 #
 # ...or, if you already have the repo, just run this file. It installs the
 # prerequisites, makes the box reachable over SSH, clones the repo, and then hands

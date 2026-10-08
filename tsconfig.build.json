@@ -1,6 +1,7 @@
 {
-  // What Rslib reads to lay out and declare the package: its own `src` and no test. The ROOT `tsconfig.json` is the typecheck (`tsc --noEmit`,
-  // tests and `scripts/` included); Rslib builds, `tsc` here emits nothing.
+  // What Rslib reads to lay out and declare the package: its own `src` and no test. `tsconfig.json` is the typecheck (`tsc --noEmit`, tests and
+  // `scripts/` included); Rslib builds, `tsc` here emits nothing. It is a second file because `rootDir: src` is what keeps `dist` flat, and the
+  // typecheck reads `scripts/` too.
   "extends": "@a11ign/toolchain/tsconfig.base.json",
   // `@a11ign/screenreader-worker` ships `.mjs` with `.d.mts` beside it only from its next release; until then the compiler reads the JS it
   // ships (a module and what it imports), and nothing in `node_modules` is emitted.

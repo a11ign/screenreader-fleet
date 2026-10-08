@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a local NVDA capture worker VM on Apple Silicon, unattended.
 #
-#   ./packages/worker-fleet/src/local-worker/build-vm.sh /path/to/Win11_ARM64.iso
+#   ./src/local-worker/build-vm.sh /path/to/Win11_ARM64.iso
 #
 # Produces a self-contained VM directory (default ~/a11y-worker-vm) holding the disk
 # image, UEFI vars and a run script. That directory IS the portable artifact: copy it
@@ -40,7 +40,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 die() { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
 
-[ -n "$WIN_ISO" ] || die "usage: $0 <windows-11-arm64.iso>   (build one with CrystalFetch, or packages/worker-fleet/src/local-worker/fetch-windows-iso.sh)"
+[ -n "$WIN_ISO" ] || die "usage: $0 <windows-11-arm64.iso>   (build one with CrystalFetch, or src/local-worker/fetch-windows-iso.sh)"
 [ -f "$WIN_ISO" ] || die "not found: $WIN_ISO"
 command -v qemu-system-aarch64 >/dev/null || die "qemu missing: brew install qemu"
 command -v qemu-img >/dev/null || die "qemu-img missing: brew install qemu"

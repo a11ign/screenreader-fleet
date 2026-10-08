@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { sourceFiles } from "./source-walk.mjs";
 
 const MJS_FLOOR = 25;
-const PACKAGES = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const REPOSITORY = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Every `.mjs` file still PARSES — the check this repo names and never ran.
@@ -46,7 +46,7 @@ test("every .mjs parses, which lint and tsc cannot tell you", () => {
     .map(([rel]) => rel)
     .filter((rel) => rel.endsWith(".mjs"));
 
-  // The floor was 50 for the monorepo's whole `packages/` (123 modules); this repository walks the one package, and the walk found 30
+  // The floor was 50 for the monorepo's whole `packages/` (123 modules); this repository walks its own root, and the walk found 30
   // when it moved (a11ign/a11ign#2702). A floor, not a count: it only has to tell "found the corpus" from "found nothing".
   assert.ok(files.length > MJS_FLOOR,
     `expected the walker to find the .mjs corpus, got ${files.length} — a discovery test that finds ` +
@@ -54,7 +54,7 @@ test("every .mjs parses, which lint and tsc cannot tell you", () => {
 
   const broken: string[] = [];
   for (const rel of files) {
-    const path = resolve(PACKAGES, rel);
+    const path = resolve(REPOSITORY, rel);
     // `ScriptKind.JS` with `setParentNodes` — the same parse a loader performs, without the loading.
     const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
     // `parseDiagnostics` is not on the public SourceFile type; it is what the parser records and the only
