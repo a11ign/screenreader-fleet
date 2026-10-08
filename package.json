@@ -1,6 +1,6 @@
 {
   "name": "@a11ign/screenreader-fleet",
-  "version": "0.1.0",
+  "version": "0.5.3",
   "description": "Host-side lifecycle, health and capacity for a fleet of Windows NVDA capture workers: lease one, judge whether it is degrading, and know how many the host can afford.",
   "license": "AGPL-3.0-or-later",
   "type": "module",
