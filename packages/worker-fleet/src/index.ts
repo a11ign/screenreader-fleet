@@ -28,3 +28,4 @@ export function fleetScriptPaths(): Record<string, string> {
   return scriptPaths();
 }
 
+// throwaway probe for a11ign/a11ign#4132, never merged
