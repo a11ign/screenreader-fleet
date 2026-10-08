@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Clone the local NVDA worker VM into an additional, independent worker.
 #
-#   ./packages/worker-fleet/src/local-worker/clone-worker.sh [new-name]      # default: a11y-worker-2
+#   ./src/local-worker/clone-worker.sh [new-name]      # default: a11y-worker-2
 #
 # One worker serves one capture at a time by design (one desktop, one foreground window, one
 # NVDA), so throughput scales by running more of them. On APFS the clone is copy-on-write, so

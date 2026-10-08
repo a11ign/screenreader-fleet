@@ -19,7 +19,7 @@ const BIN_ENTRIES = {
 export default defineConfig({
   lib: [{
     ...library,
-    source: { entry: { ...library.source.entry, ...BIN_ENTRIES } },
+    source: { entry: { ...library.source.entry, ...BIN_ENTRIES }, tsconfigPath: "./tsconfig.build.json" },
     // `chunkIds: "named"` keeps the chunks the entries share readable in `dist`: the default writes `8.mjs`, `s.mjs` and `t.mjs`.
     tools: { rspack: { ...library.tools.rspack, optimization: { chunkIds: "named" } } },
   }],

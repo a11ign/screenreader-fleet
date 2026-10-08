@@ -1,4 +1,4 @@
-# The merge gate. Every pull request and every merge-queue entry runs lint, the typecheck and the tests (`checks`) and the changeset check
+# The merge gate. Every pull request and every merge-queue entry runs the layout check, lint, the typecheck and the tests (`checks`) and the changeset check
 # (`changeset`), and the last job below, `gate`, waits for both. It is named `gate` because that is the check `main`'s protection and the `merge-queue-main` ruleset require
 # (`docs/code-repository-protection.json` in a11ign/a11ign names it). `merge_group` is what lets the queue's
 # temporary branches run it: a required check that never runs on one blocks the queue for ever.
@@ -35,7 +35,7 @@ jobs:
       pull-requests: read
     uses: a11ign/toolchain/.github/workflows/changeset-required.yml@745b552ed550f44cc15c9d797718d350730540ce
     with:
-      releasable-paths: packages/worker-fleet/
+      releasable-paths: src/
 
   checks:
     runs-on: ubuntu-latest
@@ -50,6 +50,10 @@ jobs:
       # The build comes first because the package is published BUILT (`prepack` runs it at publish), so a build that fails must read red here
       # and not at the release. The tests run on `src` and do not need it; the typecheck and the lint do not either.
       - run: pnpm run build
+      # The repository's own layout: a single-package repository has its package at the root (ADR 0043; a11ign/a11ign#4210, adopted here by #4216).
+      # `layout-check` is `@a11ign/toolchain`'s, pinned by the lockfile and moved by Dependabot with the rest of it. It reads `git ls-files`, so
+      # it needs no build and runs before the slower steps: a monorepo shape coming back by habit reads red in seconds.
+      - run: pnpm exec layout-check
       # Lint and typecheck gated every pull request in a11ign/a11ign ("CI gates on both") and were dropped by the move
       # (#3179). They run before the tests so a style or type failure reads red without waiting for the suite.
       - run: pnpm run lint

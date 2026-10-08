@@ -13,7 +13,7 @@
  * local VM", was the one path never run. Four copies of a fact is three chances to be wrong about it.
  *
  * `.mjs` rather than `.ts` on purpose: the fleet's own scripts are `.mjs` and are run directly with
- * `node packages/worker-fleet/src/doctor.mjs`, with nothing compiled first, so they can only import `.mjs`
+ * `node src/doctor.mjs`, with nothing compiled first, so they can only import `.mjs`
  * siblings.
  */
 import { fileURLToPath } from "node:url";

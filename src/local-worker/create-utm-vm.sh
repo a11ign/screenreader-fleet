@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create the NVDA worker VM in UTM, fully from the CLI. No GUI clicking.
 #
-#   ./packages/worker-fleet/src/local-worker/create-utm-vm.sh <windows-arm64.iso> [support.iso]
+#   ./src/local-worker/create-utm-vm.sh <windows-arm64.iso> [support.iso]
 #
 # Why UTM rather than plain QEMU: homebrew QEMU + HVF cannot boot Windows 11 ARM64 on
 # Apple Silicon (open upstream bug, https://gitlab.com/qemu-project/qemu/-/issues/2893,

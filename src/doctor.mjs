@@ -15,7 +15,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
@@ -716,7 +716,7 @@ async function checkDegradedWorkers(/** @type {any} */ probed) {
     const { degraded, reason } = assessWorker(w.health.vitals);
     if (degraded) {
       add(`worker ${w.name}`, true, `DEGRADED — ${reason}`,
-        `re-provision ${w.name}: packages/worker-fleet/src/provisioning/provision-nvda-worker.ps1, elevated,`
+        `re-provision ${w.name}: ${join(fleetScriptPaths().provisioning, "provision-nvda-worker.ps1")}, elevated,`
         + " in the interactive session");
     }
   }

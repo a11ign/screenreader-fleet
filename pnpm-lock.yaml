@@ -7,10 +7,20 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@a11ign/judge':
+        specifier: 0.1.0
+        version: 0.1.0(@a11ign/scorer@0.1.0)
+      '@a11ign/screenreader-worker':
+        specifier: 0.1.0
+        version: 0.1.0
     devDependencies:
+      '@a11ign/evidence':
+        specifier: 0.1.0
+        version: 0.1.0
       '@a11ign/toolchain':
-        specifier: 0.1.4
-        version: 0.1.4(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)
+        specifier: 0.1.5
+        version: 0.1.5(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)
       '@changesets/cli':
         specifier: 3.0.3
         version: 3.0.3
@@ -99,6 +109,20 @@ packages:
   '@a11ign/toolchain@0.1.4':
     resolution: {integrity: sha512-t5V4RU3kXf72LdyJLgCHJU+UuKvK1087FX66fOKgsjzUGi0egEF06l8aOve4wMhAzQ5USax03nw+qC3mFPL2EQ==}
     engines: {node: '>=22.15.0'}
+    peerDependencies:
+      '@rslib/core': ^1.0.3
+      '@rstest/core': ^0.12.3
+      '@rstest/coverage-v8': ^0.12.3
+    peerDependenciesMeta:
+      '@rslib/core':
+        optional: true
+      '@rstest/coverage-v8':
+        optional: true
+
+  '@a11ign/toolchain@0.1.5':
+    resolution: {integrity: sha512-T+aX/fbI1G28IL7FXaGVdBSlXry0FyiGsmYLt50MGHwAaISTDPi7zxFqOJLaVgE3BR7Ie9sQboBE3DfsKYE1DQ==}
+    engines: {node: '>=22.15.0'}
+    hasBin: true
     peerDependencies:
       '@rslib/core': ^1.0.3
       '@rstest/core': ^0.12.3
@@ -942,6 +966,12 @@ snapshots:
       '@guidepup/guidepup': 0.31.0
 
   '@a11ign/toolchain@0.1.4(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)':
+    dependencies:
+      '@rstest/core': 0.12.3
+    optionalDependencies:
+      '@rslib/core': 1.0.3(typescript@6.0.3)
+
+  '@a11ign/toolchain@0.1.5(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)':
     dependencies:
       '@rstest/core': 0.12.3
     optionalDependencies:

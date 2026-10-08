@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Every source file under `packages/`, so a guard can be written over what EXISTS rather than over a list.
+ * Every source file under the repository root, so a guard can be written over what EXISTS rather than over a list.
  *
  * This repo's most expensive recurring shape is a check that only examines the places somebody already
  * thought of. Two instances are recorded in `budget-ladder.test.ts` alone: the worker-file list that let a
@@ -26,18 +26,18 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The `packages/` directory, resolved from this module rather than from the caller's cwd. */
-export const PACKAGES = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** The repository root, resolved from this module rather than from the caller's cwd. */
+export const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SKIPPED_DIRECTORY = /^(node_modules|dist|\..*)$/;
 
 /**
- * Every non-test source file under `packages/`, as `[relativePath, source]`.
+ * Every non-test source file under the repository root, as `[relativePath, source]`.
  *
  * @param {{ root?: string }} [options]
  * @returns {Array<[string, string]>}
  */
-export function sourceFiles({ root = PACKAGES } = {}) {
+export function sourceFiles({ root = REPOSITORY } = {}) {
   /** @type {Array<[string, string]>} */
   const found = [];
   /** @param {string} dir */

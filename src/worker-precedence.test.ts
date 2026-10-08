@@ -22,7 +22,7 @@ import { resolveWorkerPool } from "./fleet-env.mjs";
  * — but "gone" rots back. This test DISCOVERS the fallback shape rather than naming the three modules, so
  * a fourth resolver is caught on the day it is written.
  */
-const ROOT = join(import.meta.dirname, "../../..");
+const ROOT = join(import.meta.dirname, "..");
 const NONE = () => [];
 const one = (url: string) => () => [url];
 
@@ -51,7 +51,7 @@ test("nothing anywhere names all three places it looked", () => {
   }
 });
 
-/** Every non-test source file under packages/, as [path, text]. */
+/** Every non-test source file under src/, as [path, text]. */
 function sources(): [string, string][] {
   const out: [string, string][] = [];
   const walk = (dir: string) => {
@@ -66,7 +66,7 @@ function sources(): [string, string][] {
       out.push([path.slice(ROOT.length + 1), readFileSync(path, "utf8")]);
     }
   };
-  walk(join(ROOT, "packages"));
+  walk(join(ROOT, "src"));
   return out;
 }
 
@@ -93,7 +93,7 @@ const firstLine = (lines: string[], pattern: RegExp) => lines.findIndex((l) => p
  * blind spot (missing `leaseWorker` entirely) for a worse one (flagging it, or clearing it, for a
  * reason unrelated to what it actually does).
  *
- * A new top-level function starts at column 0 — this repo's own style throughout `packages/` — so
+ * A new top-level function starts at column 0 — this repo's own style throughout `src/` — so
  * chunking on that line shape needs no brace-counting and cannot be confused by a brace inside a string
  * or a regex literal, which a real parser would have to guard against and a chunker by line shape does
  * not need to.
@@ -147,7 +147,7 @@ test("functionChunks actually isolates leaseWorker, so the property above is not
   // `local-vm.ts` is exactly the file the OLD, whole-file version of this test was blind to, and
   // `findLocalVm(` is called three times in it for three unrelated reasons — this pins that exactly ONE
   // of those three lands inside `leaseWorker`'s own chunk, which is the span that actually matters.
-  const text = readFileSync(join(ROOT, "packages/worker-fleet/src/local-vm.ts"), "utf8");
+  const text = readFileSync(join(ROOT, "src/local-vm.ts"), "utf8");
   const chunks = functionChunks(code(text));
   const lease = chunks.find((c) => /^export async function leaseWorker\(/.test(c.lines[0]));
   assert.ok(lease, "leaseWorker must be found as its own chunk");

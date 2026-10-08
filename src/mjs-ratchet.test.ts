@@ -36,7 +36,7 @@ test("the repository's .mjs/.js/.cjs source does not exceed its committed baseli
 });
 
 test("the baseline is at the repository root, found from this file", () => {
-  assert.equal(findBaselineRoot(here), fileURLToPath(new URL("../../../", import.meta.url)).replace(/\/$/, ""));
+  assert.equal(findBaselineRoot(here), fileURLToPath(new URL("../", import.meta.url)).replace(/\/$/, ""));
 });
 
 test("a baseline with one name removed fails and names the file", () => {

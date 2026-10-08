@@ -1,7 +1,7 @@
 // @ts-check
 // Run a script on a guest, elevated, and get its output back.
 //
-//   node packages/worker-fleet/src/guest-run.mjs <vm-name> <local-script.cmd> [--timeout=600]
+//   node src/guest-run.mjs <vm-name> <local-script.cmd> [--timeout=600]
 //
 // This exists because there was no reliable way to do it, and the workarounds each failed differently:
 //
@@ -120,12 +120,12 @@ async function pull(uuid, guestPath) {
 }
 
 async function main() {
-  warnUtmDeprecated("node packages/worker-fleet/src/guest-run.mjs");
+  warnUtmDeprecated("node src/guest-run.mjs");
   const args = process.argv.slice(2);
   const [vmName, scriptFile] = args.filter((a) => !a.startsWith("--"));
   const timeoutS = Number(args.find((a) => a.startsWith("--timeout="))?.split("=")[1] ?? 600);
   if (!vmName || !scriptFile) {
-    process.stderr.write("usage: node packages/worker-fleet/src/guest-run.mjs <vm-name> <script.cmd> [--timeout=600]\n");
+    process.stderr.write("usage: node src/guest-run.mjs <vm-name> <script.cmd> [--timeout=600]\n");
     process.exit(2);
   }
   const local = resolve(scriptFile);

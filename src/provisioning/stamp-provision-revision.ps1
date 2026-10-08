@@ -47,8 +47,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# TWO OF THE FIVE PATHS ARE NOT WRITTEN HERE (ADR 0039 item 6d, #3397). Where the worker layer lives is
-# declared in `packages/control/layers.json`, and what its launchers reach outside it in the layer's own
+# THREE OF THE FIVE PATHS ARE NOT WRITTEN HERE (ADR 0039 item 6d, #3397; this repository's own file since the flat layout, a11ign/a11ign#4216).
+# Where the worker layer and this fleet layer live is declared in `packages/control/layers.json`, and what its launchers reach outside it in the layer's own
 # `src/launcher-reach.cmd`, which `run-capture-check.cmd` `call`s. Both are READ, so a path cannot change in
 # the launcher and stay behind in the stamp. A declaration that is absent or does not say THROWS: the stamp
 # must not fall back to a literal, because a literal that was right yesterday is the stamp describing less
@@ -77,7 +77,7 @@ $FOREGROUND_LOCK = Get-DeclaredReach -Name 'FLT'
 # The single definition. Explicit paths rather than a filename search, because `main.yml` is not unique
 # in this repo and a search would silently pick the wrong one.
 $ENVIRONMENT_FILES = @(
-    'packages/worker-fleet/src/provisioning/provision-nvda-worker.ps1'
+    (Get-LayerFile -Layer 'screenreader-fleet' -Relative 'src/provisioning/provision-nvda-worker.ps1')
     $RUN_SERVER
     $FOREGROUND_LOCK
     'packages/control/ansible/roles/worker/defaults/main.yml'

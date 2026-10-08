@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build an official Windows 11 ARM64 ISO on macOS, from the CLI.
 #
-#   ./packages/worker-fleet/src/local-worker/fetch-windows-iso.sh [outdir]
+#   ./src/local-worker/fetch-windows-iso.sh [outdir]
 #
 # Microsoft's ARM64 ISO download is a session-token web flow that does not script
 # cleanly, so this uses UUP dump: it fetches the same Unified Update Platform packages
@@ -16,7 +16,7 @@ set -euo pipefail
 
 # architecture-audit.md §8: builds an ISO for a local UTM worker VM, which is deprecated -- "The UTM is
 # deprecated, that was a testing thing." (repository owner, 2026-09-05). Bare-metal boxes install via
-# PXE/autounattend.xml instead — see packages/worker-fleet/src/provisioning/bare-metal/.
+# PXE/autounattend.xml instead — see src/provisioning/bare-metal/.
 echo "DEPRECATED: fetch-windows-iso.sh feeds a local UTM worker VM build. UTM was a testing path and is not the fleet." >&2
 echo "Capture on the bare-metal fleet instead: npm run fleet:status, npm run fleet:deploy." >&2
 
@@ -100,7 +100,7 @@ cd "$OUT_DIR"
 EXISTING="$(ls -t "$OUT_DIR"/*.ISO "$OUT_DIR"/*.iso 2>/dev/null | grep -vi support | head -1 || true)"
 if [ -n "$EXISTING" ] && xorriso -indev "$EXISTING" -report_el_torito plain 2>/dev/null | grep -q UEFI; then
   echo "ISO ready (already built): $EXISTING"
-  echo "Next:  ./packages/worker-fleet/src/local-worker/create-utm-vm.sh \"$EXISTING\""
+  echo "Next:  ./src/local-worker/create-utm-vm.sh \"$EXISTING\""
   exit 0
 fi
 if [ -n "$EXISTING" ]; then
@@ -234,5 +234,5 @@ fi
 
 echo
 echo "ISO ready: $ISO"
-echo "Next:  ./packages/worker-fleet/src/local-worker/build-vm.sh \"$ISO\""
-echo "       ./packages/worker-fleet/src/local-worker/create-utm-vm.sh \"$ISO\""
+echo "Next:  ./src/local-worker/build-vm.sh \"$ISO\""
+echo "       ./src/local-worker/create-utm-vm.sh \"$ISO\""
