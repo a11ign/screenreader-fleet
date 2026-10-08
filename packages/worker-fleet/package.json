@@ -73,7 +73,7 @@
   },
   "devDependencies": {
     "@a11ign/evidence": "0.1.0",
-    "@a11ign/toolchain": "0.1.2",
+    "@a11ign/toolchain": "0.1.4",
     "@rslib/core": "1.0.3",
     "typescript": "^6.0.3",
     "yaml": "^2.9.1"
