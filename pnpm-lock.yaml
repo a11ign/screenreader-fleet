@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@a11ign/judge':
-        specifier: 0.1.0
-        version: 0.1.0(@a11ign/scorer@0.1.0)
+        specifier: 0.5.1
+        version: 0.5.1(@a11ign/scorer@0.3.3)
       '@a11ign/screenreader-worker':
         specifier: 0.1.0
         version: 0.1.0
@@ -19,8 +19,8 @@ importers:
         version: 0.5.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)
     devDependencies:
       '@a11ign/evidence':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.3.0
+        version: 0.3.0
       '@changesets/cli':
         specifier: 3.0.3
         version: 3.0.3
@@ -89,6 +89,14 @@ packages:
     resolution: {integrity: sha512-Pn9xdgqLfxsTOSPoOqee4cqiwiRKia4hvv1On7pRoh70qvB2qAQ0K2n/5pFcseEmOCOUF30lNC6YQu2L4bfL3w==}
     engines: {node: '>=20'}
 
+  '@a11ign/evidence@0.3.0':
+    resolution: {integrity: sha512-3tEwoeemYIsPxDfViPSrVaLvXwCNowVzjkANVGdNu59ZnATotW8Dc86jU1uFYQ42a7Vu9paXzXWE1YJ/8sZ6HQ==}
+    engines: {node: '>=20'}
+
+  '@a11ign/evidence@0.3.2':
+    resolution: {integrity: sha512-E2LQAAMMmZwmSI2GkOW7JrC3IWx8JQTvRZfoKW3tJZzAWcaWQ3+t7u75KXQzoXmXtIgab2jCIUwD12ATtq+tNg==}
+    engines: {node: '>=20'}
+
   '@a11ign/judge@0.1.0':
     resolution: {integrity: sha512-XCAPGxM+i5dHtiUQMvjsp0/DG/zNsn8oAWJJVvy5QhJIE8ro+sjMk78QjmAGnSpmR4U7v8D3TA/dbGhKXZ0FpA==}
     engines: {node: '>=20'}
@@ -102,8 +110,26 @@ packages:
       '@huggingface/transformers':
         optional: true
 
+  '@a11ign/judge@0.5.1':
+    resolution: {integrity: sha512-SnUqM0hkPiuGjMWtFx0o2X1FUCoYqBz6uhm+/sGCIWodk7HShf2zgJnm9Qsf4yW2qk6SNp+V2nsROlxmA5DBTA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@a11ign/scorer': 0.3.3
+      '@anthropic-ai/sdk': '>=0.106.0 <0.132.0'
+      '@huggingface/transformers': '>=3.0.0'
+    peerDependenciesMeta:
+      '@anthropic-ai/sdk':
+        optional: true
+      '@huggingface/transformers':
+        optional: true
+
   '@a11ign/scorer@0.1.0':
     resolution: {integrity: sha512-wAWEbNWdAnY9LsC0oyRrv5A+CK+yC2CvJxtx0Hu1xgSmTMu+nQw9NAi8nywkm62eZx+FOAk+slZkuwiZqxgk+w==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  '@a11ign/scorer@0.3.3':
+    resolution: {integrity: sha512-LT4O63IlzGsiT2Jx8DDDd7GCEBDbGOoLRzyFQI/vHe6kvU7K8OlDFWg5nmbA024df2SczxcSvdfw4QbW340NeA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -1136,14 +1162,27 @@ snapshots:
 
   '@a11ign/evidence@0.1.0': {}
 
+  '@a11ign/evidence@0.3.0': {}
+
+  '@a11ign/evidence@0.3.2': {}
+
   '@a11ign/judge@0.1.0(@a11ign/scorer@0.1.0)':
     dependencies:
       '@a11ign/evidence': 0.1.0
       '@a11ign/scorer': 0.1.0
 
+  '@a11ign/judge@0.5.1(@a11ign/scorer@0.3.3)':
+    dependencies:
+      '@a11ign/evidence': 0.3.2
+      '@a11ign/scorer': 0.3.3
+
   '@a11ign/scorer@0.1.0':
     dependencies:
       '@a11ign/evidence': 0.1.0
+
+  '@a11ign/scorer@0.3.3':
+    dependencies:
+      '@a11ign/evidence': 0.3.2
 
   '@a11ign/screenreader-worker@0.1.0':
     dependencies:
