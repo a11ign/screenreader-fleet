@@ -160,9 +160,8 @@ export const REPORTED_ONLY = [
  * `Record<string, unknown>` on the other, which typecheck caught in the test that calls them in sequence.
  * Two spellings of one shape is the duplication this repo names as its most expensive recurring defect,
  * and a typedef is the cheapest form of "delete a copy".
- *
- * @typedef {{field: string, why: string, values: Record<string, unknown>}} Mismatch
  */
+export type Mismatch = {field: string, why: string, values: Record<string, unknown>};
 
 /** Edge policy values every guest must agree on, checked separately because they come from /diagnostics. */
 export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"];
@@ -187,10 +186,9 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  * of the asked guests actually reported it, and the verdict draws its own line. `compared`/`unchecked`
  * stay because they are what a caller greps for the REMEDY -- a field at 0 sends a reader to the field,
  * a field at k sends them to the boxes -- and `coverage` is the measurement both are derived from.
- *
- * @typedef {{field: string, reported: number, asked: number}} FieldReporters
- * @typedef {{compared: string[], unchecked: string[], coverage: FieldReporters[]}} FieldCoverage
  */
+export type FieldReporters = {field: string, reported: number, asked: number};
+export type FieldCoverage = {compared: string[], unchecked: string[], coverage: FieldReporters[]};
 
 /**
  * One reported-only field that has something to say, and WHICH thing it is saying — #2063.
@@ -202,10 +200,8 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  * It carries `reported`/`asked` for the same reason `FieldReporters` does — a count is what lets a reader
  * tell 0 of 10 from 9 of 10 — and the values map for the reason `Mismatch` does: drift detected and not
  * located is not actionable.
- *
- * @typedef {{field: string, why: string, values: Record<string, unknown>, reported: number,
- *   asked: number, state: "drifted" | "unreported"}} ReportedDrift
  */
+export type ReportedDrift = {field: string, why: string, values: Record<string, unknown>, reported: number, asked: number, state: "drifted" | "unreported"};
 
 /**
  * ONE FIELD READ ACROSS THE FLEET, before anybody decides what it means.
@@ -217,9 +213,6 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  * second copy of this loop is how a "reported-only" field would end up counted differently from a gating
  * one and nobody would know which was right.
  *
- * @typedef {{worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}} Guest
- * @typedef {{field: string, why: string, values: Record<string, unknown>, reported: number, asked: number}} Reading
- *
  * @param {Guest[]} present
  * @param {{field: string, why: string, source: (guest: Guest) => Record<string, unknown> | undefined,
  *   key: string}} ask `source` is the BLOCK this field lives in, not the value: coverage has to tell
@@ -227,9 +220,14 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  *   the block answers the second
  * @returns {Reading}
  */
-function readField(present, { field, why, source, key }) {
+export type Guest = {worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>};
+export type Reading = {field: string, why: string, values: Record<string, unknown>, reported: number, asked: number};
+function readField(present: Guest[], { field, why, source, key }: {
+        field: string; why: string; source: (guest: Guest) => Record<string, unknown> | undefined;
+        key: string;
+    }): Reading {
   /** @type {Record<string, unknown>} */
-  const values = {};
+  const values: Record<string, unknown> = {};
   // THE REPORTER COUNT IS COUNTED, NEVER READ OFF `values` -- #2019, and #2018 is why. The map is keyed
   // by worker name, and a caller that supplies guests without one collapses every guest onto a single
   // `undefined` key -- which `capture-real-pages.mjs` does -- so `Object.keys(values).length` reads 1
@@ -258,7 +256,7 @@ function readField(present, { field, why, source, key }) {
 }
 
 /** How many distinct values the guests actually gave for one field. @param {Reading} reading */
-function distinctValues({ values }) {
+function distinctValues({ values }: Reading) {
   return new Set(Object.values(values)).size;
 }
 
@@ -268,11 +266,11 @@ function distinctValues({ values }) {
  * @param {Reading[]} readings
  * @returns {{mismatches: Mismatch[], fields: FieldCoverage}}
  */
-function gateOn(readings) {
+function gateOn(readings: Reading[]): { mismatches: Mismatch[]; fields: FieldCoverage; } {
   /** @type {Mismatch[]} */
-  const mismatches = [];
+  const mismatches: Mismatch[] = [];
   /** @type {FieldCoverage} */
-  const fields = { compared: [], unchecked: [], coverage: [] };
+  const fields: FieldCoverage = { compared: [], unchecked: [], coverage: [] };
   for (const reading of readings) {
     const { field, why, values, reported, asked } = reading;
     // A FIELD NO GUEST REPORTED IS CANNOT ASK, NOT ALL AGREE. One value from one guest still counts as
@@ -303,7 +301,7 @@ function gateOn(readings) {
  * @param {Reading[]} readings
  * @returns {ReportedDrift[]}
  */
-function driftOf(readings) {
+function driftOf(readings: Reading[]): ReportedDrift[] {
   return readings.flatMap((reading) => {
     const state = driftState(reading);
     return state === null ? [] : [{ ...reading, state }];
@@ -314,7 +312,7 @@ function driftOf(readings) {
  * @param {Reading} reading
  * @returns {"drifted" | "unreported" | null}
  */
-function driftState(reading) {
+function driftState(reading: Reading): "drifted" | "unreported" | null {
   if (distinctValues(reading) > 1) return "drifted";
   // NOT REPORTED BY EVERYBODY WHO WAS ASKED, which covers #1997's nobody and #2019's some in one line --
   // for a GATING field those are two refusals with different remedies, and here they are one sentence
@@ -336,7 +334,10 @@ function driftState(reading) {
  *   `reportedOnly` is the third channel (#2063): compared, named, and part of NEITHER of the two above,
  *   which is what makes it something to report rather than something to refuse.
  */
-export function fleetConsistency(guests) {
+export function fleetConsistency(guests: Guest[]): {
+    consistent: boolean; mismatches: Mismatch[]; compared: number; fields: FieldCoverage;
+    reportedOnly: ReportedDrift[];
+} {
   const present = (guests ?? []).filter((g) => g && (g.environment || g.policy));
   // One guest is trivially consistent with itself, and zero is not a fleet. Neither is a finding, and
   // neither is a field nothing compared: with nobody to compare against, coverage is not a question yet.
@@ -347,7 +348,7 @@ export function fleetConsistency(guests) {
       fields: { compared: [], unchecked: [], coverage: [] }, reportedOnly: [] };
   }
   /** @param {Guest} guest */
-  const environmentOf = (guest) => guest.environment;
+  const environmentOf = (guest: Guest) => guest.environment;
   const gated = [
     ...MUST_MATCH.map(({ path, why }) =>
       readField(present, { field: path, why, source: environmentOf, key: path })),
@@ -373,7 +374,7 @@ export function fleetConsistency(guests) {
  * @param {ReportedDrift[]} drifts
  * @returns {string[]}
  */
-export function describeReportedOnly(drifts) {
+export function describeReportedOnly(drifts: ReportedDrift[]): string[] {
   return (drifts ?? []).map((drift) => `${drift.field}: ${reportedDetail(drift)} — ${drift.why}`);
 }
 
@@ -386,7 +387,7 @@ export function describeReportedOnly(drifts) {
  *
  * @param {ReportedDrift} drift
  */
-function reportedDetail({ values, reported, asked, state }) {
+function reportedDetail({ values, reported, asked, state }: ReportedDrift) {
   const label = labelWorkers(Object.keys(values));
   const detail = Object.entries(values).map(([worker, value]) => `${label.get(worker)}=${value}`).join(" ");
   if (state === "drifted") return detail;
@@ -400,7 +401,7 @@ function reportedDetail({ values, reported, asked, state }) {
  * @param {Mismatch[]} mismatches
  * @returns {string[]}
  */
-export function describeMismatches(mismatches) {
+export function describeMismatches(mismatches: Mismatch[]): string[] {
   return (mismatches ?? []).map(({ field, values, why }) => {
     const label = labelWorkers(Object.keys(values));
     const detail = Object.entries(values).map(([worker, value]) => `${label.get(worker)}=${value}`).join(" ");
@@ -423,7 +424,7 @@ export function describeMismatches(mismatches) {
  * @param {string[]} workers
  * @returns {Map<string, string>}
  */
-function labelWorkers(workers) {
+function labelWorkers(workers: string[]): Map<string, string> {
   const short = new Map(workers.map((w) => [w, shortWorker(w)]));
   const counts = new Map();
   for (const name of short.values()) counts.set(name, (counts.get(name) ?? 0) + 1);
@@ -437,12 +438,12 @@ function labelWorkers(workers) {
 }
 
 /** a guest's full `http://<address>:8765` is noise in a table; `.4` is not. @param {string} worker */
-function shortWorker(worker) {
+function shortWorker(worker: string) {
   const host = /\/\/([^:/]+)/.exec(worker)?.[1] ?? worker;
   return host.includes(".") ? `.${host.split(".").pop()}` : host;
 }
 
 /** @param {string} worker */
-function hostAndPort(worker) {
+function hostAndPort(worker: string) {
   return /\/\/(.+?)\/?$/.exec(worker)?.[1] ?? worker;
 }

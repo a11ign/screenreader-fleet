@@ -28,37 +28,31 @@ function withBaselineCopy(edit: (baseline: Baseline) => Baseline, check: (copyRo
   }
 }
 
-test("the repository's .mjs/.js/.cjs source does not exceed its committed baseline", () => {
+test("the repository holds no .mjs/.js/.cjs source and its baseline is empty: the pinned end state (#4280)", () => {
   const result = checkMjsRatchet({ from: here });
   assert.equal(result.ok, true, result.message);
-  // The positive control: the read found this repository's own scripts, so 'ok' is not 'the walk read nothing'.
-  assert.ok(result.count > 0, `the ratchet counted ${result.count} files in ${result.root}`);
+  assert.equal(result.count, 0, `the tree still holds ${result.count} script source files`);
+  const baseline = JSON.parse(readFileSync(join(findBaselineRoot(here), BASELINE_FILE), "utf8")) as Baseline;
+  assert.deepEqual(baseline, { files: [], exceptions: [] });
 });
 
 test("the baseline is at the repository root, found from this file", () => {
   assert.equal(findBaselineRoot(here), fileURLToPath(new URL("../", import.meta.url)).replace(/\/$/, ""));
 });
 
-test("a baseline with one name removed fails and names the file", () => {
-  withBaselineCopy(
-    (baseline) => ({ ...baseline, files: baseline.files.filter((name) => name !== "eslint.config.mjs") }),
-    (copy) => {
-      const result = checkMjsRatchet({ from: copy });
-      assert.equal(result.ok, false);
-      assert.match(result.message, /eslint\.config\.mjs/);
-    },
-  );
-});
-
-test("an emptied baseline fails and names every file the tree holds", () => {
-  withBaselineCopy(
-    (baseline) => ({ ...baseline, files: [] }),
-    (copy) => {
-      const result = checkMjsRatchet({ from: copy });
-      assert.equal(result.ok, false);
-      for (const name of ["eslint.config.mjs", "rstest.config.mjs", "rslib.config.mjs", "isolation-smoke.mjs"]) assert.match(result.message, new RegExp(name.replace(".", "\\.")));
-    },
-  );
+// The positive control for the emptiness above: the walk DOES count a new file, and names it. Without it, "0 files" could be "the walk read nothing".
+test("a new .mjs, .js or .cjs file fails the ratchet and is named", () => {
+  for (const name of ["new-script.mjs", "new-script.js", "new-script.cjs"]) {
+    withBaselineCopy(
+      (baseline) => baseline,
+      (copy) => {
+        writeFileSync(join(copy, "src", name), "export {};\n");
+        const result = checkMjsRatchet({ from: copy });
+        assert.equal(result.ok, false, `${name} was not caught`);
+        assert.match(result.message, new RegExp(name.replace(".", "\\.")));
+      },
+    );
+  }
 });
 
 test("a baseline listing a file the tree lacks passes and says it can be lowered", () => {

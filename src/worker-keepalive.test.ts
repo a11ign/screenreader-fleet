@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { AddressInfo, Socket } from "node:net";
 
-import { requestJson, KEEPALIVE_DELAY_MS } from "./worker-http.mjs";
+import { requestJson, KEEPALIVE_DELAY_MS } from "./worker-http.ts";
 
 /** A server that hands back the SERVER-side view of the connection it was reached on. */
 async function server(onSocket: (socket: Socket) => void) {

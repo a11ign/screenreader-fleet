@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ipv4ToInt, hostAddressFor, hostAddressForWorker, hostPagesBase,
-} from "./host-address.mjs";
+} from "./host-address.ts";
 
 test("ipv4ToInt: a well-formed dotted quad converts to a comparable integer", () => {
   assert.equal(ipv4ToInt("0.0.0.0"), 0);

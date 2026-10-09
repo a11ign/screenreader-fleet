@@ -18,7 +18,7 @@
 // import through.
 
 /** @type {readonly string[]} */
-export const KNOWN_GIT_REDIRECT_VARS = [
+export const KNOWN_GIT_REDIRECT_VARS: readonly string[] = [
   "GIT_DIR",
   "GIT_WORK_TREE",
   "GIT_INDEX_FILE",
@@ -34,9 +34,9 @@ export const KNOWN_GIT_REDIRECT_VARS = [
  * @param {Record<string, string>} [extra]
  * @returns {Record<string, string | undefined>}
  */
-export function sandboxGitEnv(extra = {}) {
+export function sandboxGitEnv(extra: Record<string, string> = {}): Record<string, string | undefined> {
   /** @type {Record<string, string | undefined>} */
-  const scrubbed = {};
+  const scrubbed: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith("GIT_")) scrubbed[key] = value;
   }

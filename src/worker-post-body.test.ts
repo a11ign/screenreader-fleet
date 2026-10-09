@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { AddressInfo } from "node:net";
 
-import { requestJson } from "./worker-http.mjs";
+import { requestJson } from "./worker-http.ts";
 
 interface Received { method: string | undefined; headers: IncomingHttpHeaders; body: string }
 

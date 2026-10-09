@@ -21,15 +21,15 @@ import { homedir } from "node:os";
 import { createRequire } from "node:module";
 // The canonical scrubber for this package -- `packages/guards/src/git-env.mjs` re-exports the same function for the
 // repo-root scripts. One helper, two entry points, so a git spawn cannot inherit GIT_DIR by either door.
-import { sandboxGitEnv } from "./git-safe-env.mjs";
-import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.mjs";
-import { fleetConsistency, describeMismatches } from "./fleet-consistency.mjs";
-import { assessWorker } from "./worker-health.mjs";
-import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
-import { fleetScriptPaths } from "./fleet-scripts.mjs";
-import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.mjs";
-import { flagValue, refuseUnknownFlags } from "./cli-flags.mjs";
-import { requestJson } from "./worker-http.mjs";
+import { sandboxGitEnv } from "./git-safe-env.ts";
+import { availableHostMemoryMb, workersHostCanRun } from "./host-capacity.ts";
+import { fleetConsistency, describeMismatches } from "./fleet-consistency.ts";
+import { assessWorker } from "./worker-health.ts";
+import { controlPlaneIsolation } from "./control-plane-isolation.ts";
+import { fleetScriptPaths } from "./fleet-scripts.ts";
+import { configuredWorkers, namedInventoryWorkers } from "./fleet-env.ts";
+import { flagValue, refuseUnknownFlags } from "./cli-flags.ts";
+import { requestJson } from "./worker-http.ts";
 
 /**
  * a mistyped `--json` prints for a human where a script expected a machine-readable answer, and the
@@ -60,7 +60,7 @@ const PAGES_PORT = Number(process.env.DATASET_PAGES_PORT || 5050);
 const CTL = fleetScriptPaths().workerCtl;
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 /** A checkout, not `node_modules`: the layout `../../../` from this module only means "the repo root" inside one. */
-const isMonorepoRoot = (/** @type {string} */ root) =>
+const isMonorepoRoot = (root: string) =>
   existsSync(resolve(root, "packages")) && existsSync(resolve(root, "package.json"));
 
 /**
@@ -72,7 +72,7 @@ const isMonorepoRoot = (/** @type {string} */ root) =>
  * @param {string} [baseDir]
  * @returns {{ root: string, checkout: boolean }}
  */
-function checkoutLayout(baseDir = MODULE_DIR) {
+function checkoutLayout(baseDir: string = MODULE_DIR): { root: string; checkout: boolean; } {
   const root = resolve(baseDir, "..", "..", "..");
   return { root, checkout: isMonorepoRoot(root) };
 }
@@ -81,7 +81,7 @@ function checkoutLayout(baseDir = MODULE_DIR) {
  * What a checkout-only check reports from an installed package: ADVISORY, naming the directory it declined to read.
  * Never `ok: false`, which would turn READY into NOT READY on a path it should not have read.
  */
-const notACheckout = (/** @type {string[]} */ names, /** @type {string} */ root) => {
+const notACheckout = (names: string[], root: string) => {
   for (const name of names) {
     advise(name, `n/a: installed package -- ${root} is not a checkout, so there is nothing here for this check to read`);
   }
@@ -100,7 +100,7 @@ const notACheckout = (/** @type {string[]} */ names, /** @type {string} */ root)
  * @param {{ argv?: readonly string[], baseDir?: string }} [options]
  * @returns {string}
  */
-export function runsDirFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR } = {}) {
+export function runsDirFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR }: { argv?: readonly string[]; baseDir?: string; } = {}): string {
   const supplied = flagValue(argv, "runs-dir");
   if (supplied !== undefined) {
     if (existsSync(supplied)) return resolve(supplied);
@@ -116,7 +116,10 @@ const PROBE_TIMEOUT_MS = 8000;
 
 /** @type {{name: string, id: string, ok: boolean, detail: string, fix: string|null, note?: string|null,
  *    advisory?: boolean}[]} */
-const checks = [];
+const checks: {
+    name: string; id: string; ok: boolean; detail: string; fix: string | null; note?: string | null;
+    advisory?: boolean;
+}[] = [];
 /** What the checks have recorded so far, for a test that drives one check through the real recorder. */
 export const recordedChecks = () => checks;
 /**
@@ -139,7 +142,7 @@ export const recordedChecks = () => checks;
  * lab path -- which is why it is still PRINTED with its fix.
  * @type {Readonly<Record<string, boolean>>}
  */
-const GATES = Object.freeze({
+const GATES: Readonly<Record<string, boolean>> = Object.freeze({
   worker: true,          // no worker, no capture
   fleet: true,           // the fleet is the worker, on a configured machine
   judge: true,           // a run that cannot score is not a run
@@ -187,7 +190,7 @@ const GATES = Object.freeze({
  * @param {string|null|{fix: string|null, note?: string|null}} [remedy] a runnable command, `null` when
  *   none can be constructed, or `{ fix, note }` when there is advice a shell cannot run
  */
-export const addCheck = (name, ok, detail, remedy = null) => {
+export const addCheck = (name: string, ok: boolean, detail: string, remedy: string | null | { fix: string | null; note?: string | null; } = null) => {
   // #1073: an undeclared check cannot inherit a default. The throw is the forcing function.
   if (!Object.hasOwn(GATES, name)) {
     throw new Error(`doctor: check "${name}" declares no entry in GATES -- say whether it decides `
@@ -214,11 +217,11 @@ const add = addCheck;
  * Distinct from `ok: true` for the opposite reason: silence is how ADR 0012 went years describing a system
  * that did not exist. It is stated on every run and excluded from the verdict.
  */
-const advise = (/** @type {string} */ name, /** @type {string} */ detail, /** @type {string|null} */ fix = null) =>
+const advise = (name: string, detail: string, fix: string | null = null) =>
   checks.push({ name, id: name, ok: true, advisory: true, detail, fix });
 
-function commandError(/** @type {any} */ error) {
-  const observed = [error?.stderr, error?.stdout, /** @type {any} */ (error)?.message]
+function commandError(error: any) {
+  const observed = [error?.stderr, error?.stdout, (error as any)?.message]
     .map((value) => String(value ?? "").trim())
     .find(Boolean) || "unknown command failure";
   return observed.replace(/\s+/g, " ").slice(0, 400);
@@ -235,7 +238,7 @@ function commandError(/** @type {any} */ error) {
  * @param {string} observed
  * @returns {{ fix: string|null, note: string|null }}
  */
-export function workerControlFix(observed) {
+export function workerControlFix(observed: string): { fix: string | null; note: string | null; } {
   // The deprecation names itself; matching the REFUSAL rather than the script's name, because the same
   // script succeeds under `A11Y_LOCAL_VM=1` and that is a different situation with a different remedy.
   if (/DEPRECATED|refusing: set A11Y_LOCAL_VM/i.test(observed)) {
@@ -254,7 +257,7 @@ export function workerControlFix(observed) {
     : { fix: `${CTL} pool`, note: "this launches UTM if it is installed" };
 }
 
-async function shell(/** @type {any} */ cmd, /** @type {any} */ args, timeout = 30000) {
+async function shell(cmd: any, args: any, timeout = 30000) {
   const { stdout } = await run(cmd, args, { timeout, encoding: "utf8" });
   return stdout.trim();
 }
@@ -263,7 +266,7 @@ async function shell(/** @type {any} */ cmd, /** @type {any} */ args, timeout = 
 // worker JSON API, with its own timeout mechanism, buys nothing and cost this project a silent-truncation
 // bug once already (worker-http.mjs's own header). `requestJson` also carries the failure's CODE
 // (`ECONNREFUSED`, `EHOSTUNREACH`) rather than fetch's undifferentiated `TypeError: fetch failed`.
-async function httpJson(/** @type {any} */ url) {
+async function httpJson(url: any) {
   const response = await requestJson(url, { timeoutMs: PROBE_TIMEOUT_MS });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   // `requestJson` returns `undefined` for unparseable JSON rather than throwing (its own docstring: a
@@ -372,7 +375,7 @@ export function checkControlPlaneIsolation({ baseDir = MODULE_DIR } = {}) {
  * @param {string} thisCheckoutRootReal
  * @returns {boolean}
  */
-export function resolvesToThisCheckout(resolvedRealPath, thisCheckoutRootReal) {
+export function resolvesToThisCheckout(resolvedRealPath: string, thisCheckoutRootReal: string): boolean {
   return resolvedRealPath === thisCheckoutRootReal
     || resolvedRealPath.startsWith(thisCheckoutRootReal.endsWith("/") ? thisCheckoutRootReal : `${thisCheckoutRootReal}/`);
 }
@@ -385,7 +388,7 @@ export function resolvesToThisCheckout(resolvedRealPath, thisCheckoutRootReal) {
  * @param {string} resolvedRealPath
  * @returns {string | null}
  */
-export function checkoutRootFor(resolvedRealPath) {
+export function checkoutRootFor(resolvedRealPath: string): string | null {
   const idx = resolvedRealPath.indexOf("/packages/");
   return idx === -1 ? null : resolvedRealPath.slice(0, idx);
 }
@@ -397,7 +400,7 @@ export function checkoutRootFor(resolvedRealPath) {
  * @param {unknown} exportsField
  * @returns {string[]}
  */
-function exportTargets(exportsField) {
+function exportTargets(exportsField: unknown): string[] {
   if (typeof exportsField === "string") return [exportsField];
   if (exportsField === null || typeof exportsField !== "object") return [];
   return Object.values(exportsField).flatMap(exportTargets);
@@ -419,15 +422,15 @@ function exportTargets(exportsField) {
  * @param {string} packageDir
  * @returns {string[] | null}
  */
-export function missingExportTargets(packageDir) {
+export function missingExportTargets(packageDir: string): string[] | null {
   /** @type {unknown} */
-  let manifest;
+  let manifest: unknown;
   try {
     manifest = JSON.parse(readFileSync(resolve(packageDir, "package.json"), "utf8"));
   } catch {
     return null;
   }
-  const targets = exportTargets(/** @type {{ exports?: unknown }} */ (manifest)?.exports);
+  const targets = exportTargets((manifest as { exports?: unknown })?.exports);
   if (targets.length === 0) return null;
   return targets.filter((target) => !existsSync(resolve(packageDir, target)));
 }
@@ -440,7 +443,7 @@ export function missingExportTargets(packageDir) {
  * @param {string | null} otherRoot
  * @returns {string}
  */
-function behindOriginMainNote(otherRoot) {
+function behindOriginMainNote(otherRoot: string | null): string {
   if (!otherRoot) return "";
   try {
     const behindBy = execFileSync("git", ["rev-list", "--count", "HEAD..origin/main"],
@@ -469,12 +472,12 @@ export function checkCrossPackageDist({ baseDir = MODULE_DIR } = {}) {
   const { root: thisCheckoutRoot, checkout } = checkoutLayout(baseDir);
   if (!checkout) return notACheckout(["dist-resolution", "dist-freshness"], thisCheckoutRoot);
   /** @type {string} */
-  let resolvedRealPath;
+  let resolvedRealPath: string;
   try {
     resolvedRealPath = realpathSync(createRequire(import.meta.url).resolve(specifier));
   } catch (error) {
     return advise("dist-resolution", `could not resolve ${specifier} to check whose dist it comes from -- `
-      + `${/** @type {Error} */ (error).message}`, "pnpm run build");
+      + `${(error as Error).message}`, "pnpm run build");
   }
 
   if (resolvesToThisCheckout(resolvedRealPath, realpathSync(thisCheckoutRoot))) {
@@ -522,7 +525,7 @@ export function checkCrossPackageDist({ baseDir = MODULE_DIR } = {}) {
  * @param {{ from?: string }} [options] a path or file URL to resolve `@a11ign/judge` from
  * @returns {Promise<string>}
  */
-export async function scorerWeightsFor({ from = import.meta.url } = {}) {
+export async function scorerWeightsFor({ from = import.meta.url }: { from?: string; } = {}): Promise<string> {
   const judgeEntry = realpathSync(createRequire(from).resolve("@a11ign/judge"));
   const scorerEntry = realpathSync(createRequire(judgeEntry).resolve("@a11ign/scorer"));
   const { scorerPaths } = await import(pathToFileURL(scorerEntry).href);
@@ -539,7 +542,7 @@ export async function checkJudge({ from = import.meta.url } = {}) {
       weights = await scorerWeightsFor({ from });
     } catch (error) {
       // Could not ASK, which is not "the weights are missing": the message names what failed to resolve.
-      return add("judge", false, `backend=local, but @a11ign/scorer could not be resolved from @a11ign/judge: ${/** @type {Error} */ (error).message}`,
+      return add("judge", false, `backend=local, but @a11ign/scorer could not be resolved from @a11ign/judge: ${(error as Error).message}`,
         "install @a11ign/scorer (a peer dependency of @a11ign/judge) beside @a11ign/judge");
     }
     return add("judge", existsSync(weights),
@@ -600,14 +603,14 @@ async function checkWorker() {
       "UTM has no registered worker VM; re-register an existing a11y-worker*.utm bundle, or build one from docs/getting-started.md");
   }
 
-  const running = pool.filter((/** @type {any} */ vm) => vm.state === "started");
-  const healthy = pool.filter((/** @type {any} */ vm) => vm.healthy);
-  const brokenlyRunning = running.filter((/** @type {any} */ vm) => !vm.healthy);
-  const summary = pool.map((/** @type {any} */ vm) => `${vm.name}=${vm.healthy ? vm.ip : vm.state}`).join(" ");
+  const running = pool.filter((vm: any) => vm.state === "started");
+  const healthy = pool.filter((vm: any) => vm.healthy);
+  const brokenlyRunning = running.filter((vm: any) => !vm.healthy);
+  const summary = pool.map((vm: any) => `${vm.name}=${vm.healthy ? vm.ip : vm.state}`).join(" ");
 
   // A VM that is RUNNING but not answering is a genuine fault. One that is stopped is not.
   if (brokenlyRunning.length) {
-    add("worker", false, `${summary} — ${brokenlyRunning.map((/** @type {any} */ v) => v.name).join(", ")} running but not answering`,
+    add("worker", false, `${summary} — ${brokenlyRunning.map((v: any) => v.name).join(", ")} running but not answering`,
       "Start-ScheduledTask -TaskName a11ysrv on that guest, or " + `${CTL} stop && ${CTL} up`);
   } else if (healthy.length) {
     add("worker", true, `${healthy.length}/${pool.length} ready — ${summary}`);
@@ -617,15 +620,15 @@ async function checkWorker() {
   // Same shape as a configured fleet, so the two diagnostics below have ONE implementation. They were
   // pure functions over /health JSON that only the UTM branch could reach, which meant a bare-metal
   // fleet -- the direction this project is going -- got neither.
-  const reachable = pool.filter((/** @type {any} */ v) => v.healthy && v.ip)
-    .map((/** @type {any} */ v) => ({ name: v.name, url: `http://${v.ip}:${v.port}` }));
+  const reachable = pool.filter((v: any) => v.healthy && v.ip)
+    .map((v: any) => ({ name: v.name, url: `http://${v.ip}:${v.port}` }));
   const probed = await probeAll(reachable);
   await checkDegradedWorkers(probed);
   checkFleetConsistency(probed, pool.length);
   checkHostCapacity(pool);
-  const busy = pool.filter((/** @type {any} */ vm) => vm.busy);
+  const busy = pool.filter((vm: any) => vm.busy);
   if (busy.length) {
-    add("contention", false, `${busy.map((/** @type {any} */ v) => v.name).join(", ")} busy with a capture — another shell or agent is using the pool`,
+    add("contention", false, `${busy.map((v: any) => v.name).join(", ")} busy with a capture — another shell or agent is using the pool`,
       // #1059: no `fix`, because waiting is not a command. The advice is a note and `next_command` is null.
       { fix: null, note: "wait for it, or you will both see the other's restarts as breakage" });
   }
@@ -651,23 +654,23 @@ async function checkWorker() {
  *
  * @param {{name: string, url: string}[]} workers
  */
-async function probeAll(workers) {
+async function probeAll(workers: { name: string; url: string; }[]) {
   const probed = [];
   for (const w of workers) {
     try {
       probed.push({ ...w, health: await httpJson(`${w.url}/health`) });
     } catch (e) {
-      probed.push({ ...w, health: null, error: /** @type {any} */ (e).message });
+      probed.push({ ...w, health: null, error: (e as any).message });
     }
   }
   return probed;
 }
 
-async function checkConfiguredFleet(/** @type {any} */ workers) {
+async function checkConfiguredFleet(workers: any) {
   const probed = await probeAll(workers);
   const reachable = probed.filter((p) => p.health);
   const ready = reachable.filter((p) => p.health.ready);
-  const state = (/** @type {any} */ p) => {
+  const state = (p: any) => {
     if (!p.health) return "unreachable";
     if (p.health.busy) return "busy";
     return p.health.ready ? "ready" : "not-ready";
@@ -710,7 +713,7 @@ async function checkConfiguredFleet(/** @type {any} */ workers) {
 // none, so this never surfaced anywhere. Measured on this pool: one worker needed a recovery on 4 of 4
 // captures (nvdaStart 19.1s each, WALL 122.9s) beside one that needed none (WALL 40.6s). Reported, not
 // failed: a degraded worker is slow, not broken, and pulling it costs more throughput than it saves.
-async function checkDegradedWorkers(/** @type {any} */ probed) {
+async function checkDegradedWorkers(probed: any) {
   for (const w of probed) {
     if (!w.health) continue; // unreachable is already the worker check's business
     const { degraded, reason } = assessWorker(w.health.vitals);
@@ -734,9 +737,9 @@ async function checkDegradedWorkers(/** @type {any} */ probed) {
  * Never a FAIL. A run on slightly mismatched guests is worse than one on matched guests and far better
  * than no run, and a diagnostic must not be the thing that takes the pool offline.
  */
-function checkFleetConsistency(/** @type {any} */ probed, /** @type {number} */ configured) {
-  const guests = probed.filter((/** @type {any} */ w) => w.health)
-    .map((/** @type {any} */ w) => ({ worker: w.url, environment: w.health.environment, policy: undefined }));
+function checkFleetConsistency(probed: any, configured: number) {
+  const guests = probed.filter((w: any) => w.health)
+    .map((w: any) => ({ worker: w.url, environment: w.health.environment, policy: undefined }));
   const { consistent, mismatches, fields } = fleetConsistency(guests);
   if (guests.length < 2) return;
   if (consistent) {
@@ -748,7 +751,7 @@ function checkFleetConsistency(/** @type {any} */ probed, /** @type {number} */ 
   // fleet split on `displayMode` was told to go and align four fields that already matched.
   add("fleet", true, `INCONSISTENT — ${describeMismatches(mismatches).join("; ")}`,
     "re-provision the odd one out so every worker reports the same "
-    + `${mismatches.map((/** @type {any} */ m) => m.field).join(", ")}`);
+    + `${mismatches.map((m: any) => m.field).join(", ")}`);
 }
 
 /**
@@ -794,7 +797,13 @@ function checkFleetConsistency(/** @type {any} */ probed, /** @type {number} */ 
  *                     coverage?: { field: string, reported: number, asked: number }[] } }} input
  * @returns {string}
  */
-export function fleetAgreementLine({ agreeing, configured, fields }) {
+export function fleetAgreementLine({ agreeing, configured, fields }: {
+        agreeing: number; configured: number;
+        fields: {
+            compared: string[]; unchecked: string[];
+            coverage?: { field: string; reported: number; asked: number; }[];
+        };
+    }): string {
   const rest = agreeing < configured ? " — the rest could not be asked" : "";
   const coverage = fields.coverage;
   // NO COUNTS SUPPLIED IS A CANNOT-ASK, NOT A PASS — `fleet:status` takes the same line on the same
@@ -813,7 +822,7 @@ export function fleetAgreementLine({ agreeing, configured, fields }) {
 }
 
 /** "it"/"them" for a clause that names a list, so one gap does not read as a plural. */
-const itOrThem = (/** @type {number} */ count) => (count === 1 ? "it" : "them");
+const itOrThem = (count: number) => (count === 1 ? "it" : "them");
 
 /**
  * #2034's clause: the fields SOME compared guests reported and others did not, each with its `k of N`.
@@ -826,7 +835,7 @@ const itOrThem = (/** @type {number} */ count) => (count === 1 ? "it" : "them");
  * @param {{ field: string, reported: number, asked: number }[]} coverage
  * @returns {string} empty when no field is partly reported
  */
-function partialClause(coverage) {
+function partialClause(coverage: { field: string; reported: number; asked: number; }[]): string {
   const partial = coverage.filter(({ reported, asked }) => reported > 0 && reported < asked);
   if (partial.length === 0) return "";
   const named = partial.map(({ field, reported, asked }) => `${field} (${reported} of ${asked} reported it)`);
@@ -843,7 +852,7 @@ function partialClause(coverage) {
  * @param {{ field: string, reported: number, asked: number }[]} coverage
  * @returns {string} empty when every asked field drew at least one value
  */
-function uncheckedClause(coverage) {
+function uncheckedClause(coverage: { field: string; reported: number; asked: number; }[]): string {
   const unchecked = coverage.filter(({ reported }) => reported === 0).map(({ field }) => field);
   if (unchecked.length === 0) return "";
   return `; NOT compared on any guest, so agreement says nothing about ${itOrThem(unchecked.length)}: `
@@ -856,12 +865,12 @@ function uncheckedClause(coverage) {
 // alternative is invisible. Three guests on this 36 GB Mac made every capture 1.6x slower than one
 // and produced mute-NVDA failures, and from outside that reads as "the workers are degrading" rather
 // than "the host is out of memory" — which is exactly how it was misread for a day.
-function checkHostCapacity(/** @type {any} */ pool) {
+function checkHostCapacity(pool: any) {
   const availableMb = availableHostMemoryMb();
   if (availableMb === null || !pool.length) return;
   // Guests already up have paid for their memory and are not counted in `availableMb`, so they are
   // added back — otherwise a running worker makes the host look smaller than it is.
-  const running = pool.filter((/** @type {any} */ vm) => vm.state === "started").length;
+  const running = pool.filter((vm: any) => vm.state === "started").length;
   const poolSize = pool.length;
   const limit = workersHostCanRun({ availableMb, alreadyRunning: running });
   const detail = `~${availableMb} MB available — room for ${Math.min(limit, poolSize)} of ${poolSize} worker(s)`;
@@ -912,7 +921,7 @@ function checkRunState() {
     return add("run", false, `a run is UNFINISHED (started ${p.startedAt})`,
       "pnpm run training:wait, or pnpm run training:capture -- --resume --no-cache");
   }
-  const failed = Object.values(p.cases ?? {}).filter((c) => c.status === "failed").length;
+  const failed = Object.values<any>(p.cases ?? {}).filter((c) => c.status === "failed").length;
   add("run", failed === 0, `last run ${p.outcome ?? "finished"}`,
     failed ? "pnpm run training:capture -- --resume --no-cache" : null);
 }
@@ -937,7 +946,7 @@ function checkRunState() {
  * @param {{ok: boolean, fix: string|null}[]} [checkList]
  * @returns {string|null}
  */
-export function nextCommand(checkList = checks) {
+export function nextCommand(checkList: { ok: boolean; fix: string | null; }[] = checks): string | null {
   const broken = checkList.find((c) => !c.ok);
   if (!broken) return "pnpm run training:capture";
   return broken.fix ?? null;
@@ -953,7 +962,7 @@ export function nextCommand(checkList = checks) {
  * @param {string|null} line
  * @returns {boolean}
  */
-export function isRunnableCommand(line) {
+export function isRunnableCommand(line: string | null): boolean {
   if (line === null) return false;                 // absent is not unrunnable; the caller distinguishes them
   const first = line.trim().split(/\s+/)[0] ?? "";
   return /^(?:[A-Z][A-Z0-9_]*=\S*|pnpm|npm|npx|node|git|\.?\.?\/\S+|[a-z0-9_-]+\.(?:sh|mjs|js|ts|py))$/.test(first);
@@ -977,7 +986,7 @@ export function isRunnableCommand(line) {
  * @param {{name: string, ok: boolean}[]} checkList
  * @returns {boolean}
  */
-export function readyFrom(checkList) {
+export function readyFrom(checkList: { name: string; ok: boolean; }[]): boolean {
   return checkList.every((c) => c.ok || GATES[c.name] === false);
 }
 
@@ -1012,7 +1021,7 @@ const DEFAULT_STEPS = [checkPrimaryCheckoutMark, checkControlPlaneIsolation, che
  * @param {unknown} error
  * @returns {{ready: false, error: string, checks: never[]}}
  */
-export function errorDocument(error) {
+export function errorDocument(error: unknown): { ready: false; error: string; checks: never[]; } {
   const message = error instanceof Error ? error.message : String(error);
   return { ready: false, error: message, checks: [] };
 }
@@ -1024,7 +1033,10 @@ export function errorDocument(error) {
  *           err?: (line: string) => void, runsDir?: () => string }} [deps]
  * @returns {Promise<number>}
  */
-export async function doctorRun(deps = {}) {
+export async function doctorRun(deps: {
+    steps?: (() => unknown)[]; json?: boolean; out?: (line: string) => void;
+    err?: (line: string) => void; runsDir?: () => string;
+} = {}): Promise<number> {
   const { steps = DEFAULT_STEPS, json = JSON_OUT, out = console.log, err = console.error, runsDir = runsDirFor } = deps;
   // BEFORE any step: a missing runs directory is the caller's to supply, and the checks that probe workers must not
   // run first only for the dataset one to refuse at the end.
@@ -1032,7 +1044,7 @@ export async function doctorRun(deps = {}) {
     runsDir();
   } catch (error) {
     if (json) out(JSON.stringify(errorDocument(error), null, 2));
-    else err(/** @type {Error} */ (error).message);
+    else err((error as Error).message);
     return REFUSED;
   }
   try {
@@ -1053,7 +1065,7 @@ export async function doctorRun(deps = {}) {
  * @param {{ json: boolean, out: (line: string) => void }} deps
  * @returns {number}
  */
-function renderDoctor({ json, out }) {
+function renderDoctor({ json, out }: { json: boolean; out: (line: string) => void; }): number {
   const ready = readyFrom(checks);
 
   if (json) {

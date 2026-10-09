@@ -6,7 +6,7 @@
 // the expectations depend on whoever runs the suite.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { capacityReason, workerCeilingFromTotalRam, workersHostCanRun } from "./host-capacity.mjs";
+import { capacityReason, workerCeilingFromTotalRam, workersHostCanRun } from "./host-capacity.ts";
 
 const MAC_36GB = 36_864;
 

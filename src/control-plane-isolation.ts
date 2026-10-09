@@ -35,7 +35,7 @@
  * @param {{ hasNodeModules: boolean, hasFleetKey: boolean, packages?: number, isWorkspace?: boolean }} found
  * @returns {{ violated: boolean, why: string }}
  */
-export function controlPlaneIsolation({ hasNodeModules, hasFleetKey, packages, isWorkspace = false }) {
+export function controlPlaneIsolation({ hasNodeModules, hasFleetKey, packages, isWorkspace = false }: { hasNodeModules: boolean; hasFleetKey: boolean; packages?: number; isWorkspace?: boolean; }): { violated: boolean; why: string; } {
   // BOTH, and neither alone. `node_modules` on a box with no fleet key is a lab or a laptop, which is
   // where they belong. A fleet key with no dependencies beside it is the intended configuration. The
   // defect is the ADJACENCY, and reporting either half alone would fire on correct machines -- a guard

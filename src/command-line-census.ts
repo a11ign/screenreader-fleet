@@ -44,10 +44,10 @@ const ROOTS = ["scripts", ...["packages/lab", "packages/worker-fleet"]
  * @param {string} repoRoot absolute path to the repository root
  * @returns {string[]} repo-relative paths, unsorted (discovery order)
  */
-export function allMjsFiles(repoRoot) {
-  const found = /** @type {string[]} */ ([]);
+export function allMjsFiles(repoRoot: string): string[] {
+  const found = ([] as string[]);
   /** @param {string} dir */
-  const walk = (dir) => {
+  const walk = (dir: string) => {
     for (const entry of readdirSync(join(repoRoot, dir), { withFileTypes: true })) {
       const rel = `${dir}/${entry.name}`;
       if (entry.isDirectory() && entry.name !== "node_modules") walk(rel);
@@ -76,7 +76,7 @@ export function allMjsFiles(repoRoot) {
  * @param {string} repoRoot absolute path to the repository root
  * @returns {boolean}
  */
-export function readsArgv(rel, repoRoot) {
+export function readsArgv(rel: string, repoRoot: string): boolean {
   if (!rel.endsWith(".mjs")) return false;
   const source = stripComments(readFileSync(join(repoRoot, rel), "utf8"));
   return source.includes("process.argv") && !source.includes("export function refuseUnknownFlags");
@@ -90,6 +90,6 @@ export function readsArgv(rel, repoRoot) {
  * @param {string} repoRoot absolute path to the repository root
  * @returns {string[]}
  */
-export function commandLineModules(repoRoot) {
+export function commandLineModules(repoRoot: string): string[] {
   return allMjsFiles(repoRoot).filter((rel) => readsArgv(rel, repoRoot));
 }

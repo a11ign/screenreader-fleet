@@ -28,7 +28,7 @@ import { join, dirname, delimiter } from "node:path";
  * @param {"npx" | "npm"} name
  * @returns {string}
  */
-function cliScriptName(name) {
+function cliScriptName(name: "npx" | "npm"): string {
   return name === "npx" ? "npx-cli.js" : "npm-cli.js";
 }
 
@@ -36,7 +36,7 @@ function cliScriptName(name) {
  * @param {"npx" | "npm"} name
  * @returns {string[]}
  */
-export function npmCliScriptCandidates(name) {
+export function npmCliScriptCandidates(name: "npx" | "npm"): string[] {
   const script = cliScriptName(name);
   const nodeDir = dirname(process.execPath);
   const fixed = [
@@ -58,7 +58,7 @@ export function npmCliScriptCandidates(name) {
  * @param {string} script
  * @returns {string | null}
  */
-function pathDerivedCandidate(name, script) {
+function pathDerivedCandidate(name: "npx" | "npm", script: string): string | null {
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
     if (dir === "") continue;
     const executable = join(dir, name);
@@ -73,7 +73,7 @@ function pathDerivedCandidate(name, script) {
  * @param {"npx" | "npm"} name
  * @returns {string}
  */
-export function resolveNpmCliScript(name) {
+export function resolveNpmCliScript(name: "npx" | "npm"): string {
   const candidates = npmCliScriptCandidates(name);
   const found = candidates.find((path) => existsSync(path));
   if (!found) {
@@ -88,7 +88,7 @@ export function resolveNpmCliScript(name) {
  * @param {string[]} args
  * @returns {{ command: string, args: string[] }}
  */
-export function npmCliInvocation(name, args) {
+export function npmCliInvocation(name: "npx" | "npm", args: string[]): { command: string; args: string[]; } {
   return { command: process.execPath, args: [resolveNpmCliScript(name), ...args] };
 }
 
@@ -110,7 +110,7 @@ export function npmCliInvocation(name, args) {
  * @param {string[]} args
  * @returns {{ command: string, args: string[] }}
  */
-export function pnpmCliInvocation(args) {
+export function pnpmCliInvocation(args: string[]): { command: string; args: string[]; } {
   const fromParent = process.env.npm_execpath ?? "";
   if (/pnpm\.c?js$/.test(fromParent) && existsSync(fromParent)) {
     return { command: process.execPath, args: [fromParent, ...args] };
@@ -132,7 +132,7 @@ export function pnpmCliInvocation(args) {
  * @param {string} name
  * @returns {string | null}
  */
-function onPath(name) {
+function onPath(name: string): string | null {
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
     if (dir === "") continue;
     for (const candidate of [join(dir, name), join(dir, `${name}.cmd`)]) {
@@ -151,7 +151,7 @@ function onPath(name) {
  * @param {string[]} args
  * @returns {{ command: string, args: string[] }}
  */
-function shimInvocation(shim, script, args) {
+function shimInvocation(shim: string, script: string, args: string[]): { command: string; args: string[]; } {
   if (!shim.endsWith(".cmd")) return { command: shim, args };
   const found = [join(dirname(shim), script), join(dirname(process.execPath), script)].find((path) => existsSync(path));
   if (found === undefined) throw new Error(`${shim} is a .cmd shim and its script ${script} is not beside it or beside node`);

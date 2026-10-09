@@ -17,10 +17,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { networkInterfaces } from "node:os";
-import { availableHostMemoryMb, capacityReason, workersHostCanRun } from "./host-capacity.mjs";
-import { fleetScriptPaths } from "./fleet-scripts.mjs";
-import { inventoryWorkerUrls } from "./fleet-env.mjs";
-import { warnUtmDeprecated } from "./utm-deprecated.mjs";
+import { availableHostMemoryMb, capacityReason, workersHostCanRun } from "./host-capacity.ts";
+import { fleetScriptPaths } from "./fleet-scripts.ts";
+import { inventoryWorkerUrls } from "./fleet-env.ts";
+import { warnUtmDeprecated } from "./utm-deprecated.ts";
 
 const execFileAsync = promisify(execFile);
 

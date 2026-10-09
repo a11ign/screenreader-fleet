@@ -16,7 +16,7 @@
  * @param {string} what The command or module the caller is about to run — named so the message is
  *   specific to what actually fired, not a generic banner every UTM-adjacent file prints identically.
  */
-export function warnUtmDeprecated(what) {
+export function warnUtmDeprecated(what: string) {
   process.stderr.write(
     `DEPRECATED: ${what} manages a local UTM worker VM. UTM was a testing path and is not the fleet.\n` +
     "Capture on the bare-metal fleet instead: npm run fleet:status, npm run fleet:deploy. See CLAUDE.md's\n" +

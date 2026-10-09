@@ -7,9 +7,10 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { checkControlPlaneIsolation, checkCrossPackageDist, checkJudge, checkPrimaryCheckoutMark, recordedChecks,
-  runsDirFor } from "./doctor.mjs";
-import { outDirFor } from "./compare-workers.mjs";
-import { inventoryPathsFor } from "./fleet-env.mjs";
+  runsDirFor } from "./doctor.ts";
+import { outDirFor } from "./compare-workers.ts";
+import { inventoryPathsFor } from "./fleet-env.ts";
+import { TSX_ARGS } from "./tsx-import.ts";
 
 /**
  * `doctor`, `compare-workers` and `fleet-env` take the paths they read from the CALLER, and refuse naming the missing one
@@ -133,7 +134,7 @@ test("fleet-env: inside a checkout the defaults are the checkout's control files
 // and `doctor` must refuse BEFORE it probes anything (this run reaches no worker: the refusal is the first step).
 function refusal(script: string, args: string[]) {
   try {
-    execFileSync(process.execPath, [join(here, script), ...args], { encoding: "utf8", stdio: "pipe", timeout: 60_000 });
+    execFileSync(process.execPath, [...TSX_ARGS, join(here, script), ...args], { encoding: "utf8", stdio: "pipe", timeout: 60_000 });
   } catch (error) {
     const { status, stderr } = error as { status: number; stderr: string };
     return { status, stderr };
@@ -144,9 +145,9 @@ function refusal(script: string, args: string[]) {
 test("the commands refuse a missing path with exit 2, naming it and the flag", () => {
   const { root } = layouts();
   const missing = join(root, "typo");
-  const doctor = refusal("doctor.mjs", [`--runs-dir=${missing}`]);
-  const compare = refusal("compare-workers.mjs", ["--runs-dir=", "http://127.0.0.1:1", "http://127.0.0.1:2", "http://127.0.0.1:3"]);
-  const fleetEnv = refusal("fleet-env.mjs", [`--inventory=${missing}.yml`, "--list"]);
+  const doctor = refusal("doctor.ts", [`--runs-dir=${missing}`]);
+  const compare = refusal("compare-workers.ts", ["--runs-dir=", "http://127.0.0.1:1", "http://127.0.0.1:2", "http://127.0.0.1:3"]);
+  const fleetEnv = refusal("fleet-env.ts", [`--inventory=${missing}.yml`, "--list"]);
   for (const { status } of [doctor, compare, fleetEnv]) assert.equal(status, 2);
   assert.match(doctor.stderr, new RegExp(`--runs-dir=${missing}`));
   assert.match(compare.stderr, /--runs-dir= is empty/);
@@ -255,7 +256,7 @@ function workspaceLayout() {
   symlinkSync(join(packages, "scorer"), join(packages, "judge", "node_modules", "@a11ign", "scorer"), "dir");
   mkdirSync(join(packages, "worker-fleet", "node_modules", "@a11ign"), { recursive: true });
   symlinkSync(join(packages, "judge"), join(packages, "worker-fleet", "node_modules", "@a11ign", "judge"), "dir");
-  return { from: join(packages, "worker-fleet", "src", "doctor.mjs"), scorerDir: join(packages, "scorer") };
+  return { from: join(packages, "worker-fleet", "src", "doctor.ts"), scorerDir: join(packages, "scorer") };
 }
 
 const weightsIn = (scorerDir: string) => join(scorerDir, "models", "screenreader-scorer", "model.safetensors");
@@ -284,9 +285,9 @@ test("judge: the scorer is resolved, and its weights missing, names the path the
 function judgeCheckWithoutNodePath(from: string): RecordedCheck {
   const env: NodeJS.ProcessEnv = { ...process.env, JUDGE_BACKEND: "" };
   delete env.NODE_PATH;
-  const program = `const d = await import(${JSON.stringify(pathToFileURL(join(here, "doctor.mjs")).href)});`
+  const program = `const d = await import(${JSON.stringify(pathToFileURL(join(here, "doctor.ts")).href)});`
     + `await d.checkJudge({ from: ${JSON.stringify(from)} }); console.log(JSON.stringify(d.recordedChecks()[0]));`;
-  const out = execFileSync(process.execPath, ["--input-type=module", "-e", program],
+  const out = execFileSync(process.execPath, [...TSX_ARGS, "--input-type=module", "-e", program],
     { encoding: "utf8", env, timeout: 60_000 });
   return JSON.parse(out);
 }

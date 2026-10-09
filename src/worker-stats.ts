@@ -26,20 +26,18 @@
  * Named as a typedef rather than repeated inline because four functions pass it around, and this module's
  * whole purpose is refusing to claim a difference the samples do not support — so `q1`, `q3` and `iqr`
  * travelling together, as one thing with one name, is the point rather than a formality.
- *
- * @typedef {{n: number, median: number, q1: number, q3: number, iqr: number,
- *            min: number, max: number}} Summary
  */
+export type Summary = {n: number, median: number, q1: number, q3: number, iqr: number, min: number, max: number};
 
 /** Below this many rounds, report the numbers but never claim a difference. */
 const MIN_ROUNDS_FOR_A_VERDICT = 5;
 
 /** @param {number[]} values @returns {number[]} */
-const sorted = (values) => [...values].sort((a, b) => a - b);
+const sorted = (values: number[]): number[] => [...values].sort((a, b) => a - b);
 
 /** Linear-interpolated quantile. Fine for the sample sizes here and has no dependencies. */
 /** @param {number[]} values @param {number} q @returns {number|null} */
-export function quantile(values, q) {
+export function quantile(values: number[], q: number): number | null {
   if (!values.length) return null;
   const s = sorted(values);
   const position = (s.length - 1) * q;
@@ -57,15 +55,15 @@ export function quantile(values, q) {
  * @param {number[]} values
  * @returns {Summary|null}
  */
-export function describe(values) {
+export function describe(values: number[]): Summary | null {
   if (!values.length) return null;
   // Non-null by construction: `quantile` returns null only for an empty list, and the guard above has
   // already excluded that. Written as a local rather than an assertion so the reason is stated once.
-  const q1 = /** @type {number} */ (quantile(values, 0.25));
-  const q3 = /** @type {number} */ (quantile(values, 0.75));
+  const q1 = (quantile(values, 0.25) as number);
+  const q3 = (quantile(values, 0.75) as number);
   return {
     n: values.length,
-    median: /** @type {number} */ (quantile(values, 0.5)),
+    median: (quantile(values, 0.5) as number),
     q1, q3, iqr: q3 - q1,
     min: Math.min(...values),
     max: Math.max(...values),
@@ -73,7 +71,7 @@ export function describe(values) {
 }
 
 /** Do two interquartile ranges overlap at all? @param {Summary} a @param {Summary} b */
-function overlaps(a, b) {
+function overlaps(a: Summary, b: Summary) {
   return a.q1 <= b.q3 && b.q1 <= a.q3;
 }
 
@@ -90,9 +88,12 @@ function overlaps(a, b) {
  * @returns {{ stats: Record<string, Summary>, slowest: string|null, fastest: string|null,
  *             distinguishable: boolean, verdict: string }}
  */
-export function compareWorkers(samplesByWorker) {
+export function compareWorkers(samplesByWorker: Record<string, number[]>): {
+    stats: Record<string, Summary>; slowest: string | null; fastest: string | null;
+    distinguishable: boolean; verdict: string;
+} {
   /** @type {Record<string, Summary>} */
-  const stats = {};
+  const stats: Record<string, Summary> = {};
   for (const [worker, values] of Object.entries(samplesByWorker)) {
     const description = describe(values);
     if (description) stats[worker] = description;
@@ -138,9 +139,9 @@ export function compareWorkers(samplesByWorker) {
  * @returns {Record<string, number | null>} null where the worker captured nothing — "no idea", which
  *   must not be confused with a rate of zero ("perfectly reliable").
  */
-export function recoveryRates(deltas) {
+export function recoveryRates(deltas: Record<string, { recoveries: number; captures: number; }>): Record<string, number | null> {
   /** @type {Record<string, number | null>} */
-  const rates = {};
+  const rates: Record<string, number | null> = {};
   for (const [worker, d] of Object.entries(deltas)) {
     rates[worker] = d.captures > 0 ? d.recoveries / d.captures : null;
   }

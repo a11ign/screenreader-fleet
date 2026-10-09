@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import ts from "typescript";
 
-import { sourceFiles } from "./source-walk.mjs";
+import { sourceFiles } from "./source-walk.ts";
 
 /**
  * A JSDoc BLOCK THAT IS NOT THE LAST ONE ABOVE A DECLARATION IS DISCARDED, SILENTLY (#244).

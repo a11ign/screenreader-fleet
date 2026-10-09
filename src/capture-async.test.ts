@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 
-import { captureTolerantly } from "./capture-client.mjs";
+import { captureTolerantly } from "./capture-client.ts";
 
 const json = (res: ServerResponse, status: number, value: unknown) => {
   res.writeHead(status, { "content-type": "application/json" });
@@ -184,7 +184,7 @@ test("the budget bounds the POLLING, so a capture that never finishes is not wai
  * arrives by a different route.
  */
 test("CAPTURE_LOST is distinguishable from a transport failure, because they need opposite handling", async () => {
-  const { isTransient } = await import("./transient-fault.mjs");
+  const { isTransient } = await import("./transient-fault.ts");
   const lost = Object.assign(new Error("worker forgot capture X — it restarted mid-capture"),
     { code: "CAPTURE_LOST" });
   assert.equal(isTransient(lost), false,

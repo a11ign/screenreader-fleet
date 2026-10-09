@@ -33,7 +33,7 @@ const IPV4_OCTETS = 4;
 
 /** Dotted quad to a comparable integer, or null if it is not one (a hostname, IPv6, nonsense). */
 /** @param {string} ip */
-export function ipv4ToInt(ip) {
+export function ipv4ToInt(ip: string) {
   const parts = String(ip).split(".").map(Number);
   if (parts.length !== IPV4_OCTETS || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
   return parts.reduce((acc, octet) => acc * 256 + octet, 0);
@@ -48,7 +48,7 @@ export function ipv4ToInt(ip) {
  * @param {string} guestIp
  * @returns {string | undefined}
  */
-export function hostAddressFor(guestIp) {
+export function hostAddressFor(guestIp: string): string | undefined {
   const guest = ipv4ToInt(guestIp);
   if (guest === null) return undefined;
   for (const addresses of Object.values(networkInterfaces())) {
@@ -71,7 +71,7 @@ export function hostAddressFor(guestIp) {
  * @param {string} workerUrl
  * @returns {string | undefined}
  */
-export function hostAddressForWorker(workerUrl) {
+export function hostAddressForWorker(workerUrl: string): string | undefined {
   try {
     const { hostname } = new URL(workerUrl);
     return ipv4ToInt(hostname) === null ? undefined : hostAddressFor(hostname);
@@ -91,7 +91,7 @@ export function hostAddressForWorker(workerUrl) {
  * @param {number | string} [port]
  * @returns {string}
  */
-export function hostPagesBase(workerUrl, port = process.env.DATASET_PAGES_PORT || 5050) {
+export function hostPagesBase(workerUrl: string, port: number | string = process.env.DATASET_PAGES_PORT || 5050): string {
   if (process.env.DATASET_BASE_URL) return process.env.DATASET_BASE_URL.replace(/\/$/, "");
   const address = hostAddressForWorker(workerUrl);
   if (!address) {

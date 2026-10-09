@@ -15,14 +15,14 @@
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
-import { fleetScriptPaths } from "./fleet-scripts.mjs";
-import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.mjs";
+import { fleetScriptPaths } from "./fleet-scripts.ts";
+import { configuredWorkers, inventoryWorkerUrls, resolveWorkerPool } from "./fleet-env.ts";
 // The comparison, the remedy and the expected hash live in ONE place, because the capture entry points ask
 // the same question before every run and a second copy of "is this worker stale" is a second answer.
-import { resolveExpectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.mjs";
-import { refuseUnknownFlags } from "./cli-flags.mjs";
+import { resolveExpectedWorkerCode, codeDrift, remedyLines } from "./worker-code-check.ts";
+import { refuseUnknownFlags } from "./cli-flags.ts";
 import { errorText } from "@a11ign/screenreader-worker/error-text";
-import { requestJson } from "./worker-http.mjs";
+import { requestJson } from "./worker-http.ts";
 
 /**
  * takes NO flags — it asks every worker what code it is running and compares. Any flag passed to it
@@ -73,8 +73,8 @@ export function workerUrls({
 function localPoolUrls() {
   try {
     const pool = JSON.parse(execFileSync(CTL, ["pool"], { encoding: "utf8" }));
-    return pool.filter((/** @type {{ip?: string}} */ vm) => vm.ip)
-      .map((/** @type {{ip: string, port: number}} */ vm) => `http://${vm.ip}:${vm.port}`);
+    return pool.filter((vm: { ip?: string; }) => vm.ip)
+      .map((vm: { ip: string; port: number; }) => `http://${vm.ip}:${vm.port}`);
   } catch (e) {
     // Never silent: "there is no UTM here" and "utmctl failed" are different, and the second is the one
     // that would otherwise send somebody to the inventory believing the local pool was empty.
@@ -84,7 +84,7 @@ function localPoolUrls() {
 }
 
 /** @param {string} url */
-async function versionOf(url) {
+async function versionOf(url: string) {
   // `requestJson`, not `fetch`: gains a real error CODE (`ECONNREFUSED`, `EHOSTUNREACH`) for the per-worker
   // `errorText(e)` line below, in place of fetch's undifferentiated `TypeError: fetch failed`.
   const response = await requestJson(`${url.replace(/\/$/, "")}/health`, { timeoutMs: HEALTH_TIMEOUT_MS });

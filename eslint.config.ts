@@ -37,4 +37,12 @@ export default tseslint.config(
 
   // TypeScript-specific recommendations (unused vars, no-explicit-any, etc.).
   ...tseslint.configs.recommended.map((c) => ({ ...c, files: ["**/*.ts"] })),
+
+  // The conversion from JSDoc to TypeScript (#4280) wrote `any` wherever the JSDoc named no type (a pool entry, a probe result, a caught
+  // error), and these six files hold all 68 of them. A warning, not an error, so the debt stays visible without blocking CI; the rule is
+  // an error everywhere else, and a file that gets real types drops out of this list.
+  {
+    files: ["src/capture-client.ts", "src/compare-workers.ts", "src/doctor.ts", "src/measure-guard.ts", "src/probe-outcome.ts", "src/worker-http.ts"],
+    rules: { "@typescript-eslint/no-explicit-any": "warn" },
+  },
 );

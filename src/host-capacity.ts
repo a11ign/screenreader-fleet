@@ -82,7 +82,7 @@ export function availableHostMemoryMb() {
     const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
     if (!Number.isFinite(pageSize)) return null;
     /** @param {string} label */
-    const pagesFor = (label) =>
+    const pagesFor = (label: string) =>
       Number(new RegExp(`Pages ${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
     const pages = pagesFor("free") + pagesFor("inactive") + pagesFor("speculative") + pagesFor("purgeable");
     return Math.round((pages * pageSize) / (1024 * 1024));
@@ -107,7 +107,7 @@ export function totalHostMemoryMb() {
  *
  * @returns {number} workers, from physical memory
  */
-export function workerCeilingFromTotalRam(totalMb = totalHostMemoryMb()) {
+export function workerCeilingFromTotalRam(totalMb = totalHostMemoryMb()): number {
   return Math.floor((totalMb - HOST_APPS_RESERVE_MB - HOST_HEADROOM_MB) / MEMORY_PER_WORKER_MB);
 }
 
@@ -132,7 +132,7 @@ export function workerCeilingFromTotalRam(totalMb = totalHostMemoryMb()) {
  * @param {{ availableMb: number | null, alreadyRunning: number, totalMb?: number }} host
  * @returns {number}
  */
-export function workersHostCanRun({ availableMb, alreadyRunning, totalMb = totalHostMemoryMb() }) {
+export function workersHostCanRun({ availableMb, alreadyRunning, totalMb = totalHostMemoryMb() }: { availableMb: number | null; alreadyRunning: number; totalMb?: number; }): number {
   if (availableMb === null) return Number.POSITIVE_INFINITY; // unreadable: do not constrain the run
   const spareMb = availableMb - HOST_HEADROOM_MB;
   const dynamic = alreadyRunning + Math.max(0, Math.floor(spareMb / MEMORY_PER_WORKER_MB));
@@ -145,7 +145,7 @@ export function workersHostCanRun({ availableMb, alreadyRunning, totalMb = total
  * @param {{ limit: number, wanted: number, availableMb: number | null }} cap
  * @returns {string | null}
  */
-export function capacityReason({ limit, wanted, availableMb }) {
+export function capacityReason({ limit, wanted, availableMb }: { limit: number; wanted: number; availableMb: number | null; }): string | null {
   if (!Number.isFinite(limit) || limit >= wanted) return null;
   return `host has ${totalHostMemoryMb()} MB of RAM and ~${availableMb} MB available, and each worker ` +
     `costs ~${MEMORY_PER_WORKER_MB} MB, so ${limit} of ${wanted} local workers will be used. ` +

@@ -23,16 +23,16 @@
 //   - A single mute-recovery outlier (~86s against a normal ~12s) moves a mean by 5s and makes a healthy
 //     worker look broken. The median and IQR do not move.
 //
-// It also refuses to declare a difference the samples do not support -- see `./worker-stats.mjs`.
+// It also refuses to declare a difference the samples do not support -- see `./worker-stats.ts`.
 // "Not distinguishable" is a real answer, and it is the one that was missing.
 import { existsSync, writeFileSync, mkdirSync, realpathSync } from "node:fs";
-import { refuseIfBusy, sampleVitals } from "./measure-guard.mjs";
+import { refuseIfBusy, sampleVitals } from "./measure-guard.ts";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.mjs";
-import { sampleHost, diffHost } from "./host-metrics.mjs";
-import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.mjs";
+import { compareWorkers, describe as summarise, recoveryRates } from "./worker-stats.ts";
+import { sampleHost, diffHost } from "./host-metrics.ts";
+import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.ts";
 import { resolve } from "node:path";
-import { flagValue, refuseUnknownFlags } from "./cli-flags.mjs";
+import { flagValue, refuseUnknownFlags } from "./cli-flags.ts";
 
 /**
  * takes a page and two workers POSITIONALLY. `--runs=` is a documented alias of `--rounds=`, so both
@@ -47,7 +47,7 @@ refuseUnknownFlags(["--rounds=", "--runs=", "--runs-dir="], { entry: import.meta
 // See worker-http.mjs -- this budget sits at or above that cap, so it never applied.
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 /** A checkout, not `node_modules`: the layout `../../../` from this module only means "the repo root" inside one. */
-const isMonorepoRoot = (/** @type {string} */ root) =>
+const isMonorepoRoot = (root: string) =>
   existsSync(resolve(root, "packages")) && existsSync(resolve(root, "package.json"));
 
 /**
@@ -63,7 +63,7 @@ const isMonorepoRoot = (/** @type {string} */ root) =>
  * @param {{ argv?: readonly string[], baseDir?: string }} [options]
  * @returns {string}
  */
-export function outDirFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR } = {}) {
+export function outDirFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR }: { argv?: readonly string[]; baseDir?: string; } = {}): string {
   const supplied = flagValue(argv, "runs-dir");
   if (supplied === "") throw new Error("worker:compare: --runs-dir= is empty. Pass --runs-dir=<the runs directory>.");
   if (supplied !== undefined) return resolve(supplied, "worker-compare");
@@ -95,7 +95,7 @@ function refuseUnlessOutDir() {
   try {
     return outDirFor();
   } catch (error) {
-    process.stderr.write(`${/** @type {Error} */ (error).message}\n`);
+    process.stderr.write(`${(error as Error).message}\n`);
     return process.exit(2);
   }
 }
@@ -105,9 +105,9 @@ const runs = Number(args.find((a) => a.startsWith("--rounds="))?.slice("--rounds
   ?? args.find((a) => a.startsWith("--runs="))?.slice("--runs=".length) ?? 6);
 const [page, ...workers] = args.filter((a) => !a.startsWith("--"));
 
-const short = (/** @type {any} */ worker) => new URL(worker).hostname.split(".").pop();
+const short = (worker: any) => new URL(worker).hostname.split(".").pop();
 
-async function capture(/** @type {any} */ worker) {
+async function capture(worker: any) {
   const response = await requestJson(`${worker.replace(/\/$/, "")}/capture`, {
     method: "POST",
     body: { url: page, probeForms: true },
@@ -118,7 +118,7 @@ async function capture(/** @type {any} */ worker) {
   return body;
 }
 
-async function diagnostics(/** @type {any} */ worker) {
+async function diagnostics(worker: any) {
   try {
     // `requestJson`, not `fetch`: the same worker JSON client every other probe in this file uses (see
     // `capture`, above), rather than a second hand-rolled timeout mechanism for this one endpoint.
@@ -138,9 +138,9 @@ async function diagnostics(/** @type {any} */ worker) {
  * same arithmetic bench-capture does. Repeated events (there are six `sweep` marks) accumulate, which is
  * what makes `sweep` look like one large phase.
  */
-function phaseCosts(/** @type {any} */ entries) {
+function phaseCosts(entries: any) {
   /** @type {Record<string, any>} */
-  const costs = {};
+  const costs: Record<string, any> = {};
   let previous = 0;
   for (const entry of entries ?? []) {
     if (typeof entry.atMs !== "number") continue;
@@ -151,9 +151,9 @@ function phaseCosts(/** @type {any} */ entries) {
 }
 
 /** Per-sweep detail, keyed by sweep type, which the aggregate throws away. */
-function sweepDetail(/** @type {any} */ entries) {
+function sweepDetail(entries: any) {
   /** @type {Record<string, any>} */
-  const byType = {};
+  const byType: Record<string, any> = {};
   for (const entry of entries ?? []) {
     if (entry.event !== "sweep" || !entry.type) continue;
     const to = byType[entry.type] ??= { found: 0, ms: 0, trips: 0, n: 0 };
@@ -167,7 +167,7 @@ function sweepDetail(/** @type {any} */ entries) {
 
 
 /** `sampleVitals` says on stderr why a worker has none, so a blank column in the report has a reason. */
-async function vitals(/** @type {string} */ worker) {
+async function vitals(worker: string) {
   return sampleVitals(worker, { warn: (line) => process.stderr.write(line) });
 }
 
@@ -197,13 +197,13 @@ async function main() {
   // Declared because every array here is empty at construction and inferred `never[]`, so each push --
   // which IS the measurement -- reads as an error while the shape that discards it reads as fine.
   /** @type {Record<string, { phases: any[], sweeps: any[], walls: number[], diagnostics: any }>} */
-  const results = Object.fromEntries(workers.map((/** @type {string} */ w) =>
+  const results: Record<string, { phases: any[]; sweeps: any[]; walls: number[]; diagnostics: any; }> = Object.fromEntries(workers.map((w: string) =>
     [w, { phases: [], sweeps: [], walls: [], diagnostics: null }]));
   /** @type {Record<string, any>} */
   /** @type {Record<string, any>} */
-  const vitalsBefore = {};
+  const vitalsBefore: Record<string, any> = {};
   /** @type {Record<string, any>} */
-  const vitalsAfter = {};
+  const vitalsAfter: Record<string, any> = {};
 
   for (const worker of workers) vitalsBefore[worker] = await vitals(worker);
 
@@ -228,7 +228,7 @@ async function main() {
         process.stdout.write(`  round ${round} ${short(worker)}: ${(wall / MS_PER_S).toFixed(1)}s ` +
           `${result.transcript?.length ?? 0} phrases\n`);
       } catch (error) {
-        process.stdout.write(`  round ${round} ${short(worker)}: FAILED ${/** @type {any} */ (error).message}\n`);
+        process.stdout.write(`  round ${round} ${short(worker)}: FAILED ${(error as any).message}\n`);
       }
     }
   }
@@ -246,10 +246,10 @@ async function main() {
  * the other decides what the numbers mean. `compare-workers` exists because reading two `bench-capture`
  * printouts side by side attributed a 2x difference to the wrong phase for hours.
  */
-function report(/** @type {any} */ { results, vitalsBefore, vitalsAfter, hostBefore, outDir }) {
+function report({ results, vitalsBefore, vitalsAfter, hostBefore, outDir }: any) {
   // Shared by both tables below: which phases exist at all, and how to pull one worker's samples.
-  const allPhases = [...new Set(Object.values(results).flatMap((r) => r.phases.flatMap(Object.keys)))];
-  const phaseSamples = (/** @type {any} */ worker, /** @type {any} */ phase) => results[worker].phases.map((/** @type {any} */ p) => (p[phase] ?? 0) / MS_PER_S);
+  const allPhases = [...new Set(Object.values<any>(results).flatMap((r) => r.phases.flatMap(Object.keys)))];
+  const phaseSamples = (worker: any, phase: any) => results[worker].phases.map((p: any) => (p[phase] ?? 0) / MS_PER_S);
   const { verdict, deltas } = reportWallTime({ results, vitalsBefore, vitalsAfter });
   reportPhases({ results, allPhases, phaseSamples });
   const { foundations, hostAfter } = reportFoundations({ hostBefore });
@@ -262,11 +262,11 @@ function report(/** @type {any} */ { results, vitalsBefore, vitalsAfter, hostBef
 }
 
 /** Wall time and the verdict, first, because that is the question being asked. */
-function reportWallTime(/** @type {any} */ { results, vitalsBefore, vitalsAfter }) {
+function reportWallTime({ results, vitalsBefore, vitalsAfter }: any) {
 
 
   // Wall time first, with the verdict, because that is the question being asked.
-  const wallSeconds = Object.fromEntries(workers.map((w) => [short(w), results[w].walls.map((/** @type {any} */ v) => v / MS_PER_S)]));
+  const wallSeconds = Object.fromEntries(workers.map((w) => [short(w), results[w].walls.map((v: any) => v / MS_PER_S)]));
   const verdict = compareWorkers(wallSeconds);
 
   process.stdout.write(`\n\nWALL TIME (seconds), ${runs} interleaved round(s)\n`);
@@ -276,7 +276,7 @@ function reportWallTime(/** @type {any} */ { results, vitalsBefore, vitalsAfter 
     recoveries: (vitalsAfter[w]?.recoveries ?? 0) - (vitalsBefore[w]?.recoveries ?? 0),
     captures: (vitalsAfter[w]?.captures ?? 0) - (vitalsBefore[w]?.captures ?? 0),
   }]));
-  const rates = /** @type {Record<string, any>} */ (recoveryRates(deltas));
+  const rates = (recoveryRates(deltas) as Record<string, any>);
   for (const w of workers) {
     const name = String(short(w)), d = summarise(wallSeconds[name]);
     if (!d) continue;
@@ -291,35 +291,35 @@ function reportWallTime(/** @type {any} */ { results, vitalsBefore, vitalsAfter 
 }
 
 /** Where a real difference actually LIVES: per-phase medians, then the per-sweep detail. */
-function reportPhases(/** @type {any} */ { results, allPhases, phaseSamples }) {
+function reportPhases({ results, allPhases, phaseSamples }: any) {
   // Per-phase medians, so a real difference can be located rather than guessed at.
   process.stdout.write(`\nPHASE MEDIANS (seconds)\n`);
-  process.stdout.write(`  ${"phase".padEnd(20)}${workers.map((/** @type {string} */ w) => String(short(w)).padStart(9)).join("")}    spread\n`);
+  process.stdout.write(`  ${"phase".padEnd(20)}${workers.map((w: string) => String(short(w)).padStart(9)).join("")}    spread\n`);
   const rows = allPhases
-    .map((/** @type {any} */ phase) => {
+    .map((phase: any) => {
       const medians = workers.map((w) => summarise(phaseSamples(w, phase))?.median ?? 0);
       return { phase, medians, spread: Math.max(...medians) - Math.min(...medians) };
     })
-    .filter((/** @type {any} */ row) => row.medians.some((/** @type {any} */ v) => v >= 0.05))
-    .sort((/** @type {any} */ a, /** @type {any} */ b) => b.spread - a.spread);
+    .filter((row: any) => row.medians.some((v: any) => v >= 0.05))
+    .sort((a: any, b: any) => b.spread - a.spread);
   for (const { phase, medians, spread } of rows) {
-    process.stdout.write(`  ${phase.padEnd(20)}${medians.map((/** @type {any} */ v) => v.toFixed(1).padStart(9)).join("")}` +
+    process.stdout.write(`  ${phase.padEnd(20)}${medians.map((v: any) => v.toFixed(1).padStart(9)).join("")}` +
       `${spread.toFixed(1).padStart(10)}${spread >= 1 ? "  <-- diverges" : ""}\n`);
   }
 
   // The per-sweep view. `found` and `trips` separate "doing more work" from "doing work more slowly",
   // which is the distinction the aggregate destroys and the one that identifies a cause.
-  const sweepTypes = [...new Set(Object.values(results).flatMap((r) => r.sweeps.flatMap(Object.keys)))];
+  const sweepTypes = [...new Set(Object.values<any>(results).flatMap((r) => r.sweeps.flatMap(Object.keys)))];
   if (sweepTypes.length) {
     process.stdout.write("\nSWEEP DETAIL (mean ms / round trips / elements found)\n");
     for (const type of sweepTypes) {
       process.stdout.write(`  ${type.padEnd(14)}`);
       for (const w of workers) {
-        const runsWith = results[w].sweeps.map((/** @type {any} */ s) => s[type]).filter(Boolean);
+        const runsWith = results[w].sweeps.map((s: any) => s[type]).filter(Boolean);
         // Medians here too: one mute recovery inside a sweep skews a mean the same way it skews wall time.
-        const ms = (summarise(runsWith.map((/** @type {any} */ x) => x.ms))?.median ?? 0).toFixed(0);
-        const trips = (summarise(runsWith.map((/** @type {any} */ x) => x.trips))?.median ?? 0).toFixed(1);
-        const found = (summarise(runsWith.map((/** @type {any} */ x) => x.found))?.median ?? 0).toFixed(1);
+        const ms = (summarise(runsWith.map((x: any) => x.ms))?.median ?? 0).toFixed(0);
+        const trips = (summarise(runsWith.map((x: any) => x.trips))?.median ?? 0).toFixed(1);
+        const found = (summarise(runsWith.map((x: any) => x.found))?.median ?? 0).toFixed(1);
         process.stdout.write(`${short(w)}: ${ms}ms/${trips}t/${found}f   `);
       }
       process.stdout.write("\n");
@@ -341,9 +341,9 @@ function reportPhases(/** @type {any} */ { results, allPhases, phaseSamples }) {
  * The foundations. Timings alone say something got slower; they never say which resource ran out --
  * which is why three guests contending on one SSD was misdiagnosed as memory, then as the guests.
  */
-function reportFoundations(/** @type {any} */ { hostBefore }) {
+function reportFoundations({ hostBefore }: any) {
   const hostAfter = sampleHost();
-  const foundations = diffHost(/** @type {any} */ (hostBefore), /** @type {any} */ (hostAfter));
+  const foundations = diffHost((hostBefore as any), (hostAfter as any));
 
   // These describe THE MACHINE THIS COMMAND RAN ON, which is the workers' machine only while the workers
   // are local UTM guests. A bare-metal fleet is four separate computers, and this host's swap state then

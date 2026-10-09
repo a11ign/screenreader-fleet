@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sourceFiles } from "./source-walk.mjs";
+import { sourceFiles } from "./source-walk.ts";
 
 /**
  * `sourceFiles` lists what is on DISK, not what git tracks, so a directory some other test plants and removes

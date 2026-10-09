@@ -1,7 +1,7 @@
 // @ts-check
 // Run a script on a guest, elevated, and get its output back.
 //
-//   node src/guest-run.mjs <vm-name> <local-script.cmd> [--timeout=600]
+//   node src/guest-run.ts <vm-name> <local-script.cmd> [--timeout=600]
 //
 // This exists because there was no reliable way to do it, and the workarounds each failed differently:
 //
@@ -33,8 +33,8 @@ import { createReadStream, readFileSync, existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
-import { refuseUnknownFlags } from "./cli-flags.mjs";
-import { warnUtmDeprecated } from "./utm-deprecated.mjs";
+import { refuseUnknownFlags } from "./cli-flags.ts";
+import { warnUtmDeprecated } from "./utm-deprecated.ts";
 
 /**
  * takes a VM name and a script POSITIONALLY, which this guard does not touch, plus `--timeout=`;
@@ -60,7 +60,7 @@ const POLL_MS = 5_000;
  * a guest, because it is the part that silently produces wrong answers rather than errors.
  */
 /** @param {{ scriptPath: string, taskName?: string }} where */
-export function scheduleCommand({ scriptPath, taskName = TASK_NAME }) {
+export function scheduleCommand({ scriptPath, taskName = TASK_NAME }: { scriptPath: string; taskName?: string; }) {
   return `schtasks /create /tn ${taskName} /tr "${scriptPath}" /sc once /st 00:00 ` +
     `/ru SYSTEM /rl HIGHEST /f >nul 2>&1 & schtasks /run /tn ${taskName} >nul 2>&1`;
 }
@@ -72,13 +72,13 @@ export function scheduleCommand({ scriptPath, taskName = TASK_NAME }) {
  * exactly how a trim that crashed immediately looked identical to a trim in progress, for three boots.
  */
 /** @param {string} body @param {string} outputFile */
-export function wrapScript(body, outputFile) {
+export function wrapScript(body: string, outputFile: string) {
   const lines = [
     "@echo off",
     `cd /d ${GUEST_DIR}`,
     `set OUT=${outputFile}`,
     `> ${outputFile} echo === guest-run ===`,
-    ...body.split(/\r?\n/).filter((/** @type {string} */ l) => !/^@echo off\s*$/i.test(l)).map((/** @type {string} */ l) => l.trimEnd()),
+    ...body.split(/\r?\n/).filter((l: string) => !/^@echo off\s*$/i.test(l)).map((l: string) => l.trimEnd()),
     `>> ${outputFile} echo ${DONE_SENTINEL}`,
   ];
   return lines.join("\r\n") + "\r\n";
@@ -87,12 +87,12 @@ export function wrapScript(body, outputFile) {
 /** Did the run finish? Exported because "no sentinel" and "no file" are different failures. */
 /** @param {string} output */
 /** @param {string | null} output */
-export function isComplete(output) {
+export function isComplete(output: string | null) {
   return typeof output === "string" && output.includes(DONE_SENTINEL);
 }
 
 /** @param {string} vmName */
-async function uuidFor(vmName) {
+async function uuidFor(vmName: string) {
   const { stdout } = await run(UTMCTL, ["list"]);
   const line = stdout.split("\n").find((l) => l.trim().endsWith(` ${vmName}`) || l.trim().endsWith(`\t${vmName}`));
   const uuid = line?.trim().split(/\s+/)[0];
@@ -101,16 +101,16 @@ async function uuidFor(vmName) {
 }
 
 /** @param {string} uuid @param {string} guestPath @param {string} localPath @returns {Promise<void>} */
-function push(uuid, guestPath, localPath) {
+function push(uuid: string, guestPath: string, localPath: string): Promise<void> {
   return new Promise((done, fail) => {
     const child = execFile(UTMCTL, ["file", "push", uuid, guestPath], (error) =>
-      error ? fail(new Error(`push failed: ${/** @type {Error} */ (error).message}`)) : done());
+      error ? fail(new Error(`push failed: ${(error as Error).message}`)) : done());
     if (child.stdin) createReadStream(localPath).pipe(child.stdin);
   });
 }
 
 /** @param {string} uuid @param {string} guestPath */
-async function pull(uuid, guestPath) {
+async function pull(uuid: string, guestPath: string) {
   try {
     const { stdout } = await run(UTMCTL, ["file", "pull", uuid, guestPath], { maxBuffer: 1 << 24 });
     return stdout;
@@ -120,12 +120,12 @@ async function pull(uuid, guestPath) {
 }
 
 async function main() {
-  warnUtmDeprecated("node src/guest-run.mjs");
+  warnUtmDeprecated("node src/guest-run.ts");
   const args = process.argv.slice(2);
   const [vmName, scriptFile] = args.filter((a) => !a.startsWith("--"));
   const timeoutS = Number(args.find((a) => a.startsWith("--timeout="))?.split("=")[1] ?? 600);
   if (!vmName || !scriptFile) {
-    process.stderr.write("usage: node src/guest-run.mjs <vm-name> <script.cmd> [--timeout=600]\n");
+    process.stderr.write("usage: node src/guest-run.ts <vm-name> <script.cmd> [--timeout=600]\n");
     process.exit(2);
   }
   const local = resolve(scriptFile);

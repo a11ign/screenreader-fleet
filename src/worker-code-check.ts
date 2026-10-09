@@ -46,7 +46,7 @@
  * `node:child_process`, and is safe from both places. This file supplies the one thing only it can compute.
  */
 import { codeDrift, describeCodeDrift, describeEmptyPool, readWorkerCode, remedyLines,
-  workerSourceDirty, assertWorkersServe } from "./code-drift.mjs";
+  workerSourceDirty, assertWorkersServe } from "./code-drift.ts";
 
 // A SUBPATH export, not a deep relative path: `../../nvda-worker/src/...` drags those .mjs files into
 // worker-fleet's tsc project and the build dies with TS5055 "would overwrite input file". The subpath is
@@ -76,7 +76,7 @@ const NVDA_WORKER_LAYER = "nvda-worker";
  * @param {string} checkoutRoot
  * @returns {{ dir: string } | { absent: string }}
  */
-function layerClone(checkoutRoot) {
+function layerClone(checkoutRoot: string): { dir: string; } | { absent: string; } {
   const manifestPath = join(checkoutRoot, "packages", "control", "layers.json");
   if (!existsSync(manifestPath)) return { absent: `no packages/control/layers.json under ${checkoutRoot}` };
   const layer = JSON.parse(readFileSync(manifestPath, "utf8")).layers?.[NVDA_WORKER_LAYER];
@@ -103,7 +103,7 @@ function layerClone(checkoutRoot) {
  * @param {{ checkoutRoot?: string }} [options]
  * @returns {Promise<{ code: string, source: "clone" | "installed", sourceDir: string, note: string }>}
  */
-export async function resolveExpectedWorkerCode({ checkoutRoot = process.cwd() } = {}) {
+export async function resolveExpectedWorkerCode({ checkoutRoot = process.cwd() }: { checkoutRoot?: string; } = {}): Promise<{ code: string; source: "clone" | "installed"; sourceDir: string; note: string; }> {
   const clone = layerClone(checkoutRoot);
   if ("absent" in clone) {
     return { code: codeVersion(), source: "installed", sourceDir: workerSourceDir(),
@@ -133,7 +133,7 @@ export { codeDrift, describeCodeDrift, describeEmptyPool, readWorkerCode, remedy
  * @param {string[]} workers
  * @param {{when?: string, allow?: boolean, read?: (url: string) => Promise<string|null>, bareMetalUrls?: string[], checkoutRoot?: string}} options
  */
-export async function assertFleetRunsThisCheckout(workers, options = {}) {
+export async function assertFleetRunsThisCheckout(workers: string[], options: { when?: string; allow?: boolean; read?: (url: string) => Promise<string | null>; bareMetalUrls?: string[]; checkoutRoot?: string; } = {}) {
   const { checkoutRoot, ...rest } = options;
   const expected = await resolveExpectedWorkerCode({ checkoutRoot });
   if (!options.allow) process.stdout.write(`Expected worker code ${expected.code}, from ${expected.note}.\n`);

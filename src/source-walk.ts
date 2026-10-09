@@ -37,11 +37,11 @@ const SKIPPED_DIRECTORY = /^(node_modules|dist|\..*)$/;
  * @param {{ root?: string }} [options]
  * @returns {Array<[string, string]>}
  */
-export function sourceFiles({ root = REPOSITORY } = {}) {
+export function sourceFiles({ root = REPOSITORY }: { root?: string; } = {}): Array<[string, string]> {
   /** @type {Array<[string, string]>} */
-  const found = [];
+  const found: Array<[string, string]> = [];
   /** @param {string} dir */
-  const walk = (dir) => {
+  const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {

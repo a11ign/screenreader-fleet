@@ -2,7 +2,7 @@
 // worker's own retry keeps failures at zero — which is exactly how a 100%-broken NVDA hid in the pool.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assessWorker, workerIsUsable } from "./worker-health.mjs";
+import { assessWorker, workerIsUsable } from "./worker-health.ts";
 
 test("the real degraded worker is caught: every capture needed a recovery, zero failures", () => {
   // Measured: 4 captures, 4 recoveries, nvdaStart 19.1s each, and the run saw no failures at all.

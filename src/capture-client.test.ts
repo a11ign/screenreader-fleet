@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 
-import { captureTolerantly, recoverCapture } from "./capture-client.mjs";
+import { captureTolerantly, recoverCapture } from "./capture-client.ts";
 
 /** A worker that behaves however the test says, so the client is driven rather than described. */
 async function worker(handler: (url: string, res: ServerResponse, body: string) => void) {

@@ -33,7 +33,7 @@ const NEAR = 4;
  * Levenshtein, small and iterative — the inputs are flag names, never long strings.
  * @param {string} a @param {string} b @returns {number}
  */
-function distance(a, b) {
+function distance(a: string, b: string): number {
   let previous = Array.from({ length: b.length + 1 }, (_unused, index) => index);
   for (let i = 1; i <= a.length; i += 1) {
     const row = [i];
@@ -50,7 +50,7 @@ function distance(a, b) {
  * The flag name alone: `--shard=0/4` and `--shard` both name `--shard`.
  * @param {string} argument @returns {string}
  */
-export function nameOf(argument) {
+export function nameOf(argument: string): string {
   const equals = argument.indexOf("=");
   return equals === -1 ? argument : argument.slice(0, equals);
 }
@@ -73,7 +73,7 @@ export function nameOf(argument) {
  * @param {readonly string[]} argv @param {string} name
  * @returns {string | undefined}
  */
-export function flagValue(argv, name) {
+export function flagValue(argv: readonly string[], name: string): string | undefined {
   const prefix = `--${name}=`;
   const hit = argv.find((a) => a.startsWith(prefix));
   return hit === undefined ? undefined : hit.slice(prefix.length);
@@ -102,7 +102,7 @@ export function flagValue(argv, name) {
 /**
  * @param {string[]} argv @param {string[]} known @returns {string[]}
  */
-export function unknownFlags(argv, known) {
+export function unknownFlags(argv: string[], known: string[]): string[] {
   const accepted = new Set(known.map(nameOf));
   return argv
     .filter((argument) => argument !== "--" && (argument.startsWith("--") || /^-[A-Za-z]/.test(argument)))
@@ -114,7 +114,7 @@ export function unknownFlags(argv, known) {
  * The closest known flag, when there is one close enough to be a likely typo rather than a guess.
  * @param {string} flag @param {string[]} known @returns {string | undefined}
  */
-export function didYouMean(flag, known) {
+export function didYouMean(flag: string, known: string[]): string | undefined {
   const ranked = known.map(nameOf)
     .map((candidate) => ({ candidate, gap: distance(flag, candidate) }))
     .sort((left, right) => left.gap - right.gap);
@@ -138,7 +138,7 @@ export function didYouMean(flag, known) {
 // the guard below decides whether THIS module is the command by comparing `entry` against argv[1] -- so a
 // caller who forgot it would get a guard that silently never fires. Types found the contradiction the
 // moment this file entered the program. Every one of the 60 real call sites passes it.
-export function refuseUnknownFlags(known, { entry, argv = process.argv.slice(2), command }) {
+export function refuseUnknownFlags(known: string[], { entry, argv = process.argv.slice(2), command }: { entry: string; argv?: string[]; command?: string; }) {
   // ONLY WHEN THIS MODULE IS THE COMMAND, never when it is imported.
   //
   // These calls sit at module top level, so they run on IMPORT — and then inspect the IMPORTING process's

@@ -28,8 +28,8 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.mjs";
-import { isTransient } from "./transient-fault.mjs";
+import { requestJson, CAPTURE_CLIENT_TIMEOUT_MS } from "./worker-http.ts";
+import { isTransient } from "./transient-fault.ts";
 
 /** Long enough to survive a worker that is briefly busy, short enough not to double a capture's cost. */
 const RECOVERY_TIMEOUT_MS = 30_000;
@@ -63,9 +63,9 @@ const PROGRESS_TIMEOUT_MS = 10_000;
  */
 const MAX_POLL_FAILURES = 5;
 
-const sleep = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const base = (/** @type {string} */ worker) => String(worker).replace(/\/$/, "");
+const base = (worker: string) => String(worker).replace(/\/$/, "");
 
 /**
  * What is left of the OPERATION'S budget, never negative — architecture-audit.md §14.5.
@@ -78,7 +78,7 @@ const base = (/** @type {string} */ worker) => String(worker).replace(/\/$/, "")
  *
  * @param {number} deadline
  */
-const remaining = (deadline) => Math.max(0, deadline - Date.now());
+const remaining = (deadline: number) => Math.max(0, deadline - Date.now());
 
 /**
  * Ask the worker for a capture we already paid for but may not have received.
@@ -95,7 +95,7 @@ const remaining = (deadline) => Math.max(0, deadline - Date.now());
  *
  * @param {string} worker @param {string} captureId
  */
-export async function recoverCapture(worker, captureId) {
+export async function recoverCapture(worker: string, captureId: string) {
   let response;
   try {
     response = await requestJson(`${base(worker)}/capture/${captureId}`, { timeoutMs: RECOVERY_TIMEOUT_MS });
@@ -115,7 +115,7 @@ export async function recoverCapture(worker, captureId) {
   if (!response.ok) return null;
   // "Still running" and "never heard of it" are DIFFERENT ANSWERS and must stay that way. Neither is
   // recoverable here, but only one means the work is still being done.
-  if (/** @type {any} */ (response.json)?.state === "running") return null;
+  if ((response.json as any)?.state === "running") return null;
   return response;
 }
 
@@ -139,7 +139,11 @@ export async function recoverCapture(worker, captureId) {
  *           onProgress?: (progress: object) => void, sync?: boolean }} request
  */
 export async function captureTolerantly({ worker, body, timeoutMs = CAPTURE_CLIENT_TIMEOUT_MS, beforeRecovery,
-  onProgress, sync = syncByEnv() }) {
+  onProgress, sync = syncByEnv() }: {
+        worker: string; body: object; timeoutMs?: number;
+        beforeRecovery?: (error: unknown) => Promise<void>;
+        onProgress?: (progress: object) => void; sync?: boolean;
+    }) {
   const captureId = randomUUID();
   if (!sync) return pollForResult({ worker, body, captureId, timeoutMs, onProgress });
   // Said once, at the moment it applies, rather than at import: the synchronous form holds a connection
@@ -179,7 +183,10 @@ export async function captureTolerantly({ worker, body, timeoutMs = CAPTURE_CLIE
  * @param {{ worker: string, body: object, captureId: string, timeoutMs: number,
  *           onProgress?: (progress: object) => void }} request
  */
-async function pollForResult({ worker, body, captureId, timeoutMs, onProgress }) {
+async function pollForResult({ worker, body, captureId, timeoutMs, onProgress }: {
+        worker: string; body: object; captureId: string; timeoutMs: number;
+        onProgress?: (progress: object) => void;
+    }) {
   const deadline = Date.now() + timeoutMs;
   let accepted;
   try {
@@ -225,7 +232,7 @@ async function pollForResult({ worker, body, captureId, timeoutMs, onProgress })
  * @param {string} worker @param {string} captureId @param {number} deadline
  * @returns {Promise<{ state: "running" } | { state: "unknown" } | { state: "done", response: any }>}
  */
-async function reconcileLostAcceptance(worker, captureId, deadline) {
+async function reconcileLostAcceptance(worker: string, captureId: string, deadline: number): Promise<{ state: "running"; } | { state: "unknown"; } | { state: "done"; response: any; }> {
   let lastError;
   while (Date.now() < deadline) {
     const poll = await pollOnce(worker, captureId, Math.min(RECOVERY_TIMEOUT_MS, remaining(deadline)));
@@ -259,7 +266,10 @@ async function reconcileLostAcceptance(worker, captureId, deadline) {
  * @param {{ worker: string, captureId: string, deadline: number, timeoutMs: number,
  *           onProgress?: (progress: object) => void }} request
  */
-async function awaitCompletion({ worker, captureId, deadline, timeoutMs, onProgress }) {
+async function awaitCompletion({ worker, captureId, deadline, timeoutMs, onProgress }: {
+        worker: string; captureId: string; deadline: number; timeoutMs: number;
+        onProgress?: (progress: object) => void;
+    }) {
   let transportFailures = 0;
   let survived = 0;
   while (Date.now() < deadline) {
@@ -308,7 +318,7 @@ async function awaitCompletion({ worker, captureId, deadline, timeoutMs, onProgr
  *   remaining budget by the caller — see `remaining()` — so this read cannot outlive the deadline it is
  *   answering to on its own.
  */
-async function pollOnce(worker, captureId, timeoutMs = RECOVERY_TIMEOUT_MS) {
+async function pollOnce(worker: string, captureId: string, timeoutMs: number = RECOVERY_TIMEOUT_MS) {
   let response;
   try {
     response = await requestJson(`${base(worker)}/capture/${captureId}`, { timeoutMs });
@@ -326,8 +336,8 @@ async function pollOnce(worker, captureId, timeoutMs = RECOVERY_TIMEOUT_MS) {
 }
 
 /** The phase the worker is IN, so a caller can tell a slow capture from a wedged one. */
-async function readProgress(/** @type {string} */ worker, /** @type {(p: object) => void} */ onProgress,
-  /** @type {number} */ timeoutMs = PROGRESS_TIMEOUT_MS) {
+async function readProgress(worker: string, onProgress: (p: object) => void,
+  timeoutMs: number = PROGRESS_TIMEOUT_MS) {
   try {
     const { json } = await requestJson(`${base(worker)}/progress`, { timeoutMs });
     if (json && typeof json === "object") onProgress(json);
@@ -338,7 +348,7 @@ async function readProgress(/** @type {string} */ worker, /** @type {(p: object)
 }
 
 /** @param {string} worker @param {object} body @param {number} timeoutMs */
-function post(worker, body, timeoutMs) {
+function post(worker: string, body: object, timeoutMs: number) {
   // `requestJson` serialises the body and sets the headers; passing a string here would double-encode it.
   return requestJson(`${base(worker)}/capture`, { method: "POST", body, timeoutMs });
 }

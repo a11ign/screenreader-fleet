@@ -23,15 +23,11 @@
  * `health` is the body the box sent, on the three outcomes where one arrived, because "usable" is a different
  * question in different entries (`workerIsUsable` counts a worker predating the `ready` field as usable; the
  * measurement guard wants `ready: true`) and this module does not choose for them.
- *
- * @typedef {{ outcome: "ready", health: any } | { outcome: "busy", health: any }
- *   | { outcome: "not-ready", reason: string, health: any }
- *   | { outcome: "refused", message: string }
- *   | { outcome: "no-answer", message: string, timedOut: boolean }} Probe
  */
-import { requestJson } from "./worker-http.mjs";
+export type Probe = { outcome: "ready", health: any } | { outcome: "busy", health: any } | { outcome: "not-ready", reason: string, health: any } | { outcome: "refused", message: string } | { outcome: "no-answer", message: string, timedOut: boolean };
+import { requestJson } from "./worker-http.ts";
 
-/** @typedef {typeof requestJson} ProbeRequest */
+export type ProbeRequest = typeof requestJson;
 
 /**
  * THE PER-PROBE TIMEOUT, WITH ITS READING. A probe that outlives it is UNKNOWN, never "down", so this number
@@ -58,12 +54,12 @@ export const WORKER_PROBE_TIMEOUT_MS = 12_000;
  * @param {{ timeoutMs?: number, request?: ProbeRequest }} [options]
  * @returns {Promise<Probe>}
  */
-export async function probeHealth(worker, { timeoutMs = WORKER_PROBE_TIMEOUT_MS, request = requestJson } = {}) {
+export async function probeHealth(worker: string, { timeoutMs = WORKER_PROBE_TIMEOUT_MS, request = requestJson }: { timeoutMs?: number; request?: ProbeRequest; } = {}): Promise<Probe> {
   let response;
   try {
     response = await request(`${worker.replace(/\/$/, "")}/health`, { timeoutMs });
   } catch (error) {
-    const { code, message } = /** @type {NodeJS.ErrnoException} */ (error);
+    const { code, message } = (error as NodeJS.ErrnoException);
     // `message` is EMPTY for a raw ECONNREFUSED on this Node version, so it falls back to the code.
     if (code === "ECONNREFUSED") return { outcome: "refused", message: message || code };
     return { outcome: "no-answer", timedOut: code === "ETIMEDOUT",
@@ -89,7 +85,7 @@ export const WAKE_HINT = "If it is a fleet box that has gone to sleep, wake it f
  * @param {{ worker: string, timeoutMs?: number }} about
  * @returns {string}
  */
-export function describeProbe(probe, { worker, timeoutMs = WORKER_PROBE_TIMEOUT_MS }) {
+export function describeProbe(probe: Probe, { worker, timeoutMs = WORKER_PROBE_TIMEOUT_MS }: { worker: string; timeoutMs?: number; }): string {
   switch (probe.outcome) {
     case "ready": return `${worker} answered and is ready.`;
     case "busy": return `${worker} is up and busy with a capture.`;

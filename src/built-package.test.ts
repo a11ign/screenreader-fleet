@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { tsImport } from "tsx/esm/api";
 import { entriesFromExports, entryProblems } from "@a11ign/toolchain/entries";
 
 // THE BUILT PACKAGE IS PINNED, because every other test in this package reads `src` (a11ign/a11ign#3762, as #3734 did for the worker).
@@ -52,9 +53,9 @@ const exportTargets = targetsOf(manifest.exports);
 const binTargets = targetsOf(manifest.bin);
 const builtBinTargets = binTargets.filter((target) => target.startsWith("./dist/"));
 
-// The entry map Rslib is handed: the `exports` entries the preset derives, then the `bin` commands `rslib.config.mjs` adds beside them.
+// The entry map Rslib is handed: the `exports` entries the preset derives, then the `bin` commands `rslib.config.ts` adds beside them.
 async function configuredEntries(): Promise<Record<string, string>> {
-  const config = (await import(/* webpackIgnore: true */ pathToFileURL(join(packageDir, "rslib.config.mjs")).href)).default;
+  const config = (await tsImport(pathToFileURL(join(packageDir, "rslib.config.ts")).href, import.meta.url)).default;
   return config.lib[0].source.entry;
 }
 
@@ -70,7 +71,7 @@ test("the guards name what is missing (positive control for the emptiness assert
   assert.ok(exportTargets.includes("./dist/index.mjs") && exportTargets.includes("./dist/index.d.ts"), "`exports` names `.` for both conditions");
   assert.ok(builtBinTargets.includes("./dist/doctor.mjs"), "`bin` names `doctor`, which is not an `exports` key");
 
-  // The control's entry map comes from the manifest and the disk, NOT from `rslib.config.mjs`: it must keep working while the real map
+  // The control's entry map comes from the manifest and the disk, NOT from `rslib.config.ts`: it must keep working while the real map
   // is the thing that is broken, or a broken map would fail the control as well as the case that reads it.
   const entries = entriesFromExports(exportsAndBins(), { dir: packageDir });
   assert.deepEqual(entryProblems(exportsAndBins(), entries), []);
@@ -96,7 +97,7 @@ test("every file `bin` names is in the built package, or in a directory `files` 
   assert.deepEqual(unshipped, []);
 });
 
-test("`rslib.config.mjs`'s entry map and `exports` plus `bin` agree, in both directions", async () => {
+test("`rslib.config.ts`'s entry map and `exports` plus `bin` agree, in both directions", async () => {
   assert.deepEqual(entryProblems(exportsAndBins(), await configuredEntries()), []);
 });
 

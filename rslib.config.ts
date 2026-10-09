@@ -11,9 +11,9 @@ const [library] = libraryPreset(pkg, { dir: import.meta.dirname }).lib;
 // from its OWN built file (the preset leaves `new URL("../src/local-worker/", import.meta.url)` as written), which only holds while
 // every built file is directly under `dist`.
 const BIN_ENTRIES = {
-  doctor: "./src/doctor.mjs",
-  "check-worker-code": "./src/check-worker-code.mjs",
-  "compare-workers": "./src/compare-workers.mjs",
+  doctor: "./src/doctor.ts",
+  "check-worker-code": "./src/check-worker-code.ts",
+  "compare-workers": "./src/compare-workers.ts",
 };
 
 export default defineConfig({

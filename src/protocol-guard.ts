@@ -20,7 +20,7 @@
  * the verification over HTTP — which is this repo's rule after a hash-check that returned EMPTY whenever
  * the channel it used was broken, and read as a flaky tool rather than a failed deploy.
  */
-import { requestJson } from "./worker-http.mjs";
+import { requestJson } from "./worker-http.ts";
 
 /**
  * WHAT A FULL RECAPTURE COSTS, in the words the two deploy refusals print -- derived here and shown, not
@@ -58,7 +58,10 @@ const HEALTH_TIMEOUT_MS = 5_000;
  *           allowed: boolean, source?: string }} input
  * @returns {{ refuse: boolean, message: string }}
  */
-export function protocolVerdict({ local, served, allowed, source }) {
+export function protocolVerdict({ local, served, allowed, source }: {
+        local: number | string | null; served: { worker: string; protocol: number | string | null; }[];
+        allowed: boolean; source?: string;
+    }): { refuse: boolean; message: string; } {
   if (local === null || local === undefined) {
     // NAMES THE FILE IT WAS GIVEN, never a hardcoded one. This message said "from capture-core.mjs" while
     // the caller had long since been pointed elsewhere, so the one sentence a broken guard prints sent the
@@ -102,7 +105,7 @@ export function protocolVerdict({ local, served, allowed, source }) {
  * @param {string[]} urls
  * @returns {Promise<{worker: string, protocol: number|string|null}[]>}
  */
-export async function servedProtocols(urls) {
+export async function servedProtocols(urls: string[]): Promise<{ worker: string; protocol: number | string | null; }[]> {
   return Promise.all(urls.map(async (url) => {
     try {
       // `requestJson`, not `fetch` -- the same worker JSON API this repo's own audit found duplicated with
