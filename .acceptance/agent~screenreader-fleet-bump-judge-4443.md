@@ -9,6 +9,6 @@
 - `pnpm test`: `VERDICT pass: 234 tests in 36 files`. `pnpm run typecheck` clean. `pnpm run lint` 0 errors (68 warnings, same count as base).
 - Limit: this is a pin bump, so there is no guard to mutate; the suite passing against judge 0.5.1 and evidence 0.3.0 is the whole claim.
 
-Acceptance: node -e "const p=require('./package.json'); const old=(v)=>v.replace('^','').startsWith('0.1.'); if(old(p.dependencies['@a11ign/judge'])||old(p.devDependencies['@a11ign/evidence']))process.exit(1)" && pnpm run typecheck && pnpm test
+Acceptance: node -e "const p=require('./package.json'); const old=(v)=>v.replace('^','').startsWith('0.1.'); if(old(p.dependencies['@a11ign/judge'])||old(p.devDependencies['@a11ign/evidence']))process.exit(1)" && npx tsc --noEmit && npx rstest run src/*.test.ts
 
 Mutation: none -- a dependency pin change adds no guard; the Acceptance is red on origin/main (both pins 0.1.0) and green here.
