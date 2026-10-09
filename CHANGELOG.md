@@ -1,5 +1,25 @@
 # @a11ign/screenreader-fleet
 
+## 0.7.0
+
+### Minor Changes
+
+- 5e53b92: `@a11ign/screenreader-fleet/cli-flags` re-exports `@a11ign/toolchain/lib/cli-flags` instead of carrying its own copy of `refuseUnknownFlags`, `unknownFlags`, `didYouMean`, `flagValue` and `nameOf`, so the guard has one source (#4425). The subpath and its five names are unchanged for the lab and control. `@a11ign/toolchain` (0.5.0) moves from `devDependencies` to `dependencies`: a consumer of `cli-flags` now installs it at run time, and it declares `node >=22.15.0`.
+
+### Patch Changes
+
+- 49d9549: `a11ign-worker-code` and every capture's `assertFleetRunsThisCheckout` no longer throw on a layer clone laid at `@a11ign/screenreader-worker` 0.9.0 or later. The expected hash is the clone's own hasher over the clone's `src/`, and the hasher is `code-version.ts` there: the check imported `code-version.mjs` unconditionally, so it died with `Cannot find module …/packages/nvda-worker/src/code-version.mjs`. It now asks `code-version.ts` first and falls back to `code-version.mjs`, because `--layer-ref` can still deploy a guest at a layer sha from before the move to TypeScript. A clone holding neither is refused naming both files, never answered for by the installed copy.
+
+## 0.6.0
+
+### Minor Changes
+
+- 798a5f5: `fleetConsistency` compares `windowsBuild` (`<build>.<ubr>`, what the worker reports on `/health`) in its `REPORTED_ONLY` channel, so two boxes one cumulative update apart are named as drifting even though they share a `windowsVersion`. It gates nothing: `consistent` is unchanged by it, and it reads `unreported` on every box until a worker that carries the field is released and deployed. It graduates to `MUST_MATCH` once the fleet reads one value (#4405).
+
+### Patch Changes
+
+- 97f0c7a: The package's source is TypeScript: its 32 `.mjs` (the 29 modules under `src/`, plus `eslint.config`, `rstest.config`, `rslib.config` and `isolation-smoke`) became `.ts` by the toolchain's `js-to-ts`, and the repository's `mjs-ratchet.baseline.json` is empty, so a new `.js`, `.mjs` or `.cjs` fails the ratchet. Published files, `exports` subpaths and `bin` commands are unchanged; the `types` condition of each subpath now names `./dist/<name>.d.ts` instead of `.d.mts`, because Rslib declares a `.ts` source as `.d.ts`. `@a11ign/toolchain` moves to 0.3.1 (its base tsconfig carries `erasableSyntaxOnly` and `rewriteRelativeImportExtensions`), and `jiti` (ESLint reads `eslint.config.ts` through it) and `tsx` (the tests that start a source file as a child process run it under `node --import`) are dev dependencies. The 68 `any` the script wrote where the JSDoc named no type are warnings in six files, not errors.
+
 ## 0.1.0
 
 ### Minor Changes
