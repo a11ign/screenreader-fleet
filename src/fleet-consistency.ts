@@ -150,6 +150,16 @@ export const REPORTED_ONLY = [
       "on one as of 2026-09-23. That single letter is a real hardware difference rather than a driver " +
       "fallback, so no provisioning run can converge it and a gate would refuse that guest for ever " +
       "(#2063, reading on #2170)" },
+  // `windowsVersion` (`Win32_OperatingSystem.Version`, `10.0.<build>`) is in `MUST_MATCH` and does not move when
+  // a monthly cumulative update lands, so two boxes one update apart read as the SAME value and the fleet read
+  // as consistent. The revision does move, and it is a SEPARATE field because `windowsVersion` is a capture-cache-key
+  // input: appending the UBR to it would invalidate every cached capture. THE EXIT: this is a waiting room, and it
+  // graduates to `MUST_MATCH` once the fleet reads ONE value (the Done-when of #4405) -- report, then converge,
+  // then gate, the order `nodeVersion` took (#2063/#2170). Until the worker carrying the field is released and
+  // deployed it reads `unreported` on every box, which is why it is not a gate yet.
+  { path: "windowsBuild", why: "two boxes one cumulative update apart share a `windowsVersion` and are not the " +
+      "same Windows; the revision (`CurrentBuild.UBR`) is what tells them apart. NOT a gate yet: it graduates " +
+      "to MUST_MATCH once the fleet reads one value (#4433, #4405)" },
 ];
 
 /**
