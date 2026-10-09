@@ -14,13 +14,13 @@ importers:
       '@a11ign/screenreader-worker':
         specifier: 0.1.0
         version: 0.1.0
+      '@a11ign/toolchain':
+        specifier: 0.5.0
+        version: 0.5.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)
     devDependencies:
       '@a11ign/evidence':
         specifier: 0.1.0
         version: 0.1.0
-      '@a11ign/toolchain':
-        specifier: 0.3.1
-        version: 0.3.1(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)
       '@changesets/cli':
         specifier: 3.0.3
         version: 3.0.3
@@ -125,8 +125,8 @@ packages:
       '@rstest/coverage-v8':
         optional: true
 
-  '@a11ign/toolchain@0.3.1':
-    resolution: {integrity: sha512-E3MxpyE2A6cQR5ijNARP4rxdwXV37D5fwx45xMVBUO2vITFB2wSQJOsBat7Ptix1OWcSbMSVbmjhsBHLa9ih+g==}
+  '@a11ign/toolchain@0.5.0':
+    resolution: {integrity: sha512-+6+vTWgfpmi8CQ6uxJ6XZvFFVBVaSrr6eF3nM5S8T4ZwX9yrWEk7ZhiyHIEufAwDLFTb58ShnRtVwXd5TpNuFg==}
     engines: {node: '>=22.15.0'}
     hasBin: true
     peerDependencies:
@@ -1155,7 +1155,7 @@ snapshots:
     optionalDependencies:
       '@rslib/core': 1.0.3(typescript@6.0.3)
 
-  '@a11ign/toolchain@0.3.1(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)':
+  '@a11ign/toolchain@0.5.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)':
     dependencies:
       '@rstest/core': 0.12.3
     optionalDependencies:
