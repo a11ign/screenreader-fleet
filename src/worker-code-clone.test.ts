@@ -6,17 +6,20 @@
 // ("redeploy") that could not clear it. Equal only while the clone's sources equal the release, which is the reading that hid it.
 //
 // The fixture is a CHECKOUT ROOT: `packages/control/layers.json` declaring `nvda-worker` at `packages/nvda-worker`, and a clone there
-// whose `src/` is the installed package's with ONE `.mjs` byte appended. The expected value is computed the way `layerCodeVersion` does
-// (the clone's own `code-version.mjs` over the clone's `src/`), never by the code under test, so the assertion is independent of it.
+// whose `src/` is SYNTHETIC (a `code-version.mjs` hasher and a `capture-core.mjs`, written below) with ONE byte appended for the diverged
+// case. It is not the installed package's `src/` any more: `@a11ign/screenreader-worker` ships `dist/` only since 0.9.0, so there is no
+// `src/` to copy, and a fixture that copies it fails with ENOENT the moment the pin moves. The clone is a raw-`src` layer checkout, which
+// is what `layerCodeVersion` reads, and the test owns its shape. The expected value is computed the way `layerCodeVersion` does (the
+// clone's own `code-version.mjs` over the clone's `src/`), never by the code under test, so the assertion is independent of it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { execFile } from "node:child_process";
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { codeVersion, workerSourceDir } from "@a11ign/screenreader-worker/code-version";
+import { codeVersion } from "@a11ign/screenreader-worker/code-version";
 import { assertFleetRunsThisCheckout } from "./worker-code-check.ts";
 import { TSX_ARGS } from "./tsx-import.ts";
 
@@ -31,10 +34,35 @@ function withoutClone(): string {
   return root;
 }
 
-/** A checkout root whose clone differs from the installed copy by one byte of `capture-core.mjs`. */
-function withDivergedClone(): string {
+/**
+ * The test's own small copy of the clone's hasher: `codeVersion(dir)` over the clone's worker files, line endings normalised as the
+ * real one does. Written out rather than imported, so the expected hash is still computed by the CLONE's hasher and never by the code
+ * under test, and so the fixture needs nothing from the installed package's layout.
+ */
+const CLONE_HASHER = `import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+const WORKER_FILES = ["capture-core.mjs"];
+export function codeVersion(dir) {
+  const hash = createHash("sha256");
+  for (const file of WORKER_FILES) hash.update(readFileSync(resolve(dir, file), "utf8").replace(/\\r\\n/g, "\\n"));
+  return hash.digest("hex").slice(0, 16);
+}
+`;
+
+/** A checkout root whose clone is a synthetic raw `src/`: the hasher above and one worker file. */
+function withClone(): string {
   const root = withoutClone();
-  cpSync(workerSourceDir(), join(root, CLONE_PATH, "src"), { recursive: true });
+  const src = join(root, CLONE_PATH, "src");
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(src, "code-version.mjs"), CLONE_HASHER);
+  writeFileSync(join(src, "capture-core.mjs"), "export const capture = () => 'core';\n");
+  return root;
+}
+
+/** `withClone`, with ONE byte of `capture-core.mjs` appended: a layer clone that differs from the code a guest was released with. */
+function withDivergedClone(): string {
+  const root = withClone();
   appendFileSync(join(root, CLONE_PATH, "src", "capture-core.mjs"), "\n");
   return root;
 }
@@ -86,11 +114,12 @@ async function preflight(root: string, served: string): Promise<{ exitCode: numb
   }
 }
 
-test("the control: the diverged clone really hashes differently from the installed copy", async () => {
-  const root = withDivergedClone();
+test("the control: one appended byte changes the clone's hash, and the clone's hash is not the installed copy's", async () => {
+  const clean = withClone(), diverged = withDivergedClone();
   try {
-    assert.notEqual(await cloneHash(root), codeVersion(), "one appended byte must change the hash, or the fixture proves nothing");
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    assert.notEqual(await cloneHash(diverged), await cloneHash(clean), "one appended byte must change the hash, or the fixture proves nothing");
+    assert.notEqual(await cloneHash(diverged), codeVersion(), "the clone must not hash like the installed copy, or 'stale' below proves nothing");
+  } finally { rmSync(clean, { recursive: true, force: true }); rmSync(diverged, { recursive: true, force: true }); }
 });
 
 test("`worker:code` expects the CLONE's hash: a worker serving it matches, and the output names the clone", async () => {
