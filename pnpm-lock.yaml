@@ -12,8 +12,8 @@ importers:
         specifier: 0.5.1
         version: 0.5.1(@a11ign/scorer@0.3.3)
       '@a11ign/screenreader-worker':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.9.0
+        version: 0.9.0
       '@a11ign/toolchain':
         specifier: 0.5.0
         version: 0.5.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)
@@ -135,6 +135,11 @@ packages:
 
   '@a11ign/screenreader-worker@0.1.0':
     resolution: {integrity: sha512-QNo5s/ltMfnQH8jnfDjV760JK8XDpAjB7kIdxVv9yZYD/nZLfNtUN0abYm8wD0RG/Z97LrqZbxVoTROGT/PNeA==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  '@a11ign/screenreader-worker@0.9.0':
+    resolution: {integrity: sha512-b9W+zh5H8BF2lVaLe8WhDWTdUxFPZehTaM4tsrzwZkzwODC4hCqshxOe6D3qhmYBGP7lWWReoKzz8xw0DEgYAw==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -1185,6 +1190,10 @@ snapshots:
       '@a11ign/evidence': 0.3.2
 
   '@a11ign/screenreader-worker@0.1.0':
+    dependencies:
+      '@guidepup/guidepup': 0.31.0
+
+  '@a11ign/screenreader-worker@0.9.0':
     dependencies:
       '@guidepup/guidepup': 0.31.0
 
