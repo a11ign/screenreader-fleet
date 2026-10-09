@@ -6,7 +6,7 @@ The fleet's `src/cli-flags.ts` becomes five named re-exports from `@a11ign/toolc
 
 Evidence (measured at this head, in the fleet worktree): the row's three commands all exit 0; `pnpm run build` ok; `pnpm run typecheck` clean; `pnpm run lint` 0 errors (68 pre-existing warnings); `pnpm test` -> `VERDICT pass: 230 tests in 35 files`.
 
-Acceptance: bash -c 'cd /home/agent/repos/screenreader-fleet && ! grep -q "export function" src/cli-flags.ts && grep -q "@a11ign/toolchain/lib/cli-flags" src/cli-flags.ts && node -p "Object.keys(require(\"./package.json\").dependencies).includes(\"@a11ign/toolchain\")" | grep -qx true'
+Acceptance: bash -c '! grep -q "export function" src/cli-flags.ts && grep -q "@a11ign/toolchain/lib/cli-flags" src/cli-flags.ts && node -p "Object.keys(require(\"./package.json\").dependencies).includes(\"@a11ign/toolchain\")" | grep -qx true'
 
 Closes a11ign/a11ign#4592
 
