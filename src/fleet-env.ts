@@ -32,14 +32,50 @@ import { resolve } from "node:path";
 
 import { assertWorkerUrl } from "./worker-http.ts";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { flagValue, refuseUnknownFlags } from "./cli-flags.ts";
+
+// THIS MODULE IMPORTS NO PACKAGE, AND THAT IS WHY IT HAS A FLAG READER AND A FLAG CHECK OF ITS OWN (#4680).
+//
+// `control` imports this file from a raw checkout with no `npm install` (ADR 0012), so every import reachable from here
+// must be a `node:` builtin or a relative path. It reached `./cli-flags.ts` for `flagValue` and `refuseUnknownFlags`, and
+// 0.7.0 made that file a re-export of `@a11ign/toolchain/lib/cli-flags` (#4592): the control plane then died loading the
+// fleet with ERR_MODULE_NOT_FOUND. The toolchain copy stays THE copy for every other command and for the published
+// `./cli-flags` subpath; `fleet-env.test.ts` pins that the two reach the same verdict on every flag shape.
+const KNOWN_FLAGS = ["--list", "--inventory=", "--group-vars="];
+
+/** `--name=value`'s value, or undefined; `.slice` rather than `split("=")` so a value holding its own `=` survives. */
+function flagValue(argv: readonly string[], name: string): string | undefined {
+  const prefix = `--${name}=`;
+  const hit = argv.find((argument) => argument.startsWith(prefix));
+  return hit === undefined ? undefined : hit.slice(prefix.length);
+}
+
+const flagNameOf = (argument: string) => argument.split("=")[0];
 
 /**
- * its output is `eval`-ed by a shell, so a wrong shape is executed rather than read.
- *
- * An unrecognised flag is otherwise IGNORED, so it runs the default and reports success.
+ * The arguments that look like flags and are not among `fleet:env`'s own. A bare `--` is npm's separator, and a
+ * single-dash letter IS a flag (`-e` was an ansible argument that went unrefused for a whole fleet operation, #4425).
  */
-refuseUnknownFlags(["--list", "--inventory=", "--group-vars="], { entry: import.meta.url, command: "npm run fleet:env" });
+export function unknownFlagsOf(argv: readonly string[], known: readonly string[] = KNOWN_FLAGS): string[] {
+  const accepted = new Set(known.map(flagNameOf));
+  return argv
+    .filter((argument) => argument !== "--" && (argument.startsWith("--") || /^-[A-Za-z]/.test(argument)))
+    .map(flagNameOf)
+    .filter((name) => !accepted.has(name));
+}
+
+/**
+ * Its output is `eval`-ed by a shell, so a wrong shape is executed rather than read. An unrecognised flag is otherwise
+ * IGNORED, so it runs the default and reports success. Runs from `main()`, which is the CLI-entry path: importing this
+ * module as a library never inspects the importer's flags.
+ */
+function refuseUnknownFlags(argv: readonly string[]): void {
+  const unknown = unknownFlagsOf(argv);
+  if (unknown.length === 0) return;
+  for (const flag of unknown) process.stderr.write(`  npm run fleet:env: unknown flag ${flag}\n`);
+  process.stderr.write(`  It takes: ${KNOWN_FLAGS.map(flagNameOf).sort().join(" ")}\n`
+    + "  Refusing rather than ignoring it: an ignored flag runs the default and reports success.\n");
+  process.exit(2);
+}
 
 export const DEFAULT_WORKER_PORT = 8765;
 
@@ -557,6 +593,7 @@ export function fleetEnvOutput(text: string, { port = DEFAULT_WORKER_PORT, mode 
 }
 
 function main() {
+  refuseUnknownFlags(process.argv.slice(2));
   let paths;
   try {
     paths = inventoryPathsFor();
