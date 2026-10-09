@@ -16,3 +16,5 @@
 - **Limit:** the fixtures import a `.ts` file by `file:` URL, which needs type stripping (Node 24 here) or `tsx`; the check's own entry runs under `TSX_ARGS`, as before.
 
 Acceptance: bash -c '! git grep -nE "code-version[.]mjs\"" -- src/worker-code-check.ts' && npx tsc --noEmit && npx rstest run src/worker-code-check.test.ts
+
+Mutation: forced the old always-.mjs choice (3 of 10 fail: the .ts-only, both-present and neither cases) and always-.ts (5 of 10 fail: the .mjs-only case and the worker-code-clone.test.ts cases); each restored from a copy and diffed identical, 10 of 10 pass restored.
