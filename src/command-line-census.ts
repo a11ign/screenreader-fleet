@@ -45,7 +45,7 @@ const ROOTS = ["scripts", ...["packages/lab", "packages/worker-fleet"]
  * @returns {string[]} repo-relative paths, unsorted (discovery order)
  */
 export function allMjsFiles(repoRoot: string): string[] {
-  const found = /** @type {string[]} */ ([]);
+  const found = ([] as string[]);
   /** @param {string} dir */
   const walk = (dir: string) => {
     for (const entry of readdirSync(join(repoRoot, dir), { withFileTypes: true })) {

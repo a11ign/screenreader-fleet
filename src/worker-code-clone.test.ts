@@ -18,8 +18,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { codeVersion, workerSourceDir } from "@a11ign/screenreader-worker/code-version";
 import { assertFleetRunsThisCheckout } from "./worker-code-check.ts";
+import { TSX_ARGS } from "./tsx-import.ts";
 
-const CHECK = join(import.meta.dirname, "check-worker-code.mjs");
+const CHECK = join(import.meta.dirname, "check-worker-code.ts");
 const CLONE_PATH = "packages/nvda-worker";
 
 function withoutClone(): string {
@@ -56,7 +57,7 @@ async function workerServing(code: string): Promise<{ url: string; server: Serve
 /** `a11ign-worker-code` run from `cwd` against one worker. Async, because a sync spawn would block the worker's own event loop. */
 function runCheck(cwd: string, workerUrl: string): Promise<{ status: number; out: string }> {
   return new Promise((done) => {
-    execFile(process.execPath, [CHECK], { cwd, env: { ...process.env, A11Y_WORKERS: workerUrl, A11Y_WORKER: "" } }, (error, stdout, stderr) =>
+    execFile(process.execPath, [...TSX_ARGS, CHECK], { cwd, env: { ...process.env, A11Y_WORKERS: workerUrl, A11Y_WORKER: "" } }, (error, stdout, stderr) =>
       done({ status: error ? (error as { code?: number }).code ?? 1 : 0, out: stdout + stderr }));
   });
 }

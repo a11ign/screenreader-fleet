@@ -189,8 +189,8 @@ export function requestJson(url: string, { method = "GET", body, timeoutMs = 30_
       // Typed as an ErrnoException so the `code` this deliberately attaches is describable. Recovery in
       // this repo is keyed on CODES and never on message text (`capture-faults.mjs`), so the field is
       // load-bearing rather than decorative.
-      const error = /** @type {NodeJS.ErrnoException} */ (
-        new Error(`Request to ${url} timed out after ${timeoutMs} ms`));
+      const error = (
+        new Error(`Request to ${url} timed out after ${timeoutMs} ms`) as NodeJS.ErrnoException);
       error.code = "ETIMEDOUT";
       req.destroy(error);
     }, timeoutMs);
@@ -268,7 +268,7 @@ function collect(res: import("node:http").IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let text = "";
     res.setEncoding("utf8");
-    res.on("data", (/** @type {string} */ chunk: string) => { text += chunk; });
+    res.on("data", (chunk: string) => { text += chunk; });
     res.on("end", () => resolve(text));
     res.on("error", reject);
   });

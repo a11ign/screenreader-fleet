@@ -73,8 +73,8 @@ export function workerUrls({
 function localPoolUrls() {
   try {
     const pool = JSON.parse(execFileSync(CTL, ["pool"], { encoding: "utf8" }));
-    return pool.filter((/** @type {{ip?: string}} */ vm: { ip?: string; }) => vm.ip)
-      .map((/** @type {{ip: string, port: number}} */ vm: { ip: string; port: number; }) => `http://${vm.ip}:${vm.port}`);
+    return pool.filter((vm: { ip?: string; }) => vm.ip)
+      .map((vm: { ip: string; port: number; }) => `http://${vm.ip}:${vm.port}`);
   } catch (e) {
     // Never silent: "there is no UTM here" and "utmctl failed" are different, and the second is the one
     // that would otherwise send somebody to the inventory believing the local pool was empty.

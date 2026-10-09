@@ -26,10 +26,8 @@
  * Named as a typedef rather than repeated inline because four functions pass it around, and this module's
  * whole purpose is refusing to claim a difference the samples do not support — so `q1`, `q3` and `iqr`
  * travelling together, as one thing with one name, is the point rather than a formality.
- *
- * @typedef {{n: number, median: number, q1: number, q3: number, iqr: number,
- *            min: number, max: number}} Summary
  */
+export type Summary = {n: number, median: number, q1: number, q3: number, iqr: number, min: number, max: number};
 
 /** Below this many rounds, report the numbers but never claim a difference. */
 const MIN_ROUNDS_FOR_A_VERDICT = 5;
@@ -61,11 +59,11 @@ export function describe(values: number[]): Summary | null {
   if (!values.length) return null;
   // Non-null by construction: `quantile` returns null only for an empty list, and the guard above has
   // already excluded that. Written as a local rather than an assertion so the reason is stated once.
-  const q1 = /** @type {number} */ (quantile(values, 0.25));
-  const q3 = /** @type {number} */ (quantile(values, 0.75));
+  const q1 = (quantile(values, 0.25) as number);
+  const q3 = (quantile(values, 0.75) as number);
   return {
     n: values.length,
-    median: /** @type {number} */ (quantile(values, 0.5)),
+    median: (quantile(values, 0.5) as number),
     q1, q3, iqr: q3 - q1,
     min: Math.min(...values),
     max: Math.max(...values),

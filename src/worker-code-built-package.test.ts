@@ -13,8 +13,9 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { tsImport } from "tsx/esm/api";
 
-const SIBLINGS = ["worker-code-check.mjs", "code-drift.mjs", "git-safe-env.mjs", "worker-http.mjs"];
+const SIBLINGS = ["worker-code-check.ts", "code-drift.ts", "git-safe-env.ts", "worker-http.ts"];
 const BAKED = "0123456789abcdef";
 
 // `dist/code-version.mjs` as the build emits it, which is `src/code-version.mjs` bundled, with `codeVersion()`'s default the baked hash
@@ -53,7 +54,7 @@ test("`resolveExpectedWorkerCode()` is the hash a BUILT worker package carries, 
     const built = await import(pathToFileURL(join(root, "node_modules/@a11ign/screenreader-worker/dist/code-version.mjs")).href);
     // The control: the fixture is shaped like the build, so the expression this row replaced fails on it as it failed on 0.2.0.
     assert.throws(() => built.codeVersion(built.workerSourceDir()), { code: "ENOENT" });
-    const { resolveExpectedWorkerCode } = await import(pathToFileURL(join(root, "worker-code-check.mjs")).href);
+    const { resolveExpectedWorkerCode } = await tsImport(pathToFileURL(join(root, "worker-code-check.ts")).href, import.meta.url);
     // `checkoutRoot: root` holds no `layers.json`, so the installed (here: built) package answers.
     assert.equal((await resolveExpectedWorkerCode({ checkoutRoot: root })).code, BAKED);
   } finally {

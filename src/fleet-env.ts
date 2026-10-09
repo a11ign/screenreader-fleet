@@ -94,7 +94,7 @@ export function configuredWorkers(): Array<{ name: string; url: string; }> {
 // than a hidden module constant -- a caller outside this monorepo (or a test) can supply its own path
 // instead of silently inheriting one that can only ever resolve here.
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const monorepoAnsibleFile = (/** @type {string} */ relative: string, /** @type {string} */ baseDir: string = MODULE_DIR) =>
+const monorepoAnsibleFile = (relative: string, baseDir: string = MODULE_DIR) =>
   resolve(baseDir, "..", "..", "control", "ansible", relative);
 const INVENTORY = monorepoAnsibleFile("inventory.yml");
 const GROUP_VARS = monorepoAnsibleFile("group_vars/a11y_workers.yml");
@@ -160,9 +160,8 @@ export const WORKER_GROUP = "a11y_workers";
 
 /**
  * One frame of the indentation stack: a key and the column it started at.
- *
- * @typedef {{indent: number, key: string}} Frame
  */
+export type Frame = {indent: number, key: string};
 
 /**
  * A host as the inventory declares it — the ADDRESS and the NAME together.
@@ -173,9 +172,8 @@ export const WORKER_GROUP = "a11y_workers";
  *
  * `capture` is false for a host that declares `a11y_capture: false`: enrolled, served, deployed to, and not
  * handed corpus cases.
- *
- * @typedef {{name: string|undefined, host: string, capture: boolean}} Host
  */
+export type Host = {name: string|undefined, host: string, capture: boolean};
 
 /**
  * The group a host sits in: the key directly beneath `children`.
@@ -288,7 +286,7 @@ function readCaptureDeclaration(declared: Map<string, { capture: boolean; line: 
       + "This reader takes those two literals and nothing else, so a host is never left in or out of the "
       + "capture set by a spelling it did not understand.");
   }
-  const indent = /** @type {RegExpMatchArray} */ (match)[1].length;
+  const indent = (match as RegExpMatchArray)[1].length;
   const owner = [...stack].reverse().find((frame) => frame.indent < indent)?.key;
   declared.set(owner ?? "", { capture: value === "true", line: index + 1 });
 }
@@ -563,7 +561,7 @@ function main() {
   try {
     paths = inventoryPathsFor();
   } catch (error) {
-    process.stderr.write(`${/** @type {Error} */ (error).message}\n`);
+    process.stderr.write(`${(error as Error).message}\n`);
     process.exitCode = 2;
     return;
   }

@@ -63,9 +63,9 @@ const PROGRESS_TIMEOUT_MS = 10_000;
  */
 const MAX_POLL_FAILURES = 5;
 
-const sleep = (/** @type {number} */ ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const base = (/** @type {string} */ worker: string) => String(worker).replace(/\/$/, "");
+const base = (worker: string) => String(worker).replace(/\/$/, "");
 
 /**
  * What is left of the OPERATION'S budget, never negative — architecture-audit.md §14.5.
@@ -115,7 +115,7 @@ export async function recoverCapture(worker: string, captureId: string) {
   if (!response.ok) return null;
   // "Still running" and "never heard of it" are DIFFERENT ANSWERS and must stay that way. Neither is
   // recoverable here, but only one means the work is still being done.
-  if (/** @type {any} */ (response.json)?.state === "running") return null;
+  if ((response.json as any)?.state === "running") return null;
   return response;
 }
 
@@ -336,8 +336,8 @@ async function pollOnce(worker: string, captureId: string, timeoutMs: number = R
 }
 
 /** The phase the worker is IN, so a caller can tell a slow capture from a wedged one. */
-async function readProgress(/** @type {string} */ worker: string, /** @type {(p: object) => void} */ onProgress: (p: object) => void,
-  /** @type {number} */ timeoutMs: number = PROGRESS_TIMEOUT_MS) {
+async function readProgress(worker: string, onProgress: (p: object) => void,
+  timeoutMs: number = PROGRESS_TIMEOUT_MS) {
   try {
     const { json } = await requestJson(`${base(worker)}/progress`, { timeoutMs });
     if (json && typeof json === "object") onProgress(json);

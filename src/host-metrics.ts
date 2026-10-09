@@ -60,8 +60,8 @@ const BYTES_PER_MB = 1024 * 1024;
 export function parseVmStat(output: string) {
   const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
   if (!Number.isFinite(pageSize)) return null;
-  const pages = (/** @type {string} */ label: string) => Number(new RegExp(`${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
-  const mb = (/** @type {string} */ label: string) => Math.round((pages(label) * pageSize) / BYTES_PER_MB);
+  const pages = (label: string) => Number(new RegExp(`${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
+  const mb = (label: string) => Math.round((pages(label) * pageSize) / BYTES_PER_MB);
   return {
     freeMb: mb("Pages free"),
     activeMb: mb("Pages active"),
@@ -128,7 +128,7 @@ export function parseProcessMemory(psOutput: string, match: string) {
   });
 }
 
-const run = (/** @type {string} */ cmd: string, /** @type {string[]} */ args: string[]) => {
+const run = (cmd: string, args: string[]) => {
   try {
     return execFileSync(cmd, args, { encoding: "utf8", timeout: 15_000 });
   } catch {
@@ -166,12 +166,12 @@ export function sampleHost({ processMatch = "QEMU" }: { processMatch?: string; }
 // Every `?.` and `??` is a branch, so six inlined reads of a possibly-absent snapshot pushed diffHost
 // to a complexity of 21 against a limit of 15 -- without being any clearer than naming the read once.
 /**
- * @typedef {{ memory?: Record<string, number>, processes?: { residentMb: number }[] }} HostSnapshot
  *
  * Named because the first attempt at annotating this called it `Record<string, number>` -- flat numbers,
  * which is what the CALL SITES read out of it and not what it is. A shape guessed from its uses is the
  * same defect as a type inferred from its defaults, one file over.
  */
+export type HostSnapshot = { memory?: Record<string, number>, processes?: { residentMb: number }[] };
 
 /**
  * @param {HostSnapshot} snapshot

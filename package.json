@@ -10,47 +10,47 @@
       "default": "./dist/index.mjs"
     },
     "./health": {
-      "types": "./dist/worker-health.d.mts",
+      "types": "./dist/worker-health.d.ts",
       "default": "./dist/worker-health.mjs"
     },
     "./capacity": {
-      "types": "./dist/host-capacity.d.mts",
+      "types": "./dist/host-capacity.d.ts",
       "default": "./dist/host-capacity.mjs"
     },
     "./probe-outcome": {
-      "types": "./dist/probe-outcome.d.mts",
+      "types": "./dist/probe-outcome.d.ts",
       "default": "./dist/probe-outcome.mjs"
     },
     "./worker-http": {
-      "types": "./dist/worker-http.d.mts",
+      "types": "./dist/worker-http.d.ts",
       "default": "./dist/worker-http.mjs"
     },
     "./cli-flags": {
-      "types": "./dist/cli-flags.d.mts",
+      "types": "./dist/cli-flags.d.ts",
       "default": "./dist/cli-flags.mjs"
     },
     "./transient-fault": {
-      "types": "./dist/transient-fault.d.mts",
+      "types": "./dist/transient-fault.d.ts",
       "default": "./dist/transient-fault.mjs"
     },
     "./capture-client": {
-      "types": "./dist/capture-client.d.mts",
+      "types": "./dist/capture-client.d.ts",
       "default": "./dist/capture-client.mjs"
     },
     "./host-address": {
-      "types": "./dist/host-address.d.mts",
+      "types": "./dist/host-address.d.ts",
       "default": "./dist/host-address.mjs"
     },
     "./fleet-env": {
-      "types": "./dist/fleet-env.d.mts",
+      "types": "./dist/fleet-env.d.ts",
       "default": "./dist/fleet-env.mjs"
     },
     "./fleet-consistency": {
-      "types": "./dist/fleet-consistency.d.mts",
+      "types": "./dist/fleet-consistency.d.ts",
       "default": "./dist/fleet-consistency.mjs"
     },
     "./worker-code-check": {
-      "types": "./dist/worker-code-check.d.mts",
+      "types": "./dist/worker-code-check.d.ts",
       "default": "./dist/worker-code-check.mjs"
     }
   },
@@ -73,7 +73,7 @@
   },
   "devDependencies": {
     "@a11ign/evidence": "0.1.0",
-    "@a11ign/toolchain": "0.1.5",
+    "@a11ign/toolchain": "0.3.1",
     "@changesets/cli": "3.0.3",
     "@eslint/js": "^10.0.1",
     "@rslib/core": "1.0.3",
@@ -81,6 +81,8 @@
     "@types/node": "^26.6.4",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
+    "jiti": "^2.7.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1",
     "yaml": "^2.9.1"

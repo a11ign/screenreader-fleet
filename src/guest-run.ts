@@ -78,7 +78,7 @@ export function wrapScript(body: string, outputFile: string) {
     `cd /d ${GUEST_DIR}`,
     `set OUT=${outputFile}`,
     `> ${outputFile} echo === guest-run ===`,
-    ...body.split(/\r?\n/).filter((/** @type {string} */ l: string) => !/^@echo off\s*$/i.test(l)).map((/** @type {string} */ l: string) => l.trimEnd()),
+    ...body.split(/\r?\n/).filter((l: string) => !/^@echo off\s*$/i.test(l)).map((l: string) => l.trimEnd()),
     `>> ${outputFile} echo ${DONE_SENTINEL}`,
   ];
   return lines.join("\r\n") + "\r\n";
@@ -104,7 +104,7 @@ async function uuidFor(vmName: string) {
 function push(uuid: string, guestPath: string, localPath: string): Promise<void> {
   return new Promise((done, fail) => {
     const child = execFile(UTMCTL, ["file", "push", uuid, guestPath], (error) =>
-      error ? fail(new Error(`push failed: ${/** @type {Error} */ (error).message}`)) : done());
+      error ? fail(new Error(`push failed: ${(error as Error).message}`)) : done());
     if (child.stdin) createReadStream(localPath).pipe(child.stdin);
   });
 }

@@ -160,9 +160,8 @@ export const REPORTED_ONLY = [
  * `Record<string, unknown>` on the other, which typecheck caught in the test that calls them in sequence.
  * Two spellings of one shape is the duplication this repo names as its most expensive recurring defect,
  * and a typedef is the cheapest form of "delete a copy".
- *
- * @typedef {{field: string, why: string, values: Record<string, unknown>}} Mismatch
  */
+export type Mismatch = {field: string, why: string, values: Record<string, unknown>};
 
 /** Edge policy values every guest must agree on, checked separately because they come from /diagnostics. */
 export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"];
@@ -187,10 +186,9 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  * of the asked guests actually reported it, and the verdict draws its own line. `compared`/`unchecked`
  * stay because they are what a caller greps for the REMEDY -- a field at 0 sends a reader to the field,
  * a field at k sends them to the boxes -- and `coverage` is the measurement both are derived from.
- *
- * @typedef {{field: string, reported: number, asked: number}} FieldReporters
- * @typedef {{compared: string[], unchecked: string[], coverage: FieldReporters[]}} FieldCoverage
  */
+export type FieldReporters = {field: string, reported: number, asked: number};
+export type FieldCoverage = {compared: string[], unchecked: string[], coverage: FieldReporters[]};
 
 /**
  * One reported-only field that has something to say, and WHICH thing it is saying — #2063.
@@ -202,10 +200,8 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  * It carries `reported`/`asked` for the same reason `FieldReporters` does — a count is what lets a reader
  * tell 0 of 10 from 9 of 10 — and the values map for the reason `Mismatch` does: drift detected and not
  * located is not actionable.
- *
- * @typedef {{field: string, why: string, values: Record<string, unknown>, reported: number,
- *   asked: number, state: "drifted" | "unreported"}} ReportedDrift
  */
+export type ReportedDrift = {field: string, why: string, values: Record<string, unknown>, reported: number, asked: number, state: "drifted" | "unreported"};
 
 /**
  * ONE FIELD READ ACROSS THE FLEET, before anybody decides what it means.
@@ -217,9 +213,6 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  * second copy of this loop is how a "reported-only" field would end up counted differently from a gating
  * one and nobody would know which was right.
  *
- * @typedef {{worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>}} Guest
- * @typedef {{field: string, why: string, values: Record<string, unknown>, reported: number, asked: number}} Reading
- *
  * @param {Guest[]} present
  * @param {{field: string, why: string, source: (guest: Guest) => Record<string, unknown> | undefined,
  *   key: string}} ask `source` is the BLOCK this field lives in, not the value: coverage has to tell
@@ -227,6 +220,8 @@ export const POLICY_MUST_MATCH = ["StartupBoostEnabled", "BackgroundModeEnabled"
  *   the block answers the second
  * @returns {Reading}
  */
+export type Guest = {worker: string, environment?: Record<string, unknown>, policy?: Record<string, unknown>};
+export type Reading = {field: string, why: string, values: Record<string, unknown>, reported: number, asked: number};
 function readField(present: Guest[], { field, why, source, key }: {
         field: string; why: string; source: (guest: Guest) => Record<string, unknown> | undefined;
         key: string;
