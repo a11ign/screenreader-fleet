@@ -9,6 +9,11 @@ updates:
     schedule:
       interval: daily
     # No `groups:` on purpose: each dependency is its own pull request, which is what keeps a bump small and mergeable alone.
+    # `increase` is a CANDIDATE remedy for exact pins never getting a bump pull request here (a11ign/a11ign#4649), NOT a confirmed one: the only
+    # measured facts are that this package is published (so Dependabot treats it as a library) and that one Dependabot pull request has ever
+    # existed, on a caret spec. Whether a bump now opens for the three `@a11ign` pins is read by a11ign/a11ign#4650; this line is wrong if it
+    # finds none did.
+    versioning-strategy: increase
     commit-message:
       # The handle the org's gate recognises a dependency pull request by: every title starts `deps:`.
       prefix: deps
