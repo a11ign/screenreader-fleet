@@ -51,8 +51,9 @@ import { codeDrift, describeCodeDrift, describeEmptyPool, readWorkerCode, remedy
 // A SUBPATH export, not a deep relative path: `../../nvda-worker/src/...` drags those .mjs files into
 // worker-fleet's tsc project and the build dies with TS5055 "would overwrite input file". The subpath is
 // also the shape already in use for the same reason -- `@a11ign/screenreader-fleet/worker-http`.
-// `code-version.mjs` imports nothing but node stdlib and `worker-files.mjs`, which is why it is safe and
-// why it is its own module. Still the ONE hasher: the subpath is the same function.
+// The hasher module (`code-version.ts` in the worker repository, built to `dist/code-version.mjs` in the package) imports nothing
+// but node stdlib and `worker-files`, which is why it is safe and why it is its own module. Still the ONE hasher: the subpath is
+// the same function.
 import { codeVersion, workerSourceDir } from "@a11ign/screenreader-worker/code-version";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -85,14 +86,34 @@ function layerClone(checkoutRoot: string): { dir: string; } | { absent: string; 
   return existsSync(dir) ? { dir } : { absent: `no layer clone at ${dir}` };
 }
 
+/** The clone's hasher, newest form first: `@a11ign/screenreader-worker` 0.9.0 ships `code-version.ts` and no `.mjs`. */
+const CLONE_HASHER_EXTENSIONS = ["ts", "mjs"];
+
+/**
+ * The clone's own hasher module under `sourceDir`, the `.ts` before the `.mjs`.
+ *
+ * The `.mjs` stays as a fallback because `--layer-ref` deploys a guest at ANY layer sha, and a sha from before the worker moved to
+ * TypeScript has only the `.mjs`; refusing it would turn a guest that is correctly deployed into a check that throws. A clone with
+ * NEITHER is refused here, by name, rather than answered for by the installed copy (the silent wrong reading `layerClone` explains).
+ */
+function cloneHasherPath(sourceDir: string): string {
+  const candidates = CLONE_HASHER_EXTENSIONS.map((extension) => join(sourceDir, `code-version.${extension}`));
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (found === undefined) {
+    throw new Error(`the layer clone's src/ holds no hasher to ask for the expected worker code; looked for ${candidates.join(" or ")}`);
+  }
+  return found;
+}
+
 /**
  * The hash every worker is expected to be serving, and WHERE IT CAME FROM. ONE function, asked by `a11ign-worker-code` and by
  * `assertFleetRunsThisCheckout` alike, so the two cannot be given different hashers again (a11ign/a11ign#3781).
  *
- * With a layer clone present it is the CLONE's: the clone's own `code-version.mjs` over the clone's `src/`, which is what
- * `layerCodeVersion("nvda-worker")` computes for the deploy and the lab, and what a guest is told to be on (`--layer-ref`). Asking the
- * installed package instead made every worker read stale the first time a guest was deployed at a sha whose `.mjs` differed from the
- * release, with a remedy ("redeploy") that could not clear it.
+ * With a layer clone present it is the CLONE's: the clone's own hasher (`code-version.ts`, or `code-version.mjs` in a clone from
+ * before the worker repository moved to TypeScript) over the clone's `src/`, which is what `layerCodeVersion("nvda-worker")`
+ * computes for the deploy and the lab, and what a guest is told to be on (`--layer-ref`). Asking the installed package instead made
+ * every worker read stale the first time a guest was deployed at a sha whose sources differed from the release, with a remedy
+ * ("redeploy") that could not clear it.
  *
  * With none it is the installed package's (a11ign/a11ign#3740: the one the package was RELEASED with, `codeVersion()` and no
  * directory, because the built package's `workerSourceDir()` is `dist/` and holds none of the files a guest runs), and `source` and
@@ -110,7 +131,7 @@ export async function resolveExpectedWorkerCode({ checkoutRoot = process.cwd() }
       note: `the installed @a11ign/screenreader-worker (${clone.absent})` };
   }
   const sourceDir = `${join(clone.dir, "src")}/`;
-  const hasher = await import(pathToFileURL(join(sourceDir, "code-version.mjs")).href);
+  const hasher = await import(pathToFileURL(cloneHasherPath(sourceDir)).href);
   return { code: hasher.codeVersion(sourceDir), source: "clone", sourceDir, note: `the layer clone at ${clone.dir}` };
 }
 
