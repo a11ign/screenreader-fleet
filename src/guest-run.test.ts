@@ -2,7 +2,7 @@
 // errors, which is why they are pinned by tests rather than left to a comment.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { scheduleCommand, wrapScript, isComplete, DONE_SENTINEL } from "./guest-run.mjs";
+import { scheduleCommand, wrapScript, isComplete, DONE_SENTINEL } from "./guest-run.ts";
 
 test("the schedule command is a single string, with the script path quoted", () => {
   // Trap 1: `utmctl exec ... -- a b c` passes a, b, c as SEPARATE argv entries. A command containing

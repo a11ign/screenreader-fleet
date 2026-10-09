@@ -29,7 +29,7 @@
  *   | { outcome: "refused", message: string }
  *   | { outcome: "no-answer", message: string, timedOut: boolean }} Probe
  */
-import { requestJson } from "./worker-http.mjs";
+import { requestJson } from "./worker-http.ts";
 
 /** @typedef {typeof requestJson} ProbeRequest */
 
@@ -58,7 +58,7 @@ export const WORKER_PROBE_TIMEOUT_MS = 12_000;
  * @param {{ timeoutMs?: number, request?: ProbeRequest }} [options]
  * @returns {Promise<Probe>}
  */
-export async function probeHealth(worker, { timeoutMs = WORKER_PROBE_TIMEOUT_MS, request = requestJson } = {}) {
+export async function probeHealth(worker: string, { timeoutMs = WORKER_PROBE_TIMEOUT_MS, request = requestJson }: { timeoutMs?: number; request?: ProbeRequest; } = {}): Promise<Probe> {
   let response;
   try {
     response = await request(`${worker.replace(/\/$/, "")}/health`, { timeoutMs });
@@ -89,7 +89,7 @@ export const WAKE_HINT = "If it is a fleet box that has gone to sleep, wake it f
  * @param {{ worker: string, timeoutMs?: number }} about
  * @returns {string}
  */
-export function describeProbe(probe, { worker, timeoutMs = WORKER_PROBE_TIMEOUT_MS }) {
+export function describeProbe(probe: Probe, { worker, timeoutMs = WORKER_PROBE_TIMEOUT_MS }: { worker: string; timeoutMs?: number; }): string {
   switch (probe.outcome) {
     case "ready": return `${worker} answered and is ready.`;
     case "busy": return `${worker} is up and busy with a capture.`;

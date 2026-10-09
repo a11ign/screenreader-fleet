@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { workerUrls } from "./check-worker-code.mjs";
+import { workerUrls } from "./check-worker-code.ts";
 
 /**
  * `worker:code` reported "no worker is running — nothing to compare" while five bare-metal workers served

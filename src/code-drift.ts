@@ -14,7 +14,7 @@
  * import line in one file, and this file exists to be the copy neither constraint touches: every function
  * below takes `expected` as a plain string, computed by whichever caller can safely reach a hasher.
  *
- * It imports `node:child_process` and, for `readWorkerCode`, this package's own `./worker-http.mjs` —
+ * It imports `node:child_process` and, for `readWorkerCode`, this package's own `./worker-http.ts` —
  * relative, and itself importing nothing but `node:http`/`node:https`, so it resolves without
  * `node_modules` exactly like this file already does. Verified against
  * `control-has-no-dependencies.test.ts` before relying on it, since "should resolve" and "does resolve" are
@@ -28,8 +28,8 @@
  * `packages/control`, which cannot import `worker-code-check.mjs` directly for the reason above.
  */
 import { execFileSync } from "node:child_process";
-import { sandboxGitEnv } from "./git-safe-env.mjs";
-import { requestJson } from "./worker-http.mjs";
+import { sandboxGitEnv } from "./git-safe-env.ts";
+import { requestJson } from "./worker-http.ts";
 
 /** How long a worker gets to answer `/health`. Matches `check-worker-code.mjs`: a cold Windows box needs it. */
 const HEALTH_TIMEOUT_MS = 15_000;
@@ -52,7 +52,10 @@ const HEALTH_TIMEOUT_MS = 15_000;
  * @returns {{expected: string, stale: Array<{worker: string, serving: string}>, unreachable: string[],
  *            answered: number}}
  */
-export function codeDrift(expected, readings) {
+export function codeDrift(expected: string, readings: Array<{ worker: string; code: string | null | undefined; }>): {
+    expected: string; stale: Array<{ worker: string; serving: string; }>; unreachable: string[];
+    answered: number;
+} {
   const stale = [];
   const unreachable = [];
   let answered = 0;
@@ -89,7 +92,7 @@ export function codeDrift(expected, readings) {
  * @param {string[]} bareMetalUrls
  * @returns {string[]}
  */
-export function remedyLines(staleUrls, bareMetalUrls) {
+export function remedyLines(staleUrls: string[], bareMetalUrls: string[]): string[] {
   const bareMetal = new Set(bareMetalUrls);
   const physical = staleUrls.filter((u) => bareMetal.has(u));
   const vms = staleUrls.filter((u) => !bareMetal.has(u));
@@ -119,7 +122,10 @@ export function remedyLines(staleUrls, bareMetalUrls) {
  * @param {{when?: string, bareMetalUrls?: string[], sourceDirty?: string}} options
  * @returns {string|null}
  */
-export function describeCodeDrift(drift, { when = "before the run", bareMetalUrls = [], sourceDirty = "" } = {}) {
+export function describeCodeDrift(drift: {
+        expected: string; stale: Array<{ worker: string; serving: string; }>; unreachable: string[];
+        answered?: number;
+    }, { when = "before the run", bareMetalUrls = [], sourceDirty = "" }: { when?: string; bareMetalUrls?: string[]; sourceDirty?: string; } = {}): string | null {
   // A FLEET NOBODY COULD REACH IS NOT A CLEAN FLEET. `describeEmptyPool` below makes exactly this
   // argument for `workers.length === 0` -- "an affirmative claim about a fleet it had not looked at" --
   // and the identical condition arrives by a second path when the pool is full and every box is silent:
@@ -179,7 +185,7 @@ export function describeCodeDrift(drift, { when = "before the run", bareMetalUrl
 
 /** What a single worker is serving, or `null` when it did not answer. */
 /** @param {string} url */
-export async function readWorkerCode(url) {
+export async function readWorkerCode(url: string) {
   try {
     // `requestJson`, not `fetch` -- see worker-http.mjs's own header: undici silently caps the wait for
     // response headers at ~300 s regardless of an AbortSignal, and this file exists to answer a question
@@ -212,7 +218,7 @@ export async function readWorkerCode(url) {
  *
  * @param {string} sourceDir
  */
-export function workerSourceDirty(sourceDir) {
+export function workerSourceDirty(sourceDir: string) {
   // Outside the `try`: a missing directory is a caller's bug, and the catch below would turn it into "clean".
   if (typeof sourceDir !== "string" || !sourceDir) {
     throw new TypeError("workerSourceDirty needs the worker source directory to read; there is no default");
@@ -245,7 +251,7 @@ export function workerSourceDirty(sourceDir) {
  * @param {string} expected
  * @returns {string | null} the refusal, or null when there is a pool to check
  */
-export function describeEmptyPool(workers, expected) {
+export function describeEmptyPool(workers: string[] | undefined, expected: string): string | null {
   if (workers?.length) return null;
   return "REFUSING to vouch for the fleet: no workers were given, so nothing was compared against this "
     + `checkout (${expected}). A capture dispatches to workers, so an empty pool is a broken invocation `
@@ -272,7 +278,7 @@ export function describeEmptyPool(workers, expected) {
  *
  * @param {{when?: string, allow?: boolean, read?: (url: string) => Promise<string|null>, bareMetalUrls?: string[], sourceDir: string}} options
  */
-export async function assertWorkersServe(expected, workers, options) {
+export async function assertWorkersServe(expected: string, workers: string[], options: { when?: string; allow?: boolean; read?: (url: string) => Promise<string | null>; bareMetalUrls?: string[]; sourceDir: string; }) {
   const { when = "before the run", allow = false, read = readWorkerCode, bareMetalUrls = [], sourceDir } = options;
   if (allow) {
     process.stdout.write("--allow-stale-workers: NOT checking that the fleet runs this checkout.\n");

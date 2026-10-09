@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { codeVersion, workerSourceDir } from "@a11ign/screenreader-worker/code-version";
-import { assertFleetRunsThisCheckout } from "./worker-code-check.mjs";
+import { assertFleetRunsThisCheckout } from "./worker-code-check.ts";
 
 const CHECK = join(import.meta.dirname, "check-worker-code.mjs");
 const CLONE_PATH = "packages/nvda-worker";

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import ts from "typescript";
 import { fileURLToPath } from "node:url";
-import { sourceFiles } from "./source-walk.mjs";
+import { sourceFiles } from "./source-walk.ts";
 
 const MJS_FLOOR = 25;
 const REPOSITORY = resolve(dirname(fileURLToPath(import.meta.url)), "..");

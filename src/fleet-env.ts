@@ -30,9 +30,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { assertWorkerUrl } from "./worker-http.mjs";
+import { assertWorkerUrl } from "./worker-http.ts";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { flagValue, refuseUnknownFlags } from "./cli-flags.mjs";
+import { flagValue, refuseUnknownFlags } from "./cli-flags.ts";
 
 /**
  * its output is `eval`-ed by a shell, so a wrong shape is executed rather than read.
@@ -61,7 +61,7 @@ export const DEFAULT_WORKER_PORT = 8765;
  *
  * @returns {Array<{ name: string, url: string }>}
  */
-export function configuredWorkers() {
+export function configuredWorkers(): Array<{ name: string; url: string; }> {
   const raw = process.env.A11Y_WORKERS ?? process.env.A11Y_WORKER ?? "";
   const named = process.env.A11Y_WORKERS !== undefined ? "A11Y_WORKERS" : "A11Y_WORKER";
   return raw.split(",")
@@ -94,7 +94,7 @@ export function configuredWorkers() {
 // than a hidden module constant -- a caller outside this monorepo (or a test) can supply its own path
 // instead of silently inheriting one that can only ever resolve here.
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const monorepoAnsibleFile = (/** @type {string} */ relative, /** @type {string} */ baseDir = MODULE_DIR) =>
+const monorepoAnsibleFile = (/** @type {string} */ relative: string, /** @type {string} */ baseDir: string = MODULE_DIR) =>
   resolve(baseDir, "..", "..", "control", "ansible", relative);
 const INVENTORY = monorepoAnsibleFile("inventory.yml");
 const GROUP_VARS = monorepoAnsibleFile("group_vars/a11y_workers.yml");
@@ -113,7 +113,7 @@ const GROUP_VARS = monorepoAnsibleFile("group_vars/a11y_workers.yml");
  * @param {{ argv?: readonly string[], baseDir?: string }} [options]
  * @returns {{ inventoryPath: string, groupVarsPath: string }}
  */
-export function inventoryPathsFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR } = {}) {
+export function inventoryPathsFor({ argv = process.argv.slice(2), baseDir = MODULE_DIR }: { argv?: readonly string[]; baseDir?: string; } = {}): { inventoryPath: string; groupVarsPath: string; } {
   const inventoryPath = existingPath({
     flag: "inventory", supplied: flagValue(argv, "inventory"), fallback: monorepoAnsibleFile("inventory.yml", baseDir),
   });
@@ -125,7 +125,7 @@ export function inventoryPathsFor({ argv = process.argv.slice(2), baseDir = MODU
 }
 
 /** @param {{ flag: string, supplied: string | undefined, fallback: string }} path @returns {string} */
-function existingPath({ flag, supplied, fallback }) {
+function existingPath({ flag, supplied, fallback }: { flag: string; supplied: string | undefined; fallback: string; }): string {
   const path = supplied ?? fallback;
   if (existsSync(path)) return path;
   const origin = supplied === undefined ? "the monorepo layout this command defaults to has no such file" : "no such file";
@@ -184,7 +184,7 @@ export const WORKER_GROUP = "a11y_workers";
  * to pattern-match on a name. Reading it from the path means a group added later needs no change here.
  */
 /** @param {Array<string|undefined>} path @returns {string|undefined} */
-function groupOf(path) {
+function groupOf(path: Array<string | undefined>): string | undefined {
   const children = path.indexOf("children");
   return children === -1 ? undefined : path[children + 1];
 }
@@ -197,7 +197,7 @@ function groupOf(path) {
  * only question asked of the path is which group a host is in.
  */
 /** @param {Frame[]} stack @param {string} line */
-function descend(stack, line) {
+function descend(stack: Frame[], line: string) {
   const match = line.match(KEY_LINE);
   if (!match) return;
   const indent = match[1].length;
@@ -217,9 +217,9 @@ function descend(stack, line) {
  * @param {string} text
  * @returns {Array<string | undefined>}
  */
-export function groupPerLine(text) {
+export function groupPerLine(text: string): Array<string | undefined> {
   /** @type {Frame[]} */
-  const stack = [];
+  const stack: Frame[] = [];
   return text.split(/\r?\n/).map((line) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return groupOf(stack.map((f) => f.key));
     if (!HOST_LINE.test(line)) descend(stack, line);
@@ -237,13 +237,13 @@ export function groupPerLine(text) {
  * @param {string} group
  * @returns {Host[]}
  */
-function hostsInGroup(text, group) {
+function hostsInGroup(text: string, group: string): Host[] {
   /** @type {Host[]} */
-  const hosts = [];
+  const hosts: Host[] = [];
   /** @type {Frame[]} */
-  const stack = [];
+  const stack: Frame[] = [];
   /** @type {Map<string, {capture: boolean, line: number}>} */
-  const declared = new Map();
+  const declared: Map<string, { capture: boolean; line: number; }> = new Map();
   text.split(/\r?\n/).forEach((line, index) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return;
     const match = line.match(HOST_LINE);
@@ -279,7 +279,7 @@ function hostsInGroup(text, group) {
  * @param {Map<string, {capture: boolean, line: number}>} declared
  * @param {{line: string, index: number, stack: Frame[]}} at
  */
-function readCaptureDeclaration(declared, { line, index, stack }) {
+function readCaptureDeclaration(declared: Map<string, { capture: boolean; line: number; }>, { line, index, stack }: { line: string; index: number; stack: Frame[]; }) {
   const match = line.match(CAPTURE_LINE);
   const value = match?.[2];
   if (value !== "true" && value !== "false") {
@@ -305,7 +305,7 @@ function readCaptureDeclaration(declared, { line, index, stack }) {
  * @param {string} group
  * @returns {Host[]}
  */
-function applyCaptureDeclarations(hosts, declared, group) {
+function applyCaptureDeclarations(hosts: Host[], declared: Map<string, { capture: boolean; line: number; }>, group: string): Host[] {
   const names = new Set(hosts.map((host) => host.name));
   for (const [owner, { line }] of declared) {
     if (!names.has(owner)) {
@@ -333,7 +333,7 @@ function applyCaptureDeclarations(hosts, declared, group) {
  * @param {{ port?: number, group?: string, scope?: "fleet" | "capture" }} [options]
  * @returns {string[]}
  */
-export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP, scope = "fleet" } = {}) {
+export function workersFromInventory(text: string, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP, scope = "fleet" }: { port?: number; group?: string; scope?: "fleet" | "capture"; } = {}): string[] {
   const hosts = hostsInGroup(text, group);
   const chosen = scope === "capture" ? hosts.filter((host) => host.capture) : hosts;
   if (!chosen.length) {
@@ -351,7 +351,7 @@ export function workersFromInventory(text, { port = DEFAULT_WORKER_PORT, group =
  * @param {{ port?: number, group?: string }} [options]
  * @returns {{name: string, url: string}[]}
  */
-export function hostsOutOfCaptureSet(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
+export function hostsOutOfCaptureSet(text: string, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP }: { port?: number; group?: string; } = {}): { name: string; url: string; }[] {
   return hostsInGroup(text, group)
     .filter((host) => !host.capture)
     .map(({ name, host }) => ({ name: name ?? host, url: `http://${host}:${port}` }));
@@ -367,11 +367,11 @@ export function hostsOutOfCaptureSet(text, { port = DEFAULT_WORKER_PORT, group =
  * @param {{ port?: number, group?: string }} [options]
  * @returns {Record<string, string>}
  */
-export function workerNamesFromInventory(text, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP } = {}) {
+export function workerNamesFromInventory(text: string, { port = DEFAULT_WORKER_PORT, group = WORKER_GROUP }: { port?: number; group?: string; } = {}): Record<string, string> {
   /** @type {Host[]} */
-  const hosts = [];
+  const hosts: Host[] = [];
   /** @type {Frame[]} */
-  const stack = [];
+  const stack: Frame[] = [];
   text.split(/\r?\n/).forEach((line, index) => {
     if (!line.trim() || line.trimStart().startsWith("#")) return;
     const match = line.match(HOST_LINE);
@@ -395,7 +395,7 @@ export function workerNamesFromInventory(text, { port = DEFAULT_WORKER_PORT, gro
  * @param {Host[]} hosts
  * @param {{match: RegExpMatchArray, index: number, stack: Frame[], group: string}} found
  */
-function collectHost(hosts, { match, index, stack, group }) {
+function collectHost(hosts: Host[], { match, index, stack, group }: { match: RegExpMatchArray; index: number; stack: Frame[]; group: string; }) {
   const found = groupOf(stack.map((frame) => frame.key));
   if (found === group) {
     // The inventory NAME comes along with the address. Ansible nests the host as
@@ -418,7 +418,7 @@ function collectHost(hosts, { match, index, stack, group }) {
 
 /** The port the group vars declare, so it is stated once and not guessed here. */
 /** @param {string} text @returns {number} */
-export function portFromGroupVars(text) {
+export function portFromGroupVars(text: string): number {
   const match = text.match(/^\s*a11y_port\s*:\s*(\d+)\s*$/m);
   return match ? Number(match[1]) : DEFAULT_WORKER_PORT;
 }
@@ -439,7 +439,7 @@ export function portFromGroupVars(text) {
  *
  * @param {{ inventoryPath?: string, groupVarsPath?: string }} [paths]
  */
-export function inventoryWorkerUrls({ inventoryPath = INVENTORY, groupVarsPath = GROUP_VARS } = {}) {
+export function inventoryWorkerUrls({ inventoryPath = INVENTORY, groupVarsPath = GROUP_VARS }: { inventoryPath?: string; groupVarsPath?: string; } = {}) {
   try {
     const port = portFromGroupVars(readFileSync(groupVarsPath, "utf8"));
     return workersFromInventory(readFileSync(inventoryPath, "utf8"), { port });
@@ -466,7 +466,7 @@ export function inventoryWorkerUrls({ inventoryPath = INVENTORY, groupVarsPath =
  * @param {{ inventoryPath?: string, groupVarsPath?: string }} [paths]
  * @returns {{name: string, url: string}[]} empty when no inventory is declared, like `inventoryWorkerUrls`
  */
-export function namedInventoryWorkers({ inventoryPath = INVENTORY, groupVarsPath = GROUP_VARS } = {}) {
+export function namedInventoryWorkers({ inventoryPath = INVENTORY, groupVarsPath = GROUP_VARS }: { inventoryPath?: string; groupVarsPath?: string; } = {}): { name: string; url: string; }[] {
   try {
     const port = portFromGroupVars(readFileSync(groupVarsPath, "utf8"));
     const inventory = readFileSync(inventoryPath, "utf8");
@@ -514,7 +514,7 @@ export function namedInventoryWorkers({ inventoryPath = INVENTORY, groupVarsPath
  */
 export function resolveWorkerPool({
   named = configuredWorkers, inventory = inventoryWorkerUrls, local = () => [],
-} = {}) {
+}: { named?: () => { url: string; }[]; inventory?: () => string[]; local?: () => string[]; } = {}): { urls: string[]; source: string; } {
   const configured = named();
   // Naming workers means you are managing them — nothing is started or stopped for you — so an explicit
   // list always wins. That half was already consistent everywhere; it is the fallback below that was not.
@@ -543,7 +543,7 @@ export function resolveWorkerPool({
  * @param {{ port?: number, mode?: "env" | "list" }} [options]
  * @returns {{stdout: string, stderr: string}}
  */
-export function fleetEnvOutput(text, { port = DEFAULT_WORKER_PORT, mode = "env" } = {}) {
+export function fleetEnvOutput(text: string, { port = DEFAULT_WORKER_PORT, mode = "env" }: { port?: number; mode?: "env" | "list"; } = {}): { stdout: string; stderr: string; } {
   if (mode === "list") {
     return { stdout: `${workersFromInventory(text, { port }).join("\n")}\n`, stderr: "" };
   }

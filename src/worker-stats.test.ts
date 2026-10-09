@@ -2,7 +2,7 @@
 // calling a difference real on the strength of one measurement, or of a mean an outlier had moved.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compareWorkers, describe as summarise, quantile, recoveryRates } from "./worker-stats.mjs";
+import { compareWorkers, describe as summarise, quantile, recoveryRates } from "./worker-stats.ts";
 
 const rounds = (n: number, value: number) => Array.from({ length: n }, () => value);
 

@@ -62,7 +62,7 @@ test("`resolveExpectedWorkerCode()` is the hash a BUILT worker package carries, 
 });
 
 test("`resolveExpectedWorkerCode()` answers with the package that is installed, whatever shape that is", async () => {
-  const { resolveExpectedWorkerCode } = await import("./worker-code-check.mjs");
+  const { resolveExpectedWorkerCode } = await import("./worker-code-check.ts");
   const expected = await resolveExpectedWorkerCode({ checkoutRoot: tmpdir() });
   assert.equal(expected.source, "installed");
   assert.match(expected.code, /^[0-9a-f]{16}$/);

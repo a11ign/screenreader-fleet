@@ -14,8 +14,8 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { refuseUnknownFlags } from "./cli-flags.mjs";
-import { warnUtmDeprecated } from "./utm-deprecated.mjs";
+import { refuseUnknownFlags } from "./cli-flags.ts";
+import { warnUtmDeprecated } from "./utm-deprecated.ts";
 
 /**
  * takes no flags: it brings every local guest to one baseline.
@@ -27,13 +27,13 @@ refuseUnknownFlags([], { entry: import.meta.url, command: "npm run fleet:normali
 // A SIBLING in this package, resolved from this module. It was the cwd-relative path `scripts/guest-run.mjs`,
 // which stopped existing when M8 moved the fleet tooling — and was only ever right when the cwd happened to be
 // the repo root.
-const GUEST_RUN = fileURLToPath(new URL("./guest-run.mjs", import.meta.url));
+const GUEST_RUN = fileURLToPath(new URL("./guest-run.ts", import.meta.url));
 
 const run = promisify(execFile);
 const UTMCTL = "/Applications/UTM.app/Contents/MacOS/utmctl";
 
 // Only when RUN, never on import. Unguarded, importing this file SHELLED OUT to `utmctl list` and then
-// drove DISM across every registered guest -- so `node -e "import('./normalise-fleet.mjs')"`, which
+// drove DISM across every registered guest -- so `node -e "import('./normalise-fleet.ts')"`, which
 // CLAUDE.md makes the only real check that this file still loads, normalised the fleet as a side effect.
 //
 // This file has already been broken once by a path that nothing exercised: it read

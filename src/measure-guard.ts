@@ -18,15 +18,15 @@
  * something that does not happen. A measurement script asks the box whether it is free FIRST, and refuses
  * with the reason rather than sampling whatever a busy worker happens to say.
  */
-import { describeProbe, probeHealth, WORKER_PROBE_TIMEOUT_MS } from "./probe-outcome.mjs";
+import { describeProbe, probeHealth, WORKER_PROBE_TIMEOUT_MS } from "./probe-outcome.ts";
 
 /**
  * @param {string[]} workers
- * @param {{ what: string, timeoutMs?: number, request?: import("./probe-outcome.mjs").ProbeRequest }} about
+ * @param {{ what: string, timeoutMs?: number, request?: import("./probe-outcome.ts").ProbeRequest }} about
  *   `what` names the measurement, so a refusal says what was NOT measured; `timeoutMs` and `request` are injectable
  * @returns {Promise<void>} resolves when every worker is free; throws naming the busy ones
  */
-export async function refuseIfBusy(workers, { what, timeoutMs = WORKER_PROBE_TIMEOUT_MS, request }) {
+export async function refuseIfBusy(workers: string[], { what, timeoutMs = WORKER_PROBE_TIMEOUT_MS, request }: { what: string; timeoutMs?: number; request?: import("./probe-outcome.ts").ProbeRequest; }): Promise<void> {
   const states = await Promise.all(workers.map(async (worker) => {
     const probe = await probeHealth(worker, { timeoutMs, request });
     // `ready` is the right field, not `ok`: `ok` only ever meant "the HTTP server is answering", and a
@@ -60,10 +60,10 @@ export const VITALS_TIMEOUT_MS = 20_000;
  * column in the report, and the run used to print none of them.
  *
  * @param {string} worker
- * @param {{ timeoutMs?: number, request?: import("./probe-outcome.mjs").ProbeRequest, warn?: (line: string) => void }} [options]
+ * @param {{ timeoutMs?: number, request?: import("./probe-outcome.ts").ProbeRequest, warn?: (line: string) => void }} [options]
  * @returns {Promise<any>}
  */
-export async function sampleVitals(worker, { timeoutMs = VITALS_TIMEOUT_MS, request, warn = () => {} } = {}) {
+export async function sampleVitals(worker: string, { timeoutMs = VITALS_TIMEOUT_MS, request, warn = () => {} }: { timeoutMs?: number; request?: import("./probe-outcome.ts").ProbeRequest; warn?: (line: string) => void; } = {}): Promise<any> {
   const probe = await probeHealth(worker, { timeoutMs, request });
   if (probe.outcome === "refused" || probe.outcome === "no-answer") {
     warn(`  no vitals sampled: ${describeProbe(probe, { worker, timeoutMs })}\n`);

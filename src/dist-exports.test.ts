@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { missingExportTargets } from "./doctor.mjs";
+import { missingExportTargets } from "./doctor.ts";
 
 // `doctor`'s dist-freshness check reads what Rslib's output IS, the files `exports` promises, rather than asking `tsc --build --dry` (a11ign/a11ign#3810):
 // a package built by Rslib has a `noEmit` tsconfig, so tsc has no output to call up to date. These cases are the check's own controls: a built package

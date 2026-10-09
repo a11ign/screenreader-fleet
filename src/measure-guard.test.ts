@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 
-import { refuseIfBusy } from "./measure-guard.mjs";
+import { refuseIfBusy } from "./measure-guard.ts";
 
 async function worker(health: Record<string, unknown> | null) {
   const s: Server = createServer((_req, res: ServerResponse) => {
@@ -97,7 +97,7 @@ test("a MEASUREMENT tool refuses a busy box, rather than sampling it", () => {
   const root = resolve(import.meta.dirname, "..");
   const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   // Tools whose whole output is per-worker timing. A number taken from a busy box is not slow, it is wrong.
-  const MEASURERS = ["src/compare-workers.mjs"];
+  const MEASURERS = ["src/compare-workers.ts"];
   const unguarded = MEASURERS.filter((file) =>
     !/\brefuseIfBusy\s*\(/.test(strip(readFileSync(resolve(root, file), "utf8"))));
   assert.ok(MEASURERS.length > 0,

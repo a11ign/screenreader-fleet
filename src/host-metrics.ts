@@ -57,11 +57,11 @@ const BYTES_PER_MB = 1024 * 1024;
  *
  * @param {string} output
  */
-export function parseVmStat(output) {
+export function parseVmStat(output: string) {
   const pageSize = Number(/page size of (\d+) bytes/.exec(output)?.[1]);
   if (!Number.isFinite(pageSize)) return null;
-  const pages = (/** @type {string} */ label) => Number(new RegExp(`${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
-  const mb = (/** @type {string} */ label) => Math.round((pages(label) * pageSize) / BYTES_PER_MB);
+  const pages = (/** @type {string} */ label: string) => Number(new RegExp(`${label}:\\s+(\\d+)`).exec(output)?.[1] ?? 0);
+  const mb = (/** @type {string} */ label: string) => Math.round((pages(label) * pageSize) / BYTES_PER_MB);
   return {
     freeMb: mb("Pages free"),
     activeMb: mb("Pages active"),
@@ -84,7 +84,7 @@ export function parseVmStat(output) {
  * @param {string} output
  * @returns {Array<{device: string, kbPerTransfer: number, transfersPerSecond: number, mbPerSecond: number}>}
  */
-export function parseIostat(output) {
+export function parseIostat(output: string): Array<{ device: string; kbPerTransfer: number; transfersPerSecond: number; mbPerSecond: number; }> {
   const lines = String(output).trim().split(/\r?\n/);
   const header = lines.findIndex((l) => /^\s*disk/.test(l));
   if (header === -1) return [];
@@ -105,7 +105,7 @@ export function parseIostat(output) {
  * Load averages, or null.
  * @param {string} output
  */
-export function parseLoadAverage(output) {
+export function parseLoadAverage(output: string) {
   const m = /([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(String(output));
   return m ? { one: Number(m[1]), five: Number(m[2]), fifteen: Number(m[3]) } : null;
 }
@@ -117,7 +117,7 @@ export function parseLoadAverage(output) {
  * @param {string} psOutput output of `ps -o pid=,rss=,comm=`
  * @param {string} match substring of the command to keep
  */
-export function parseProcessMemory(psOutput, match) {
+export function parseProcessMemory(psOutput: string, match: string) {
   // `flatMap` rather than map -> filter -> map. The old shape checked `m &&` and was correct at runtime,
   // but a filter cannot narrow a type for the two lines after it, so every field access read as a
   // possible null. Doing the match and the decision in one place needs no narrowing to explain.
@@ -128,7 +128,7 @@ export function parseProcessMemory(psOutput, match) {
   });
 }
 
-const run = (/** @type {string} */ cmd, /** @type {string[]} */ args) => {
+const run = (/** @type {string} */ cmd: string, /** @type {string[]} */ args: string[]) => {
   try {
     return execFileSync(cmd, args, { encoding: "utf8", timeout: 15_000 });
   } catch {
@@ -145,7 +145,7 @@ const run = (/** @type {string} */ cmd, /** @type {string[]} */ args) => {
  *
  * @param {{ processMatch?: string }} options
  */
-export function sampleHost({ processMatch = "QEMU" } = {}) {
+export function sampleHost({ processMatch = "QEMU" }: { processMatch?: string; } = {}) {
   const memory = parseVmStat(run("vm_stat", []));
   return {
     at: new Date().toISOString(),
@@ -179,13 +179,13 @@ export function sampleHost({ processMatch = "QEMU" } = {}) {
  * @param {number | null} fallback
  * @returns {number | null}
  */
-const reading = (snapshot, field, fallback) => snapshot?.memory?.[field] ?? fallback;
+const reading = (snapshot: HostSnapshot, field: string, fallback: number | null): number | null => snapshot?.memory?.[field] ?? fallback;
 
 /**
  * @param {HostSnapshot} before
  * @param {HostSnapshot} after
  */
-export function diffHost(before, after) {
+export function diffHost(before: HostSnapshot, after: HostSnapshot) {
   // `?? 0` at the call, so these two stay plain numbers: a delta of two absent readings is 0, which is
   // what "the host did not swap" has always meant here. `compressorMb` and `freeMb` below keep null,
   // because an ABSENT reading and a reading of zero are different facts about the host and this file's

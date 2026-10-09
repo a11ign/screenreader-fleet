@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { controlPlaneIsolation } from "./control-plane-isolation.mjs";
+import { controlPlaneIsolation } from "./control-plane-isolation.ts";
 
 test("THE MEASURED VIOLATION is reported, and the message says what it costs", () => {
   const v = controlPlaneIsolation({ hasNodeModules: true, hasFleetKey: true, packages: 121 });

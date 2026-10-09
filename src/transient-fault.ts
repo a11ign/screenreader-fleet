@@ -72,7 +72,7 @@ const TRANSIENT_NETWORK_CODES = new Set([
  * @param {unknown} error  anything a failed request threw — a node:http Error, an undici one, a string
  * @returns {boolean}
  */
-export function isTransient(error) {
+export function isTransient(error: unknown): boolean {
   const failure = /** @type {{ code?: string, cause?: { code?: string }, message?: string }} */ (error);
   // Prefer the code. The regex below is the fallback for older workers and for host-side failures
   // (a dropped socket has no fault code), but a message is prose and prose gets reworded — see

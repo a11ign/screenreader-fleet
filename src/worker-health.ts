@@ -38,7 +38,7 @@
  * @param {{ busy?: boolean, ready?: boolean } | null | undefined} health
  * @returns {boolean}
  */
-export function workerIsUsable(health) {
+export function workerIsUsable(health: { busy?: boolean; ready?: boolean; } | null | undefined): boolean {
   if (!health) return false;
   return !health.busy && health.ready !== false;
 }
@@ -53,7 +53,7 @@ const DEGRADED_RECOVERY_SHARE = 0.5;
  * @param {{ captures?: number, recoveries?: number, failures?: number } | null | undefined} vitals
  * @returns {{ degraded: boolean, reason: string | null, recoveryShare: number | null }}
  */
-export function assessWorker(vitals) {
+export function assessWorker(vitals: { captures?: number; recoveries?: number; failures?: number; } | null | undefined): { degraded: boolean; reason: string | null; recoveryShare: number | null; } {
   const captures = vitals?.captures ?? 0;
   const recoveries = vitals?.recoveries ?? 0;
   // Recoveries are counted per capture served, so the share can exceed nothing sensible above 1.

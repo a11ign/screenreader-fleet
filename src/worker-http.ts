@@ -126,7 +126,7 @@ export const KEEPALIVE_DELAY_MS = 15_000;
  * @param {{ source?: string }} [options] what to name in the error, e.g. "--worker"
  * @returns {string} the address, trailing slash removed
  */
-export function assertWorkerUrl(value, { source = "--worker" } = {}) {
+export function assertWorkerUrl(value: string | null | undefined, { source = "--worker" }: { source?: string; } = {}): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`${source} is required and was empty. Give a worker address, e.g. ${source}=http://192.0.2.10:8765`);
   }
@@ -164,7 +164,7 @@ export function assertWorkerUrl(value, { source = "--worker" } = {}) {
  *   strictly worse than saying the value is untyped. The SHAPE that matters is checked where it is
  *   defined: `capture-core`'s `Capture` typedef, and the worker's own `/health` contract.
  */
-export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = {}) {
+export function requestJson(url: string, { method = "GET", body, timeoutMs = 30_000 }: { method?: string; body?: unknown; timeoutMs?: number; } = {}): Promise<{ status: number; ok: boolean; text: string; json: any; }> {
   const target = new URL(url);
   const send = target.protocol === "https:" ? httpsRequest : httpRequest;
   const payload = body === undefined ? null : JSON.stringify(body);
@@ -196,7 +196,7 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
     }, timeoutMs);
 
     /** @param {unknown} error */
-    function failWith(error) {
+    function failWith(error: unknown) {
       clearTimeout(deadline);
       reject(error);
     }
@@ -248,7 +248,7 @@ export function requestJson(url, { method = "GET", body, timeoutMs = 30_000 } = 
 }
 
 /** @param {string | null} payload */
-function requestHeaders(payload) {
+function requestHeaders(payload: string | null) {
   if (payload === null) return { accept: "application/json" };
   return {
     accept: "application/json",
@@ -264,11 +264,11 @@ function requestHeaders(payload) {
  * @param {import("node:http").IncomingMessage} res
  * @returns {Promise<string>}
  */
-function collect(res) {
+function collect(res: import("node:http").IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let text = "";
     res.setEncoding("utf8");
-    res.on("data", (/** @type {string} */ chunk) => { text += chunk; });
+    res.on("data", (/** @type {string} */ chunk: string) => { text += chunk; });
     res.on("end", () => resolve(text));
     res.on("error", reject);
   });
@@ -278,7 +278,7 @@ function collect(res) {
  * Parsed JSON, or undefined — a worker error page is not a parse failure worth throwing over.
  * @param {string} text
  */
-function parse(text) {
+function parse(text: string) {
   try {
     return JSON.parse(text);
   } catch {

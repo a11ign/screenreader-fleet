@@ -3,7 +3,7 @@
 // each test pins a mistake that was actually made or narrowly avoided.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseVmStat, parseIostat, parseLoadAverage, parseProcessMemory, diffHost } from "./host-metrics.mjs";
+import { parseVmStat, parseIostat, parseLoadAverage, parseProcessMemory, diffHost } from "./host-metrics.ts";
 
 const VM_STAT = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
 Pages free:                                6553.

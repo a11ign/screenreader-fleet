@@ -15,7 +15,7 @@ export {
 } from "./local-vm.js";
 export type { AfterRun, WorkerLease, PoolLease } from "./local-vm.js";
 
-import { fleetScriptPaths as scriptPaths } from "./fleet-scripts.mjs";
+import { fleetScriptPaths as scriptPaths } from "./fleet-scripts.ts";
 
 /**
  * The provisioning and lifecycle scripts, as absolute paths.

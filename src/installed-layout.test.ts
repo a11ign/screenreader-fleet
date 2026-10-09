@@ -7,9 +7,9 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { checkControlPlaneIsolation, checkCrossPackageDist, checkJudge, checkPrimaryCheckoutMark, recordedChecks,
-  runsDirFor } from "./doctor.mjs";
-import { outDirFor } from "./compare-workers.mjs";
-import { inventoryPathsFor } from "./fleet-env.mjs";
+  runsDirFor } from "./doctor.ts";
+import { outDirFor } from "./compare-workers.ts";
+import { inventoryPathsFor } from "./fleet-env.ts";
 
 /**
  * `doctor`, `compare-workers` and `fleet-env` take the paths they read from the CALLER, and refuse naming the missing one
