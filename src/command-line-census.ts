@@ -20,14 +20,14 @@
  * A CONSUMER OF THIS FILE ALREADY HAS `node_modules` AND A BUILD. `cli-flags.mjs` itself deliberately
  * imports nothing but `node:path`/`node:fs`/`node:url`, because scripts like `auto-arm-sweep.mjs` are
  * invoked by a workflow job with only `actions/checkout` -- no `npm ci`, no `dist` (#330/#331). This file
- * is NOT that kind of dependency: `stripComments` is a real workspace import
- * (`@a11ign/evidence/source-text`), so anything importing THIS module needs to run where that package's
+ * is NOT that kind of dependency: `stripComments` is a real package import
+ * (`@a11ign/toolchain/lib/source-text`), so anything importing THIS module needs to run where that package's
  * `dist` exists -- a test file, or tooling invoked after `npm run build`. Keeping `cli-flags.mjs` itself
  * free of that import is why this is a sibling file rather than an addition to it.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { stripComments } from "@a11ign/evidence/source-text";
+import { stripComments } from "@a11ign/toolchain/lib/source-text";
 
 /**
  * Every top-level directory a `.mjs` command line can live under, relative to `repoRoot`, which is the CORE's checkout (`a11ign/a11ign`):
