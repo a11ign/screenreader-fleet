@@ -1,5 +1,37 @@
 # @a11ign/screenreader-fleet
 
+## 0.7.2
+
+### Patch Changes
+
+- 974a466: `cli-flags` imports no package again, so the eight `control` modules that import it by relative path (`fleet-auto-off`, `fleet-discover`, `fleet-playbook`, `fleet-status`, `fleet-wake`, `lab-failed-units`, `lab-pipeline`, `post-qualification-status`) load from a raw checkout with no `npm install`. 0.5.0 made `src/cli-flags.ts` a re-export of `@a11ign/toolchain/lib/cli-flags` and 0.7.1 fixed only `fleet-env.ts`, so those eight died loading with `ERR_MODULE_NOT_FOUND`. `src/cli-flags.ts` is again an in-package copy (`didYouMean`, `flagValue`, `nameOf`, `refuseUnknownFlags`, `unknownFlags`, `node:` built-ins only); the toolchain copy stays the one every other consumer uses, and `fleet-env.test.ts` pins that the two reach the same answer and the same refusal. The published `./cli-flags` subpath is built from this file, so it is now the in-package copy rather than a re-export; its exports and signatures are unchanged.
+
+## 0.7.1
+
+### Patch Changes
+
+- ae14758: `fleet-env` loads from a raw checkout with no `npm install` again. 0.7.0 made `cli-flags.ts` a re-export of `@a11ign/toolchain/lib/cli-flags` and `fleet-env.ts` still imported it, so `control` (which imports `fleet-env` by path, ADR 0012) died loading the laid fleet with `ERR_MODULE_NOT_FOUND`. `fleet-env.ts` now imports no package: it reads `--inventory=`/`--group-vars=` with its own four-line `flagValue` and refuses an unknown flag from `main()`, the CLI-entry path, with the same verdict and exit code 2 as the toolchain's guard (a test pins that the two agree on every flag shape). Importing it as a library never inspects the importer's flags, as before. New export: `unknownFlagsOf`. The `./cli-flags` subpath is unchanged and still the toolchain's copy.
+
+## 0.7.0
+
+### Minor Changes
+
+- 5e53b92: `@a11ign/screenreader-fleet/cli-flags` re-exports `@a11ign/toolchain/lib/cli-flags` instead of carrying its own copy of `refuseUnknownFlags`, `unknownFlags`, `didYouMean`, `flagValue` and `nameOf`, so the guard has one source (#4425). The subpath and its five names are unchanged for the lab and control. `@a11ign/toolchain` (0.5.0) moves from `devDependencies` to `dependencies`: a consumer of `cli-flags` now installs it at run time, and it declares `node >=22.15.0`.
+
+### Patch Changes
+
+- 49d9549: `a11ign-worker-code` and every capture's `assertFleetRunsThisCheckout` no longer throw on a layer clone laid at `@a11ign/screenreader-worker` 0.9.0 or later. The expected hash is the clone's own hasher over the clone's `src/`, and the hasher is `code-version.ts` there: the check imported `code-version.mjs` unconditionally, so it died with `Cannot find module …/packages/nvda-worker/src/code-version.mjs`. It now asks `code-version.ts` first and falls back to `code-version.mjs`, because `--layer-ref` can still deploy a guest at a layer sha from before the move to TypeScript. A clone holding neither is refused naming both files, never answered for by the installed copy.
+
+## 0.6.0
+
+### Minor Changes
+
+- 798a5f5: `fleetConsistency` compares `windowsBuild` (`<build>.<ubr>`, what the worker reports on `/health`) in its `REPORTED_ONLY` channel, so two boxes one cumulative update apart are named as drifting even though they share a `windowsVersion`. It gates nothing: `consistent` is unchanged by it, and it reads `unreported` on every box until a worker that carries the field is released and deployed. It graduates to `MUST_MATCH` once the fleet reads one value (#4405).
+
+### Patch Changes
+
+- 97f0c7a: The package's source is TypeScript: its 32 `.mjs` (the 29 modules under `src/`, plus `eslint.config`, `rstest.config`, `rslib.config` and `isolation-smoke`) became `.ts` by the toolchain's `js-to-ts`, and the repository's `mjs-ratchet.baseline.json` is empty, so a new `.js`, `.mjs` or `.cjs` fails the ratchet. Published files, `exports` subpaths and `bin` commands are unchanged; the `types` condition of each subpath now names `./dist/<name>.d.ts` instead of `.d.mts`, because Rslib declares a `.ts` source as `.d.ts`. `@a11ign/toolchain` moves to 0.3.1 (its base tsconfig carries `erasableSyntaxOnly` and `rewriteRelativeImportExtensions`), and `jiti` (ESLint reads `eslint.config.ts` through it) and `tsx` (the tests that start a source file as a child process run it under `node --import`) are dev dependencies. The 68 `any` the script wrote where the JSDoc named no type are warnings in six files, not errors.
+
 ## 0.1.0
 
 ### Minor Changes
