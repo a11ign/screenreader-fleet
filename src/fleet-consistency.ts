@@ -160,6 +160,16 @@ export const REPORTED_ONLY = [
   { path: "windowsBuild", why: "two boxes one cumulative update apart share a `windowsVersion` and are not the " +
       "same Windows; the revision (`CurrentBuild.UBR`) is what tells them apart. NOT a gate yet: it graduates " +
       "to MUST_MATCH once the fleet reads one value (#4433, #4405)" },
+  // The Edge updater is disabled by provisioning and RE-disabled by an elevated guard task; the worker runs
+  // unelevated and cannot read the updater's tasks, so it reports the guard's own record instead (#5021). Only the
+  // `state` is compared: the record's `checkedAt` differs on every box by construction, and comparing the whole
+  // object would call a healthy fleet drifted. THE EXIT is the same waiting room as `windowsBuild`: it is not a gate
+  // while workers carrying the field are still being deployed, and a re-enabled updater is what the fleet's
+  // drift report (the row after this one) will name from these readings (#4405).
+  { path: "edgeUpdaterGuard.state", why: "a box whose Edge updater came back is one auto-update away from a " +
+      "different browser than its peers: the guard task re-disables it every 15 minutes and records what it had to " +
+      "change, and `stale` or `absent` is a guard that is not running or not yet provisioned. NOT a gate yet: " +
+      "reported until the fleet's workers carry the field and the guard (#5021, #4405)" },
 ];
 
 /**
@@ -254,7 +264,7 @@ function readField(present: Guest[], { field, why, source, key }: {
     // one this list exists to surface.
     if (block === undefined || block === null) continue;
     asked += 1;
-    const value = block[key];
+    const value = valueAt(block, key);
     // Absent is not a mismatch: an older worker that does not report a field must not be flagged
     // against newer ones. Only DIFFERING known values are evidence of drift.
     if (value !== undefined && value !== null) {
@@ -263,6 +273,16 @@ function readField(present: Guest[], { field, why, source, key }: {
     }
   }
   return { field, why, values, reported, asked };
+}
+
+/**
+ * `a.b` is `block.a.b` (#5021: `edgeUpdaterGuard.state`, because the worker sends the guard's whole record and only
+ * its `state` is comparable). A segment that is missing, `null` or not an object ends the walk at `undefined`,
+ * which reads as "not reported" -- the same answer an older worker that sends nothing gets.
+ */
+function valueAt(block: Record<string, unknown>, key: string): unknown {
+  return key.split(".").reduce<unknown>(
+    (value, segment) => (value as Record<string, unknown> | null | undefined)?.[segment], block);
 }
 
 /** How many distinct values the guests actually gave for one field. @param {Reading} reading */
