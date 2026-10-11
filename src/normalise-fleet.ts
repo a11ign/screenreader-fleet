@@ -9,8 +9,10 @@
 // the same class of problem as a mixed OS image -- the cache key cannot see it, and the evidence is
 // quietly heterogeneous.
 //
-// Runs scripts/guest/normalise-fleet.cmd on each guest through guest-run.mjs, which is the only
+// Runs src/guest/normalise-fleet.cmd on each guest through guest-run.mjs, which is the only
 // channel that can do elevated work on these VMs (see that file for why the obvious ones cannot).
+import { realpathSync } from "node:fs";
+import { extname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -26,8 +28,23 @@ refuseUnknownFlags([], { entry: import.meta.url, command: "npm run fleet:normali
 
 // A SIBLING in this package, resolved from this module. It was the cwd-relative path `scripts/guest-run.mjs`,
 // which stopped existing when M8 moved the fleet tooling — and was only ever right when the cwd happened to be
-// the repo root.
-const GUEST_RUN = fileURLToPath(new URL("./guest-run.ts", import.meta.url));
+// the repo root. The extension is THIS module's own: `.ts` from `src` (`node src/normalise-fleet.ts`), `.mjs` once built into `dist`,
+// where no `.ts` ships (`a11ign-normalise-fleet` is that built file, so `./guest-run.ts` would name a file the tarball does not hold).
+const GUEST_RUN = fileURLToPath(new URL(`./guest-run${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+
+// Resolved from THIS module, never the cwd. It read `scripts/guest/normalise-fleet.cmd` -- a path the packages/ restructure moved and
+// nothing noticed, so `npm run fleet:normalise` was broken, and doctor printed it as the FIX for a failed consistency check. A path spelled
+// relative to the working directory breaks the moment anyone runs the command from somewhere else.
+//
+// `../src/guest/`, NOT `./guest/`: the `.cmd` is not JavaScript, so the build does not copy it into `dist` and it ships from `src`
+// (`files` names `src/guest`). From `src/normalise-fleet.ts` and from `dist/normalise-fleet.mjs` the two are one level below the package
+// root, which is what makes one spelling right for both; the same reason `fleet-scripts.ts` spells `../src/local-worker/`.
+const GUEST_SCRIPT = fileURLToPath(new URL("../src/guest/normalise-fleet.cmd", import.meta.url));
+
+/** The two files this command hands to each guest, absolute: what `bins-published.test.ts` reads from `src` and from `dist`. */
+export function guestPaths(): { guestRun: string; script: string } {
+  return { guestRun: GUEST_RUN, script: GUEST_SCRIPT };
+}
 
 const run = promisify(execFile);
 const UTMCTL = "/Applications/UTM.app/Contents/MacOS/utmctl";
@@ -53,17 +70,12 @@ async function main() {
     process.exit(2);
   }
 
-  // Resolved from THIS module, never the cwd. It read `scripts/guest/normalise-fleet.cmd` -- a path the
-  // packages/ restructure moved and nothing noticed, so `npm run fleet:normalise` has been broken, and
-  // doctor printed it as the FIX for a failed consistency check. A path spelled relative to the working
-  // directory is a path that breaks the moment anyone runs the command from somewhere else.
-  const script = fileURLToPath(new URL("./guest/normalise-fleet.cmd", import.meta.url));
   const failures = [];
   for (const vm of vms) {
     // One at a time. Three guests doing DISM and service work simultaneously is exactly the disk
     // contention this project spent a day diagnosing.
     try {
-      const { stdout: out } = await run("node", [GUEST_RUN, vm.name, script, "--timeout=900"],
+      const { stdout: out } = await run("node", [GUEST_RUN, vm.name, GUEST_SCRIPT, "--timeout=900"],
         { maxBuffer: 1 << 24 });
       process.stdout.write(out);
     } catch (error) {
@@ -78,4 +90,6 @@ async function main() {
   if (failures.length) process.exit(1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await main();
+// REALPATH'D, as `check-worker-code.ts`'s is: `import.meta.url` is resolved through symlinks and `process.argv[1]` is not, and npm installs a
+// bin as a `.bin` symlink, so the bare comparison read false for `a11ign-normalise-fleet` and the command loaded, did nothing and exited 0.
+if (import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href) await main();

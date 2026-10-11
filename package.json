@@ -58,10 +58,13 @@
     "a11ign-doctor": "./dist/doctor.mjs",
     "a11ign-worker-code": "./dist/check-worker-code.mjs",
     "a11ign-worker-compare": "./dist/compare-workers.mjs",
+    "a11ign-guest-run": "./dist/guest-run.mjs",
+    "a11ign-normalise-fleet": "./dist/normalise-fleet.mjs",
     "a11ign-worker-ctl": "./src/local-worker/worker-ctl.sh"
   },
   "files": [
     "dist",
+    "src/guest",
     "src/local-worker",
     "src/provisioning",
     "README.md",
