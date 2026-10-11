@@ -1,4 +1,4 @@
-The fleet reports the Edge-updater guard's state (a11ign#5021, item 3 of a11ign#4405), the second pull request on the row: `fleetConsistency` lists `edgeUpdaterGuard.state` in `REPORTED_ONLY` beside `windowsBuild`, so `fleetStatus` hands it to `fleet-watch` in `reportedOnly` and a box whose updater came back (`drift`), whose guard stopped (`stale`) or was never provisioned (`absent`) is named against its peers. The worker's half is a11ign/screenreader-worker#45. Only the guard's `state` is compared (the record's `checkedAt` differs on every box), so `readField` now walks a dotted key (`a.b`); a missing, `null` or non-object segment reads as "not reported".
+The fleet reports the Edge-updater guard's state (a11ign#5021, item 3 of a11ign#4405), the second pull request on the row (it declares `Closes: none`, and the worker's pull request closes the row): `fleetConsistency` lists `edgeUpdaterGuard.state` in `REPORTED_ONLY` beside `windowsBuild`, so `fleetStatus` hands it to `fleet-watch` in `reportedOnly` and a box whose updater came back (`drift`), whose guard stopped (`stale`) or was never provisioned (`absent`) is named against its peers. The worker's half is a11ign/screenreader-worker#45. Only the guard's `state` is compared (the record's `checkedAt` differs on every box), so `readField` now walks a dotted key (`a.b`); a missing, `null` or non-object segment reads as "not reported".
 
 Acceptance:
 
@@ -13,4 +13,4 @@ Mutation: each break turned its own test(s) red (5 mutations, each restored byte
 
 Not verified here: a live fleet reading. The comparison is run for real over fixture guests; no worker carries the field until the worker's pull request is released and deployed, so every box reads `unreported` today. A uniform non-`ok` state across the whole fleet (every guard `absent`, say) is agreement and so is not named in `reportedOnly`: that is the drift report's reading to take from the values (the row after this one), not this channel's.
 
-Closes a11ign/a11ign#5021
+Closes: none — the second half of a11ign/a11ign#5021; a11ign/screenreader-worker#45, the half that sends the field, carries the `Closes`.
