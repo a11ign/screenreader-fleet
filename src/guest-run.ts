@@ -29,7 +29,7 @@
 //      no output -- and the child never ran. A scheduled task survives because the Task Scheduler
 //      service owns it.
 import { execFile } from "node:child_process";
-import { createReadStream, readFileSync, existsSync } from "node:fs";
+import { createReadStream, readFileSync, existsSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -167,7 +167,10 @@ async function main() {
 // `my-guest-run.mjs`, a copy under another directory -- would have run this file's main instead of its own.
 // Every other entry point in this repo now uses the exact comparison; one idiom, so there is one thing to
 // get right.
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+//
+// REALPATH'D, as `check-worker-code.ts`'s is: `process.argv[1]` is not resolved through symlinks and `import.meta.url` is, and npm installs
+// the `a11ign-guest-run` bin as a `.bin` symlink, so without `realpathSync` the command loaded, did nothing and exited 0.
+if (import.meta.url === pathToFileURL(process.argv[1] ? realpathSync(process.argv[1]) : "").href) {
   main().catch((error) => {
     process.stderr.write(`guest-run failed: ${error.message}\n`);
     process.exit(1);
