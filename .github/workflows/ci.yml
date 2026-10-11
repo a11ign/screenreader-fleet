@@ -84,8 +84,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # Two commits: HEAD and its first parent, which is all `touched` compares. No credential is kept: nothing here pushes.
-          fetch-depth: 2
+          # FULL HISTORY, as the release's own `version` job checks out (`fetch-depth: 0`): `changeset version` asks git which commit added each changeset file and, on a
+          # shallow clone, never returns (measured: a depth-1 clone of a depth-2 checkout spun at full CPU until killed at 90 s; the same tree cloned from full history ran in 1 s).
+          # `touched` needs only HEAD and its first parent. No credential is kept: nothing here pushes.
+          fetch-depth: 0
           persist-credentials: false
       - name: Does the change touch what the release installs from?
         id: touched
@@ -112,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           scratch="$RUNNER_TEMP/release-dry-run"
-          git clone --quiet --depth=1 "file://$GITHUB_WORKSPACE" "$scratch"
+          git clone --quiet "file://$GITHUB_WORKSPACE" "$scratch"
           cd "$scratch"
           pnpm install --frozen-lockfile
           pnpm exec changeset version
