@@ -52,6 +52,22 @@
     "./worker-code-check": {
       "types": "./dist/worker-code-check.d.ts",
       "default": "./dist/worker-code-check.mjs"
+    },
+    "./git-safe-env": {
+      "types": "./dist/git-safe-env.d.ts",
+      "default": "./dist/git-safe-env.mjs"
+    },
+    "./protocol-guard": {
+      "types": "./dist/protocol-guard.d.ts",
+      "default": "./dist/protocol-guard.mjs"
+    },
+    "./npm-cli-executable": {
+      "types": "./dist/npm-cli-executable.d.ts",
+      "default": "./dist/npm-cli-executable.mjs"
+    },
+    "./code-drift": {
+      "types": "./dist/code-drift.d.ts",
+      "default": "./dist/code-drift.mjs"
     }
   },
   "bin": {
