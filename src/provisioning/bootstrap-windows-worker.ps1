@@ -429,10 +429,10 @@ Step 5 'Pin Edge and stop its updater — BEFORE the box has time to update itse
 #
 # ORDER IS THE WHOLE OF IT. Stop the updater first, then install. Doing it the other way leaves a live
 # updater to finish the update it had already started, in the window between installing and believing it.
-$EdgeVersion = if ($env:A11Y_EDGE_VERSION) { $env:A11Y_EDGE_VERSION } else { '152.0.4191.66' }
+$EdgeVersion = if ($env:A11Y_EDGE_VERSION) { $env:A11Y_EDGE_VERSION } else { '155.0.4283.45' }
 $EdgeExe     = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
-$EdgeMsiUrl  = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/2757513f-2ec6-4bb1-b23a-5738a92d7a56/MicrosoftEdgeEnterpriseX64.msi'
-$EdgeMsiSha  = '5bcf8cd57351ddaa94419f800f8d90b8cbaf2b485b49d9ddb07d055b76a518df'
+$EdgeMsiUrl  = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/2e772119-b856-4562-ad9a-8422e4224d42/MicrosoftEdgeEnterpriseX64.msi'
+$EdgeMsiSha  = '46db09d14b85a0df8bca87fbe9c3224ccf54f97d776bedc2eebf4b0c2ccbf5b4'
 
 # BY PREFIX, NOT BY NAME. The role learned this: a freshly installed guest carried a third task,
 # `MicrosoftEdgeUpdateBrowserReplacementTask`, sitting Ready while the two known ones were disabled. A task
