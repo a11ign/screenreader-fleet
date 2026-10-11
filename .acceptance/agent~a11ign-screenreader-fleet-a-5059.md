@@ -7,7 +7,7 @@
 
 ## The consumer's-install step is dropped, as the row allowed
 
-agent-org#967's second step reproduces a11ign's `agent-org-newest-tag`, which clones an agent-org TAG and runs `pnpm install --frozen-lockfile --ignore-scripts`. Nothing clones a tag of this repository: it is published to npm (`kind: npm`) and a11ign consumes `@a11ign/screenreader-fleet` from the registry (`"@a11ign/screenreader-fleet": "^0.7.3"` in a11ign's root `package.json`; measured by `git grep` of a11ign `main` at this date, `agent-org-newest-tag` is named only in agent-org-tool files). So there is no install to reproduce here.
+agent-org#967's second step reproduces a11ign's `agent-org-newest-tag`, which clones an agent-org TAG and runs `pnpm install --frozen-lockfile --ignore-scripts`. Nothing clones a tag of this repository: it is published to npm (`kind: npm`) and a11ign consumes `@a11ign/screenreader-fleet` from the registry (`"@a11ign/screenreader-fleet": "^0.7.3"` in a11ign's root `package.json`), and `scripts/agent-org-newest-tag.ts` in a11ign takes its repository from the constant `TOOL_REPO_URL = "https://github.com/a11ign/agent-org"` (read at a11ign's `main` in this session). So there is no install of a tag of this repository to reproduce here.
 
 ## Evidence (measured, in a scratch clone of this branch's parent, with pnpm 10.34.5 and Node 24 locally)
 
