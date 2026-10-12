@@ -73,9 +73,9 @@ export async function probeHealth(worker: string, { timeoutMs = WORKER_PROBE_TIM
     reason: response.json?.reason ?? "/health answered without `ready: true` and without a reason" };
 }
 
-/** How to wake a box from a checkout of this repo. The published entries do not do it themselves. */
-export const WAKE_HINT = "If it is a fleet box that has gone to sleep, wake it from a checkout of the a11ign repo with "
-  + "`npm run fleet:wake -- <name>` (<name> is its entry in inventory.yml).";
+/** How to wake a box from a checkout of control, which holds `fleet:wake`. The published entries do not do it themselves. */
+export const WAKE_HINT = "If it is a fleet box that has gone to sleep, wake it from a checkout of `a11ign/control` with "
+  + "`pnpm run fleet:wake -- <name>` (<name> is its entry in control's `ansible/inventory.yml`).";
 
 /**
  * One sentence per outcome, in the words of what was OBSERVED. Only `refused`, `not-ready` and `busy` say the box is
