@@ -4,4 +4,4 @@
 - **Test:** no test pins the sentence (`git grep WAKE_HINT` finds the definition and one use), so the check is the grep pair below, not a test that goes red before and green after.
 - **Mutation:** restoring the old text makes the first count 1 and the Acceptance exit 1.
 
-Acceptance: test "$(grep -c 'a checkout of the a11ign repo' src/probe-outcome.ts)" = 0 && test "$(grep -c 'fleet[:]wake -- <name>' src/probe-outcome.ts)" = 1
+Acceptance: node -e "const s=require('fs').readFileSync('src/probe-outcome.ts','utf8');if(s.includes('a checkout of the a11ign repo')||!s.includes('fleet:wake -- <name>'))process.exit(1)"
