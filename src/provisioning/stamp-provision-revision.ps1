@@ -52,13 +52,15 @@ $ErrorActionPreference = 'Stop'
 # a package: the core lays its pinned control layer at packages/control. A missing file THROWS below rather than
 # falling back to a literal, because a literal that was right yesterday is the stamp describing less than it claims.
 #
-# The fleet package ships the two fleet scripts byte-for-byte (CRLF-normalised) as this repository does, so
-# their hashes -- and `provisionRevision` for them -- are unchanged. The launcher is the one that moves: the
-# published `run-server.cmd` is what runs on the box, and it is not the worker repository's source file.
+# The fleet package ships `provision-nvda-worker.ps1` byte-for-byte (CRLF-normalised) as this repository does, so
+# its hash is unchanged. The launcher files are the ones that move: the published `run-server.cmd` is what runs
+# on the box, and it is not the worker repository's source file. The foreground-lock script is the worker's too
+# (ADR 0045 cut 5, #5148): this package no longer carries a copy, and provision-nvda-worker.ps1 runs the very
+# file hashed here.
 $FLEET_PACKAGE = 'node_modules/@a11ign/screenreader-fleet'
 $WORKER_LAUNCHER = 'node_modules/@a11ign/screenreader-worker/launcher'
 $RUN_SERVER = "$WORKER_LAUNCHER/run-server.cmd"
-$FOREGROUND_LOCK = "$FLEET_PACKAGE/src/provisioning/apply-foreground-lock-timeout.ps1"
+$FOREGROUND_LOCK = "$WORKER_LAUNCHER/apply-foreground-lock-timeout.ps1"
 
 # The single definition. Explicit paths rather than a filename search, because `main.yml` is not unique
 # in this repo and a search would silently pick the wrong one.

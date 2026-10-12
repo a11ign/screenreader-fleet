@@ -291,8 +291,12 @@ finally { Pop-Location }
 # consume it at logon either, so "it will work after a reboot" is not a safe claim. Left
 # non-zero, captures return 0 phrases with NO error anywhere -- nvda.start() succeeds,
 # windowsActivate reports ok, and every read comes back empty, because Edge is refused the
-# foreground. See scripts/apply-foreground-lock-timeout.ps1 for the detail.
-$fltScript = Join-Path $PSScriptRoot 'apply-foreground-lock-timeout.ps1'
+# foreground. See the script itself for the detail.
+#
+# The script is the screen reader worker's, not this package's (ADR 0045 cut 5, a11ign/a11ign#5148): it is
+# read from the INSTALLED `@a11ign/screenreader-worker` launcher, which is the same path
+# stamp-provision-revision.ps1 hashes, so the bytes that run are the bytes the provision stamp describes.
+$fltScript = Join-Path $RepoPath 'node_modules\@a11ign\screenreader-worker\launcher\apply-foreground-lock-timeout.ps1'
 if (Test-Path $fltScript) {
   $fltOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $fltScript 2>&1
   if ($LASTEXITCODE -eq 0) { OK ($fltOut | Select-Object -First 1) }
