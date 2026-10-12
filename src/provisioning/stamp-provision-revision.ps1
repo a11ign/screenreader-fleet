@@ -47,10 +47,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Each path is where the INSTALLED package puts its files, under the repo's node_modules: the worker's
-# published launcher (ADR 0045 cut 6, #5084) and the fleet's own package. The stamp hashes what is installed,
-# not a layout file that a checkout may or may not carry. A missing file THROWS below rather than falling
-# back to a literal, because a literal that was right yesterday is the stamp describing less than it claims.
+# The fleet and worker paths are where the INSTALLED packages put their files, under the repo's node_modules: the
+# worker's published launcher (ADR 0045 cut 6, #5084) and the fleet's own package. The Ansible entries are not in
+# a package: the core lays its pinned control layer at packages/control. A missing file THROWS below rather than
+# falling back to a literal, because a literal that was right yesterday is the stamp describing less than it claims.
 #
 # The fleet package ships the two fleet scripts byte-for-byte (CRLF-normalised) as this repository does, so
 # their hashes -- and `provisionRevision` for them -- are unchanged. The launcher is the one that moves: the
