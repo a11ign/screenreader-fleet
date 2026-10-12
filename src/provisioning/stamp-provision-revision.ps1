@@ -47,37 +47,23 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# THREE OF THE FIVE PATHS ARE NOT WRITTEN HERE (ADR 0039 item 6d, #3397; this repository's own file since the flat layout, a11ign/a11ign#4216).
-# Where the worker layer and this fleet layer live is declared in `packages/control/layers.json`, and what its launchers reach outside it in the layer's own
-# `src/launcher-reach.cmd`, which `run-capture-check.cmd` `call`s. Both are READ, so a path cannot change in
-# the launcher and stay behind in the stamp. A declaration that is absent or does not say THROWS: the stamp
-# must not fall back to a literal, because a literal that was right yesterday is the stamp describing less
-# than it claims. The VALUES are unchanged, so `provisionRevision` is too -- `layer-launchers.test.ts`
-# asserts that this row's own diff names none of the five files.
-function Get-LayerFile {
-    param([Parameter(Mandatory = $true)][string] $Layer, [Parameter(Mandatory = $true)][string] $Relative)
-    $manifest = Get-Content -Raw -LiteralPath (Join-Path $RepoPath 'packages\control\layers.json') | ConvertFrom-Json
-    "$($manifest.layers.$Layer.path)/$Relative"
-}
-
-function Get-DeclaredReach {
-    param([Parameter(Mandatory = $true)][string] $Name)
-    $declaration = Join-Path $RepoPath ((Get-LayerFile -Layer 'nvda-worker' -Relative 'src/launcher-reach.cmd') -replace '/', '\')
-    if (-not (Test-Path -LiteralPath $declaration)) {
-        throw "provision stamp: the launcher declaration $declaration is missing. Refusing to guess where the launchers reach."
-    }
-    $line = Select-String -LiteralPath $declaration -Pattern "^set `"$Name=(.+)`"\s*$" | Select-Object -First 1
-    if (-not $line) { throw "provision stamp: $declaration does not declare $Name." }
-    $line.Matches[0].Groups[1].Value -replace '\\', '/'
-}
-
-$RUN_SERVER = Get-LayerFile -Layer 'nvda-worker' -Relative 'src/run-server.cmd'
-$FOREGROUND_LOCK = Get-DeclaredReach -Name 'FLT'
+# Each path is where the INSTALLED package puts its files, under the repo's node_modules: the worker's
+# published launcher (ADR 0045 cut 6, #5084) and the fleet's own package. The stamp hashes what is installed,
+# not a layout file that a checkout may or may not carry. A missing file THROWS below rather than falling
+# back to a literal, because a literal that was right yesterday is the stamp describing less than it claims.
+#
+# The fleet package ships the two fleet scripts byte-for-byte (CRLF-normalised) as this repository does, so
+# their hashes -- and `provisionRevision` for them -- are unchanged. The launcher is the one that moves: the
+# published `run-server.cmd` is what runs on the box, and it is not the worker repository's source file.
+$FLEET_PACKAGE = 'node_modules/@a11ign/screenreader-fleet'
+$WORKER_LAUNCHER = 'node_modules/@a11ign/screenreader-worker/launcher'
+$RUN_SERVER = "$WORKER_LAUNCHER/run-server.cmd"
+$FOREGROUND_LOCK = "$FLEET_PACKAGE/src/provisioning/apply-foreground-lock-timeout.ps1"
 
 # The single definition. Explicit paths rather than a filename search, because `main.yml` is not unique
 # in this repo and a search would silently pick the wrong one.
 $ENVIRONMENT_FILES = @(
-    (Get-LayerFile -Layer 'screenreader-fleet' -Relative 'src/provisioning/provision-nvda-worker.ps1')
+    "$FLEET_PACKAGE/src/provisioning/provision-nvda-worker.ps1"
     $RUN_SERVER
     $FOREGROUND_LOCK
     'packages/control/ansible/roles/worker/defaults/main.yml'
