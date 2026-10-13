@@ -1,5 +1,0 @@
----
-"@a11ign/screenreader-fleet": minor
----
-
-`src/provisioning/apply-foreground-lock-timeout.ps1` is removed from the package: the script belongs to `@a11ign/screenreader-worker`, which publishes it as `launcher/apply-foreground-lock-timeout.ps1` (ADR 0045 cut 5, a11ign/a11ign#5148). `provision-nvda-worker.ps1` now runs it from `<RepoPath>\node_modules\@a11ign\screenreader-worker\launcher\` rather than as a sibling, and `stamp-provision-revision.ps1` hashes that same file, so the bytes that run are the bytes the stamp describes. A consumer that read the script from `node_modules/@a11ign/screenreader-fleet/src/provisioning/` must read it from the worker package's `launcher/` instead, which is why this is a minor and not a patch. Two hashed files change (the worker's copy differs from the removed one in one comment line, and `provision-nvda-worker.ps1` is edited), so `provisionRevision` moves once and a box provisioned from this release reads `fleet-consistency` INCONSISTENT against one provisioned before it until the fleet is re-provisioned.
