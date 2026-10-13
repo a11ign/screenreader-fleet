@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@a11ign/judge':
-        specifier: 0.5.1
-        version: 0.5.1(@a11ign/scorer@0.3.3)
+        specifier: 0.5.4
+        version: 0.5.4(@a11ign/scorer@0.3.5)
       '@a11ign/screenreader-worker':
         specifier: 0.9.0
         version: 0.9.0
@@ -60,19 +60,15 @@ importers:
 
 packages:
 
-  '@a11ign/evidence@0.3.2':
-    resolution: {integrity: sha512-E2LQAAMMmZwmSI2GkOW7JrC3IWx8JQTvRZfoKW3tJZzAWcaWQ3+t7u75KXQzoXmXtIgab2jCIUwD12ATtq+tNg==}
-    engines: {node: '>=20'}
-
   '@a11ign/evidence@0.4.0':
     resolution: {integrity: sha512-HuYCq9vtpyBwwdbYS7rAd9wmzYRM/mccoxAtnDP2vAy+C3nnfpHb6MVyYB3V5JL98BOF2H4y4zHvMCUh8erLbQ==}
     engines: {node: '>=20'}
 
-  '@a11ign/judge@0.5.1':
-    resolution: {integrity: sha512-SnUqM0hkPiuGjMWtFx0o2X1FUCoYqBz6uhm+/sGCIWodk7HShf2zgJnm9Qsf4yW2qk6SNp+V2nsROlxmA5DBTA==}
+  '@a11ign/judge@0.5.4':
+    resolution: {integrity: sha512-qoTuRQYndvAgR2jYnZ7j49O1BrPS1h+WfyJhal5lBRG5Q3VJkxApdxOiHiFtyAAJE19BKXOLaNQPGlqrj9JZWQ==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@a11ign/scorer': 0.3.3
+      '@a11ign/scorer': 0.3.5
       '@anthropic-ai/sdk': '>=0.106.0 <0.132.0'
       '@huggingface/transformers': '>=3.0.0'
     peerDependenciesMeta:
@@ -81,8 +77,8 @@ packages:
       '@huggingface/transformers':
         optional: true
 
-  '@a11ign/scorer@0.3.3':
-    resolution: {integrity: sha512-LT4O63IlzGsiT2Jx8DDDd7GCEBDbGOoLRzyFQI/vHe6kvU7K8OlDFWg5nmbA024df2SczxcSvdfw4QbW340NeA==}
+  '@a11ign/scorer@0.3.5':
+    resolution: {integrity: sha512-4qnW2wLX5LJkh3ssboCnSmT+/i820Ny+RdBgQ9mrr/UfqE0HZZGSNljZu2kltnSzNvtfbnkm3B5uj5wg2PJvvA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -1100,18 +1096,16 @@ packages:
 
 snapshots:
 
-  '@a11ign/evidence@0.3.2': {}
-
   '@a11ign/evidence@0.4.0': {}
 
-  '@a11ign/judge@0.5.1(@a11ign/scorer@0.3.3)':
+  '@a11ign/judge@0.5.4(@a11ign/scorer@0.3.5)':
     dependencies:
-      '@a11ign/evidence': 0.3.2
-      '@a11ign/scorer': 0.3.3
+      '@a11ign/evidence': 0.4.0
+      '@a11ign/scorer': 0.3.5
 
-  '@a11ign/scorer@0.3.3':
+  '@a11ign/scorer@0.3.5':
     dependencies:
-      '@a11ign/evidence': 0.3.2
+      '@a11ign/evidence': 0.4.0
 
   '@a11ign/screenreader-worker@0.9.0':
     dependencies:
