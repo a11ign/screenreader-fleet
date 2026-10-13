@@ -68,6 +68,10 @@
     "./code-drift": {
       "types": "./dist/code-drift.d.ts",
       "default": "./dist/code-drift.mjs"
+    },
+    "./doctor": {
+      "types": "./dist/doctor.d.ts",
+      "default": "./dist/doctor.mjs"
     }
   },
   "bin": {
