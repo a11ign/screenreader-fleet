@@ -115,6 +115,17 @@ test("`fleetScriptPaths()` from the BUILT `dist/index.mjs` names paths that exis
   assert.equal(relative(packageDir, paths.dir!), join("src", "local-worker"));
 });
 
+test("`exports[\"./doctor\"]` resolves to a built module that carries what control's same-words test calls (a11ign/a11ign#5380)", async (t) => {
+  if (!whenBuilt(t)) return;
+  // The row's Acceptance greps the literal `"./doctor"` key, which stays green when its `default` target is wrong: this imports the target the
+  // manifest names, as a consumer's `import "@a11ign/screenreader-fleet/doctor"` would, so a broken published export is red here.
+  const entry = manifest.exports["./doctor"] as { types: string; default: string };
+  assert.ok(existsSync(join(packageDir, entry.types)), `${entry.types} is on disk`);
+  const doctor = await import(/* webpackIgnore: true */ pathToFileURL(join(packageDir, entry.default)).href);
+  assert.equal(typeof doctor.fleetAgreementLine, "function");
+  assert.equal(typeof doctor.missingExportTargets, "function");
+});
+
 test("the cases above ran against a build: in CI an absent `dist` fails them, it does not skip them", (t) => {
   // A skip that fires always is a check that never runs. Locally an unbuilt `dist` skips with its reason; under CI `whenBuilt` fails
   // instead, so this is the case that says the ordinary run is covered: `dist` is there and holds the entry `fleetScriptPaths()` is read from.
