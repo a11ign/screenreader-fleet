@@ -19,8 +19,8 @@ importers:
         version: 0.5.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)
     devDependencies:
       '@a11ign/evidence':
-        specifier: 0.4.0
-        version: 0.4.0
+        specifier: 0.5.0
+        version: 0.5.0
       '@changesets/cli':
         specifier: 3.0.3
         version: 3.0.3
@@ -59,10 +59,6 @@ importers:
         version: 2.9.1
 
 packages:
-
-  '@a11ign/evidence@0.4.0':
-    resolution: {integrity: sha512-HuYCq9vtpyBwwdbYS7rAd9wmzYRM/mccoxAtnDP2vAy+C3nnfpHb6MVyYB3V5JL98BOF2H4y4zHvMCUh8erLbQ==}
-    engines: {node: '>=20'}
 
   '@a11ign/evidence@0.5.0':
     resolution: {integrity: sha512-zBLSWIRjPj/oFv0lKVOiy7fOrKnzWhbVyz2eUR9tHAGuFpFAw8lFmZI1qlobF3j+65nfODHbJb9ltOrz22N2vA==}
@@ -1099,8 +1095,6 @@ packages:
     engines: {node: '>=10'}
 
 snapshots:
-
-  '@a11ign/evidence@0.4.0': {}
 
   '@a11ign/evidence@0.5.0': {}
 
