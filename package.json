@@ -92,7 +92,7 @@
   ],
   "dependencies": {
     "@a11ign/judge": "0.5.6",
-    "@a11ign/screenreader-worker": "0.9.0",
+    "@a11ign/screenreader-worker": "0.13.2",
     "@a11ign/toolchain": "0.9.0"
   },
   "devDependencies": {
