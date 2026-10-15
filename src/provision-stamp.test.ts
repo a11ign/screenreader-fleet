@@ -15,7 +15,7 @@
 // script assigns, then the array's own entries, terminated on a line-initial `)`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const STAMP = readFileSync(fileURLToPath(new URL("./provisioning/stamp-provision-revision.ps1", import.meta.url)), "utf8");
@@ -85,9 +85,8 @@ test("the FIVE hashed files are exactly the environment, and the list has not dr
   // Viewer" instead of the page's response, so a whole corpus is captured complete and wrong.
   //
   // The two launcher entries are the worker's published files (`@a11ign/screenreader-worker`), resolved from
-  // this package's node_modules as the stamp resolves them. Their DIRECTORY is not asserted to exist: the
-  // installed worker 0.9.0 does not ship a `launcher/` directory, and an existence check would fail on the
-  // published layout rather than on a real drift. The list itself is what this test pins.
+  // this package's node_modules as the stamp resolves them. The next test asserts they EXIST in the installed
+  // package; this one pins the list itself.
   assert.deepEqual(hashedEnvironmentFiles(STAMP), [
     "node_modules/@a11ign/screenreader-fleet/src/provisioning/provision-nvda-worker.ps1",
     "node_modules/@a11ign/screenreader-worker/launcher/run-server.cmd",
@@ -103,4 +102,17 @@ test("a missing file THROWS rather than being filtered out", () => {
   // so a repo restructure removed all three at once and the stamp quietly became a constant.
   assert.match(STAMP, /throw "provision stamp:/,
     "a missing environment file no longer throws, so the stamp can silently describe less than it claims");
+});
+
+test("the installed worker ships the two launcher files the stamp hashes (a11ign/screenreader-fleet#50)", () => {
+  // The stamp THROWS when a hashed path is absent rather than hashing less. Worker 0.9.0 through 0.12.0 publish
+  // `dist` only, so a fleet pinned to one of them reads the right list and fails at provisioning; 0.13.0 is the
+  // first release carrying `launcher/`. The names are read from the stamp, so a renamed entry moves this too.
+  const launcherEntries = hashedEnvironmentFiles(STAMP).filter((entry) => entry.includes("@a11ign/screenreader-worker/"));
+  assert.equal(launcherEntries.length, 2, "the stamp no longer hashes two files from the worker package");
+  for (const entry of launcherEntries) {
+    const installed = fileURLToPath(new URL(`../${entry}`, import.meta.url));
+    assert.ok(existsSync(installed),
+      `${entry} is absent from the installed worker package: provisioning would throw before writing its stamp.`);
+  }
 });
