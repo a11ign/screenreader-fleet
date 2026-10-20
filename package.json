@@ -91,7 +91,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@a11ign/judge": "0.5.6",
+    "@a11ign/judge": "0.5.8",
     "@a11ign/screenreader-worker": "0.13.5",
     "@a11ign/toolchain": "0.9.0"
   },
