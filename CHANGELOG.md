@@ -1,5 +1,109 @@
 # @a11ign/screenreader-fleet
 
+## 0.13.2
+
+### Patch Changes
+
+- 991911b: `bootstrap-windows-worker.ps1` pins Edge `156.0.4314.42` (version, MSI URL and SHA-256 together), the newest Stable x64 build in Microsoft's enterprise catalogue (published 2026-10-22), so a box built from the bootstrap matches the build the fleet converges to under A11-183. It pinned `155.0.4283.45` before, a build twelve of fifteen boxes had already moved off.
+
+## 0.13.1
+
+### Patch Changes
+
+- 5a440cc: `@a11ign/screenreader-worker` is pinned at 0.13.2, which publishes `launcher/run-server.cmd` and `launcher/apply-foreground-lock-timeout.ps1`. Releases 0.9.0 to 0.12.0 publish `dist` only, and `stamp-provision-revision.ps1` throws when either hashed path is absent, so a consumer taking the fleet's own pin failed at provisioning before it wrote its stamp. `src/provision-stamp.test.ts` now asserts both files exist in the installed worker package.
+
+## 0.13.0
+
+### Minor Changes
+
+- 74c6dec: `engines.node` is `>=22.15.0`, the floor of `@a11ign/toolchain` 0.9.0, which the fleet ships as a runtime `dependencies` entry (it moved there at 0.5.0). `engines` said `>=20` while a production dependency needed `>=22.15.0`, so a Node 20 consumer could install a dependency whose declared engine it does not satisfy. `ci.yml` runs Node 22, so `>=22.15.0` is the floor the repository tests; Node 20 is out of maintenance. `src/engines-floor.test.ts` pins that no runtime dependency's floor is above `engines.node`.
+
+## 0.12.0
+
+### Minor Changes
+
+- 069411a: The package exports `./doctor`, so `control` can import `fleetAgreementLine` and `missingExportTargets` by subpath instead of copying them. The subpath is built to `dist/doctor.mjs` and `dist/doctor.d.ts` beside the existing entries, and it is additive: the `a11ign-doctor` bin still runs the same file. Importing it runs nothing: the entry guard inspects argv only when `doctor` is the command.
+
+## 0.11.0
+
+### Minor Changes
+
+- 7a0f8ff: `src/provisioning/apply-foreground-lock-timeout.ps1` is removed from the package: the script belongs to `@a11ign/screenreader-worker`, which publishes it as `launcher/apply-foreground-lock-timeout.ps1` (ADR 0045 cut 5, a11ign/a11ign#5148). `provision-nvda-worker.ps1` now runs it from `<RepoPath>\node_modules\@a11ign\screenreader-worker\launcher\` rather than as a sibling, and `stamp-provision-revision.ps1` hashes that same file, so the bytes that run are the bytes the stamp describes. A consumer that read the script from `node_modules/@a11ign/screenreader-fleet/src/provisioning/` must read it from the worker package's `launcher/` instead, which is why this is a minor and not a patch. Two hashed files change (the worker's copy differs from the removed one in one comment line, and `provision-nvda-worker.ps1` is edited), so `provisionRevision` moves once and a box provisioned from this release reads `fleet-consistency` INCONSISTENT against one provisioned before it until the fleet is re-provisioned.
+
+## 0.10.2
+
+### Patch Changes
+
+- 3377748: `stamp-provision-revision.ps1` no longer reads `packages/control/layers.json` to find its files. The fleet's two scripts are read from the installed `node_modules/@a11ign/screenreader-fleet/`, and the worker's published `run-server.cmd` from `node_modules/@a11ign/screenreader-worker/launcher/`. The two Ansible files stay under `packages/control`, where the core lays its pinned control layer. The two fleet scripts are byte-identical (after CRLF normalisation) to this package's own copies, so their hashes are unchanged. The launcher is not: the published `run-server.cmd` is what runs on the box and differs from the worker repository's source file, so `provisionRevision` moves once, for every box provisioned after this lands.
+
+## 0.10.1
+
+### Patch Changes
+
+- b877378: `WAKE_HINT`, printed when a probe times out, names control's checkout and `pnpm run fleet:wake -- <name>`. It said to wake the box "from a checkout of the a11ign repo" with `npm run fleet:wake`, a script the core stopped carrying when its fleet scripts moved to `a11ign/control` (ADR 0045), so the hint sent the reader to "Missing script".
+
+## 0.10.0
+
+### Minor Changes
+
+- 7276192: The package exports four more subpaths that `control` imports by relative path today: `./git-safe-env`, `./protocol-guard`, `./npm-cli-executable` and `./code-drift` (ADR 0045 rule 2, the producer half of the `control` cut 7b). Each is built to `dist` beside the twelve existing subpaths and declares its `types` and `default`. None of the four imports a package: `git-safe-env` and `npm-cli-executable` import `node:` built-ins only, `protocol-guard` and `code-drift` import their siblings `worker-http` and `git-safe-env` on top, so each runs from an unpacked tarball with nothing installed.
+
+## 0.9.0
+
+### Minor Changes
+
+- 7f3f976: The package publishes `guest-run` and `normalise-fleet` as `bin` commands, `a11ign-guest-run` and `a11ign-normalise-fleet`, so a consumer runs them from the installed package and never from this repository's source (a11ign/a11ign#5081, ADR 0045). `files` gains `src/guest`, the `.cmd` the normaliser sends to each guest; the built `normalise-fleet` finds it as `../src/guest/` and runs the built `guest-run.mjs` beside it, where it ran a `.ts` that does not ship. Both commands' entry guards now compare the REAL path of `argv[1]`, so a bin reached through npm's `.bin` symlink runs instead of loading and exiting 0. `normalise-fleet` also exports `guestPaths()`, which the pack test reads from `src` and from `dist`.
+
+## 0.8.0
+
+### Minor Changes
+
+- fd111d5: `fleetConsistency` compares `edgeUpdaterGuard.state` (`ok`, `drift`, `stale`, `absent` or `unknown`, what the worker reports on `/health`'s `environment` from the elevated guard task's record) in its `REPORTED_ONLY` channel, so a box whose Edge updater came back, or whose guard stopped or was never provisioned, is named as drifting from its peers even though the unelevated worker cannot read the updater's tasks itself. Only `state` is compared, because the record's `checkedAt` differs on every box. A field name may now be a dotted path into a block (`a.b`). It gates nothing: `consistent` is unchanged by it, and it reads `unreported` on every box until a worker that carries the field is released and deployed (#4405).
+
+## 0.7.4
+
+### Patch Changes
+
+- f2d5d1e: `bootstrap-windows-worker.ps1` pins Edge `155.0.4283.45` (version, MSI URL and SHA-256 together), the build the worker role pins in `ansible/roles/worker/defaults/main.yml`, so a box built from the bootstrap matches the fleet. It pinned `152.0.4191.66` before, which made every capture run refuse to start on such a box (`browserVersion` is first in `fleet-consistency`'s MUST_MATCH).
+
+## 0.7.3
+
+### Patch Changes
+
+- b80e825: `command-line-census` imports `stripComments` from `@a11ign/toolchain/lib/source-text`, which is a runtime dependency of this package, instead of from `@a11ign/evidence/source-text`, a devDependency that the core is removing (a11ign#4589). The census behaves the same.
+
+## 0.7.2
+
+### Patch Changes
+
+- 974a466: `cli-flags` imports no package again, so the eight `control` modules that import it by relative path (`fleet-auto-off`, `fleet-discover`, `fleet-playbook`, `fleet-status`, `fleet-wake`, `lab-failed-units`, `lab-pipeline`, `post-qualification-status`) load from a raw checkout with no `npm install`. 0.5.0 made `src/cli-flags.ts` a re-export of `@a11ign/toolchain/lib/cli-flags` and 0.7.1 fixed only `fleet-env.ts`, so those eight died loading with `ERR_MODULE_NOT_FOUND`. `src/cli-flags.ts` is again an in-package copy (`didYouMean`, `flagValue`, `nameOf`, `refuseUnknownFlags`, `unknownFlags`, `node:` built-ins only); the toolchain copy stays the one every other consumer uses, and `fleet-env.test.ts` pins that the two reach the same answer and the same refusal. The published `./cli-flags` subpath is built from this file, so it is now the in-package copy rather than a re-export; its exports and signatures are unchanged.
+
+## 0.7.1
+
+### Patch Changes
+
+- ae14758: `fleet-env` loads from a raw checkout with no `npm install` again. 0.7.0 made `cli-flags.ts` a re-export of `@a11ign/toolchain/lib/cli-flags` and `fleet-env.ts` still imported it, so `control` (which imports `fleet-env` by path, ADR 0012) died loading the laid fleet with `ERR_MODULE_NOT_FOUND`. `fleet-env.ts` now imports no package: it reads `--inventory=`/`--group-vars=` with its own four-line `flagValue` and refuses an unknown flag from `main()`, the CLI-entry path, with the same verdict and exit code 2 as the toolchain's guard (a test pins that the two agree on every flag shape). Importing it as a library never inspects the importer's flags, as before. New export: `unknownFlagsOf`. The `./cli-flags` subpath is unchanged and still the toolchain's copy.
+
+## 0.7.0
+
+### Minor Changes
+
+- 5e53b92: `@a11ign/screenreader-fleet/cli-flags` re-exports `@a11ign/toolchain/lib/cli-flags` instead of carrying its own copy of `refuseUnknownFlags`, `unknownFlags`, `didYouMean`, `flagValue` and `nameOf`, so the guard has one source (#4425). The subpath and its five names are unchanged for the lab and control. `@a11ign/toolchain` (0.5.0) moves from `devDependencies` to `dependencies`: a consumer of `cli-flags` now installs it at run time, and it declares `node >=22.15.0`.
+
+### Patch Changes
+
+- 49d9549: `a11ign-worker-code` and every capture's `assertFleetRunsThisCheckout` no longer throw on a layer clone laid at `@a11ign/screenreader-worker` 0.9.0 or later. The expected hash is the clone's own hasher over the clone's `src/`, and the hasher is `code-version.ts` there: the check imported `code-version.mjs` unconditionally, so it died with `Cannot find module …/packages/nvda-worker/src/code-version.mjs`. It now asks `code-version.ts` first and falls back to `code-version.mjs`, because `--layer-ref` can still deploy a guest at a layer sha from before the move to TypeScript. A clone holding neither is refused naming both files, never answered for by the installed copy.
+
+## 0.6.0
+
+### Minor Changes
+
+- 798a5f5: `fleetConsistency` compares `windowsBuild` (`<build>.<ubr>`, what the worker reports on `/health`) in its `REPORTED_ONLY` channel, so two boxes one cumulative update apart are named as drifting even though they share a `windowsVersion`. It gates nothing: `consistent` is unchanged by it, and it reads `unreported` on every box until a worker that carries the field is released and deployed. It graduates to `MUST_MATCH` once the fleet reads one value (#4405).
+
+### Patch Changes
+
+- 97f0c7a: The package's source is TypeScript: its 32 `.mjs` (the 29 modules under `src/`, plus `eslint.config`, `rstest.config`, `rslib.config` and `isolation-smoke`) became `.ts` by the toolchain's `js-to-ts`, and the repository's `mjs-ratchet.baseline.json` is empty, so a new `.js`, `.mjs` or `.cjs` fails the ratchet. Published files, `exports` subpaths and `bin` commands are unchanged; the `types` condition of each subpath now names `./dist/<name>.d.ts` instead of `.d.mts`, because Rslib declares a `.ts` source as `.d.ts`. `@a11ign/toolchain` moves to 0.3.1 (its base tsconfig carries `erasableSyntaxOnly` and `rewriteRelativeImportExtensions`), and `jiti` (ESLint reads `eslint.config.ts` through it) and `tsx` (the tests that start a source file as a child process run it under `node --import`) are dev dependencies. The 68 `any` the script wrote where the JSDoc named no type are warnings in six files, not errors.
+
 ## 0.1.0
 
 ### Minor Changes
