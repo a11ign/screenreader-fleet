@@ -87,3 +87,20 @@ test("it ROLLS BACK a box already newer than the pin, rather than stranding it",
   assert.doesNotMatch(BOOTSTRAP, /REIMAGE this box/,
     "the bootstrap tells the operator to reimage a box that a supported rollback repairs in place.");
 });
+
+test("the bootstrap pins Edge 156.0.4314.42: version, MSI and hash move together", () => {
+  // The three values are one pin. A version bumped without its MSI URL and hash installs the OLD build
+  // (the `already pinned` branch is skipped, the hash check passes, the post-install check refuses), and a
+  // hash from another build refuses every first boot. Control's `edge-pin-parity.test.ts` holds the worker
+  // role equal to whatever is read here; this holds the values themselves, so a typo in any one of them
+  // fails in the repository that owns the script.
+  // Each value is read the way the script assigns it, not searched for as a bare string, so a stale copy
+  // left in a comment cannot satisfy the assertion.
+  const assigned = (name: string): string | undefined =>
+    BOOTSTRAP.match(new RegExp(`^\\$${name}\\s*=\\s*(?:if \\(\\$env:\\w+\\) \\{ \\$env:\\w+ \\} else \\{ )?'([^']+)'`, "m"))?.[1];
+
+  assert.equal(assigned("EdgeVersion"), "156.0.4314.42");
+  assert.equal(assigned("EdgeMsiUrl"),
+    "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/62209208-6eb6-4f5e-bff5-feb45cfe41d3/MicrosoftEdgeEnterpriseX64.msi");
+  assert.equal(assigned("EdgeMsiSha"), "324d226c5ade08c2776645cfc2a7b12af9c08214abf18c6499410cd8ed92d1b3");
+});
