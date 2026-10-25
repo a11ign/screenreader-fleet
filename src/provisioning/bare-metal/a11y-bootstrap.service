@@ -1,6 +1,7 @@
 # The bootstrap payload server, as a service on the control plane.
 #
-# Install (on fleet-control, as root):
+# Install (on fleet-control, as root). A UNIT ALREADY INSTALLED KEEPS ITS OLD ExecStart (`<key> <port>`), which the script now refuses (the pins manifest is the
+# second argument): copy this file over it, reload the daemon and restart the service, or it restarts every 5 seconds and serves nothing.
 #
 #     cp a11y-bootstrap.service /etc/systemd/system/
 #     systemctl daemon-reload && systemctl enable --now a11y-bootstrap
@@ -11,7 +12,7 @@
 # `serve-bootstrap.sh` used to be started by hand and stopped with Ctrl-C, which is fine for one install
 # you are watching and wrong for a fleet meant to install itself. It was found running with PPID 1 and no
 # unit: a reboot of this container would have removed it silently, and the NEXT box to install would have
-# come up perfectly, logged on, retried three fetches sixty times each, given up after ~15 minutes, and sat
+# come up perfectly, logged on, retried four fetches sixty times each, given up after ~15 minutes, and sat
 # at a working desktop with no node, no sshd, no key and no worker. From outside that reads as a bad image,
 # and the only evidence is C:\a11y-first-boot.log on a machine you cannot SSH to. Hence Restart=always.
 #
@@ -30,6 +31,9 @@
 #
 #     systemctl restart a11y-bootstrap
 #
+# The pins manifest (`/root/control/deploy-pins.json`, control's checkout on this host) is SYMLINKED, not copied, so it
+# needs no restart: a box that installs after an upgrade run reads the versions the fleet is on now.
+#
 # ## It serves a PUBLIC key continuously
 #
 # The script's own header called it "a small exposure and a real one" and told you to Ctrl-C when the box
@@ -38,14 +42,14 @@
 # somebody having remembered to start a server.
 
 [Unit]
-Description=a11ign worker bootstrap payload (first-boot.cmd, bootstrap script, operator public key)
+Description=a11ign worker bootstrap payload (first-boot.cmd, bootstrap script, pins manifest, operator public key)
 Documentation=file:///root/a11y-witness/packages/worker-fleet/src/provisioning/bare-metal/README.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/root/a11y-witness/packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh /root/.ssh/a11y-witness_ed25519.pub 8099
+ExecStart=/root/a11y-witness/packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh /root/.ssh/a11y-witness_ed25519.pub /root/control/deploy-pins.json 8099
 Restart=always
 RestartSec=5
 

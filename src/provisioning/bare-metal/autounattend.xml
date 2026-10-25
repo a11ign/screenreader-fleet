@@ -407,11 +407,12 @@
              and this project already has scar tissue from El Torito boot catalogues.
 
              The box PXE-booted from this host moments ago, so it can certainly reach it.
-             `serve-bootstrap.sh` on the control plane serves exactly these two files. -->
+             `serve-bootstrap.sh` on the control plane serves exactly these four files (`deploy-pins.json` is control's pins
+             manifest, where the bootstrap reads its Edge and Node versions: it holds none of its own). -->
         <SynchronousCommand wcm:action="add">
           <Order>3</Order>
           <Description>Fetch the bootstrap payload from the control plane</Description>
-          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$h='http://203.0.113.10:8099'; $d='C:\a11y'; New-Item -ItemType Directory -Force $d | Out-Null; foreach($f in 'first-boot.cmd','bootstrap-windows-worker.ps1','operator-key.pub'){ for($i=0;$i -lt 60;$i++){ try{ Invoke-WebRequest -UseBasicParsing -Uri ($h+'/'+$f) -OutFile ($d+'\'+$f); break }catch{ Start-Sleep -Seconds 5 } } }"</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "$h='http://203.0.113.10:8099'; $d='C:\a11y'; New-Item -ItemType Directory -Force $d | Out-Null; foreach($f in 'first-boot.cmd','bootstrap-windows-worker.ps1','deploy-pins.json','operator-key.pub'){ for($i=0;$i -lt 60;$i++){ try{ Invoke-WebRequest -UseBasicParsing -Uri ($h+'/'+$f) -OutFile ($d+'\'+$f); break }catch{ Start-Sleep -Seconds 5 } } }"</CommandLine>
         </SynchronousCommand>
         <!-- Then hand off. first-boot.cmd waits for DHCP, stages the operator key, and runs the bootstrap
              elevated via a RunLevel Highest scheduled task, because a UAC prompt here would render on the secure

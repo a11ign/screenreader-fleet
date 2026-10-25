@@ -44,7 +44,7 @@ reporting success.
 ```
 PXE  ->  iVentoy serves the Windows ISO + autounattend.xml
      ->  Windows installs unattended, creates `witness`, auto-logs on
-     ->  FirstLogonCommands fetches 3 files over HTTP from the control plane
+     ->  FirstLogonCommands fetches 4 files over HTTP from the control plane
      ->  first-boot.cmd waits for DHCP, stages the key, runs bootstrap elevated
      ->  bootstrap installs node/git/sshd, sets DefaultShell, installs the operator key
      ->  the box is reachable by Ansible. No console visit after the firmware step.
@@ -64,10 +64,24 @@ Nothing can automate this: the box is off and has no OS to ask.
 ### 2. On the control plane, serve the payload
 
 ```bash
-./serve-bootstrap.sh ~/.ssh/<fleet key filename>.pub        # port 8099
+./serve-bootstrap.sh ~/.ssh/<fleet key filename>.pub ~/control/deploy-pins.json        # port 8099
 ```
 
+The second argument is control's pins manifest, `deploy-pins.json`: the bootstrap reads the fleet's Edge and Node
+versions from it (A11-205) and holds none of its own, so a box installs the versions the fleet is on now. It is
+served as a symlink, so a manifest edited by an upgrade run reaches the next box with no restart. The script
+refuses a file that is not the fleet's manifest (no Edge or Node pin), and a bootstrap run by hand takes
+`A11Y_PINS_FILE`, or one `A11Y_*` override per value, instead.
+
 It refuses a private key, and it is not a service — Ctrl-C when the box is up.
+
+**The whole manifest is served, not only the Edge and Node entries** (it also names the layers' repositories and tags, the core commit and the
+Windows and NVDA pins). It holds no secret, and like the public key it is served to the LAN while this runs.
+
+**Install media made before A11-205 must be refreshed.** The old `autounattend.xml` fetches three files and not `deploy-pins.json`, so a box
+installed from it stops in the bootstrap's Step 2 with "no pinned Node version". The same stop shows when the server was started before this
+change (it has no manifest to serve; the media tries 60 times, 5 seconds apart, and moves on). An `a11y-bootstrap.service` installed before
+this change must be replaced and restarted (see the unit's header).
 
 ### 3. In iVentoy
 
@@ -100,11 +114,11 @@ The same endpoint drives the rest: `start_server`, `stop_server`, `sys_ip_list`,
 the machine running `serve-bootstrap.sh`.
 
 That address is the **fleet-control container**, not the iVentoy host, and the reason is that
-`serve-bootstrap.sh` needs two things that live there and nowhere else: the repo (it copies
-`first-boot.cmd` and `bootstrap-windows-worker.ps1` out of the checkout) and the fleet public key. Serving
+`serve-bootstrap.sh` needs three things that live there and nowhere else: the repo (it copies
+`first-boot.cmd` and `bootstrap-windows-worker.ps1` out of the checkout), control's pins manifest and the fleet public key. Serving
 from the PXE host instead would mean cloning the repo onto it and copying a key across, which puts fleet
 material on a second box to save nothing. Both are on the same bridge, so a machine that can PXE-boot from
-one can certainly fetch three files over HTTP from the other.
+one can certainly fetch four files over HTTP from the other.
 
 ### Why the files are fetched rather than injected
 
@@ -204,7 +218,7 @@ combination has been proven zero times on unsplit media, and the stick's has bee
 Swapping a proven combination for an untested one, in the one phase of the process with no remote
 diagnosis, is the wrong trade. Refresh when a fix applies to your media, or when you change the ISO.
 
-`serve-bootstrap.sh` must be RUNNING on the control plane while the box installs: the media fetches three
+`serve-bootstrap.sh` must be RUNNING on the control plane while the box installs: the media fetches four
 files over HTTP and is not self-contained (see *Why the files are fetched rather than injected*).
 
 This section previously read "Untested end to end — this x64 adaptation has not been PXE-booted yet."
