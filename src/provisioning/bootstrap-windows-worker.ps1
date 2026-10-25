@@ -5,6 +5,11 @@
 #   Set-ExecutionPolicy -Scope Process Bypass -Force
 #   irm https://raw.githubusercontent.com/a11ign/screenreader-fleet/main/src/provisioning/bootstrap-windows-worker.ps1 | iex
 #
+# THE ONE-LINER NEEDS THE FLEET'S PINS MANIFEST NOW (A11-205). This script holds no Edge or Node version of its own, so
+# before running it put `deploy-pins.json` (control's pins manifest) at C:\a11y\deploy-pins.json, or point A11Y_PINS_FILE
+# at it, or set the six A11Y_* values listed below. With none of them it stops at the start and says what is missing.
+# The fleet's PXE install fetches the manifest for you (bare-metal/autounattend.xml).
+#
 # ...or, if you already have the repo, just run this file. It installs the
 # prerequisites, makes the box reachable over SSH, clones the repo, and then hands
 # off to provision-nvda-worker.ps1 (which does the NVDA/OS configuration and is the
@@ -18,6 +23,10 @@
 # `<# #>` block comment and no param() block -- see diagnose-nvda-worker.ps1 beside this file.
 #   A11Y_REPO_URL   (default the public GitHub repo)
 #   A11Y_REPO_PATH  (default %USERPROFILE%\a11y-witness)
+#   A11Y_PINS_FILE  (default C:\a11y\deploy-pins.json) the fleet's pins manifest: Edge and Node come from it
+#   A11Y_EDGE_VERSION, A11Y_EDGE_MSI_URL, A11Y_EDGE_MSI_SHA256,
+#   A11Y_NODE_VERSION, A11Y_NODE_SHA256_X64, A11Y_NODE_SHA256_ARM64
+#                   override the manifest, one value each. This script holds NO version of its own.
 #
 # Auto-logon needs NO configuration and NO password: provisioning gives the console account a
 # blank password and points Winlogon at it. Nothing is stored, so there is nothing to distribute
@@ -121,21 +130,44 @@ function Get-Archive($url, $outFile) {
 $tmp = Join-Path $env:TEMP 'a11y-bootstrap'
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
-# THE NODE BUILD THIS FLEET RUNS -- pinned, and PINNED EQUAL to `roles/worker/defaults/main.yml`'s
-# `worker_node_version`, which is the tested copy. `node-pin-parity.test.ts` refuses a change to one
-# without the other, for `edge-pin-parity.test.ts`'s reasons: the bootstrap runs on a box with no
-# Ansible, before the fleet can reach it, so the copy cannot be deleted or derived -- only pinned.
+# THE VERSIONS COME FROM THE FLEET'S ONE PINS MANIFEST, NOT FROM THIS SCRIPT (A11-205). `deploy-pins.json` in
+# control is the only place the fleet's Edge and Node are written; the role installs from it, `fleet:drift`
+# compares every box with it, and `serve-bootstrap.sh` serves it beside this script (autounattend.xml fetches it
+# to C:\a11y). This script used to carry its own copy of both pins, kept equal to the role's by a parity test,
+# and a copy kept equal by a test is still a second place a version is written.
 #
-# IT USED TO RESOLVE THE CURRENT LTS FROM nodejs.org, exactly as `packages.yml` did, and that is how a
+# NO GUESSING. A value comes from its A11Y_* override or from the manifest, and a box that has neither stops
+# here and says what to give it: a bootstrap that installed "some" Edge or Node would put a box on a version
+# nobody chose, which is the drift this whole path exists to end.
+$PinsFile = if ($env:A11Y_PINS_FILE) { $env:A11Y_PINS_FILE } else { 'C:\a11y\deploy-pins.json' }
+# UTF-8 said out loud: Windows PowerShell 5.1 reads a file with no BOM as the ANSI code page, which would mangle a non-ASCII character in the manifest.
+# A manifest that is there and cannot be read stops here naming the file: a partial download (the media's fetch gives up after a while) is the likely cause.
+$pins = $null
+if (Test-Path -LiteralPath $PinsFile) {
+  try { $pins = Get-Content -Raw -Encoding UTF8 -LiteralPath $PinsFile | ConvertFrom-Json }
+  catch { throw "the pins manifest at $PinsFile is not valid JSON ($($_.Exception.Message)); fetch it again from the control plane, or set the A11Y_* overrides." }
+}
+function Get-Pin([string] $envName, $manifestValue, [string] $what) {
+  $override = [Environment]::GetEnvironmentVariable($envName)
+  if ($override) { return $override }
+  if ($manifestValue) { return [string] $manifestValue }
+  throw "no pinned ${what}: set ${envName}, or put the fleet's pins manifest at $PinsFile (serve-bootstrap.sh serves control's deploy-pins.json; autounattend.xml fetches it)."
+}
+
+# EVERY PIN BUT THE NODE HASH IS READ HERE, BEFORE ANYTHING IS INSTALLED, so a box with a missing value stops at the start and not after Node, Git and sshd are on it.
+# (The Node hash is per architecture and is read below, once the architecture is known: an x64 box asks for no arm64 hash.)
+$NodeVersion = Get-Pin 'A11Y_NODE_VERSION' $pins.node.version 'Node version'
+$EdgeVersion = Get-Pin 'A11Y_EDGE_VERSION' $pins.edge.version 'Edge version'
+$EdgeMsiUrl  = Get-Pin 'A11Y_EDGE_MSI_URL' $pins.edge.msiUrl 'Edge MSI URL'
+$EdgeMsiSha  = Get-Pin 'A11Y_EDGE_MSI_SHA256' $pins.edge.msiSha256 'Edge MSI SHA-256'
+
+# THE NODE BUILD THIS FLEET RUNS, from the manifest's `node` pin (`worker_node_version` in the role is derived from
+# the same entry). It used to be resolved from nodejs.org, exactly as `packages.yml` did, and that is how a
 # fleet ends up on two runtimes: a resolve pins within a run and never across runs, and a box keeps
 # whatever it first received. Measured 2026-09-23T06:55Z: workers 2-6 on v24.19.0, workers 7-11 on
 # v24.20.0, with every other reported field identical (#2063).
-$NodeVersion = if ($env:A11Y_NODE_VERSION) { $env:A11Y_NODE_VERSION } else { 'v24.20.0' }
 # Per ARCHITECTURE, because the zip differs per architecture and one hash could only verify one of them.
-$NodeSha = @{
-  'x64'   = '6cac9ffbca8f6a47091e4b5c772e0606049c3871cb67d900c0cedde630e545ba'
-  'arm64' = '31c6799744de8a54601643098040c68c3697e56c94e407d61d0e5fa5f34191d7'
-}
+$NodeSha = @{ $nodeArch = Get-Pin "A11Y_NODE_SHA256_$($nodeArch.ToUpper())" $pins.node.sha256.$nodeArch "Node $nodeArch SHA-256" }
 
 # Check the INSTALL PATH, not just the command. `Get-Command node` consults this session's PATH,
 # and a session that started before the machine PATH was updated -- or a fresh account's first
@@ -429,10 +461,8 @@ Step 5 'Pin Edge and stop its updater — BEFORE the box has time to update itse
 #
 # ORDER IS THE WHOLE OF IT. Stop the updater first, then install. Doing it the other way leaves a live
 # updater to finish the update it had already started, in the window between installing and believing it.
-$EdgeVersion = if ($env:A11Y_EDGE_VERSION) { $env:A11Y_EDGE_VERSION } else { '156.0.4314.42' }
+# $EdgeVersion, $EdgeMsiUrl and $EdgeMsiSha are the manifest's, read with the other pins at the top of Step 2.
 $EdgeExe     = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
-$EdgeMsiUrl  = 'https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/62209208-6eb6-4f5e-bff5-feb45cfe41d3/MicrosoftEdgeEnterpriseX64.msi'
-$EdgeMsiSha  = '324d226c5ade08c2776645cfc2a7b12af9c08214abf18c6499410cd8ed92d1b3'
 
 # BY PREFIX, NOT BY NAME. The role learned this: a freshly installed guest carried a third task,
 # `MicrosoftEdgeUpdateBrowserReplacementTask`, sitting Ready while the two known ones were disabled. A task

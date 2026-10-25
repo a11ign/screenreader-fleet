@@ -441,7 +441,7 @@ cat <<EOF
     eval "\$(pnpm run --silent fleet:env)"  # A11Y_WORKERS, derived from that inventory
 
   Build one:
-    packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub
+    packages/worker-fleet/src/provisioning/bare-metal/serve-bootstrap.sh ~/.ssh/a11y-witness_ed25519.pub packages/control/deploy-pins.json
 
   Manage them (from packages/control/ansible):
     ansible-playbook provision-role.yml -l <host> --check --diff
