@@ -15,8 +15,8 @@ importers:
         specifier: 0.13.13
         version: 0.13.13
       '@a11ign/toolchain':
-        specifier: 0.13.0
-        version: 0.13.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)
+        specifier: 0.14.0
+        version: 0.14.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)
     devDependencies:
       '@a11ign/evidence':
         specifier: 0.5.0
@@ -87,8 +87,8 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  '@a11ign/toolchain@0.13.0':
-    resolution: {integrity: sha512-2zn02KyrNCv1CXsKTlXYELp23+LEoSIYEuR5w1gZCPRrvhT6NiAXLEr1ZvNQYnIJ0Cc3hCY9TD+E/0CbrBdCeA==}
+  '@a11ign/toolchain@0.14.0':
+    resolution: {integrity: sha512-x1mYnskNjYEF68VP9ywvW9VzWHpbLheQgfUeWqLtAF06o/A8GHl4uZOoSm/3C5anqKx5DxGUPO6JFcg+BnlUNQ==}
     engines: {node: '>=22.15.0'}
     hasBin: true
     peerDependencies:
@@ -1111,7 +1111,7 @@ snapshots:
     dependencies:
       '@guidepup/guidepup': 0.31.0
 
-  '@a11ign/toolchain@0.13.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)':
+  '@a11ign/toolchain@0.14.0(@rslib/core@1.0.3(typescript@6.0.3))(@rstest/core@0.12.3)(typescript@6.0.3)':
     dependencies:
       '@rstest/core': 0.12.3
     optionalDependencies:
